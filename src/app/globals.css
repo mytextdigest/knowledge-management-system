@@ -273,30 +273,6 @@ html.dark {
   --ring: #3b82f6;
 }
 
-/* Also support system preference as fallback */
-@media (prefers-color-scheme: dark) {
-  :root:not(.light) {
-    --background: #0a0f1c;
-    --foreground: #f8fafc;
-    --card: #1a202c;
-    --card-foreground: #f8fafc;
-    --popover: #1a202c;
-    --popover-foreground: #f8fafc;
-    --primary: #3b82f6;
-    --primary-foreground: #ffffff;
-    --secondary: #2d3748;
-    --secondary-foreground: #f8fafc;
-    --muted: #2d3748;
-    --muted-foreground: #a0aec0;
-    --accent: #2d3748;
-    --accent-foreground: #f8fafc;
-    --destructive: #ef4444;
-    --destructive-foreground: #ffffff;
-    --border: #4a5568;
-    --input: #4a5568;
-    --ring: #3b82f6;
-  }
-}
 
 * {
   border-color: hsl(var(--border));

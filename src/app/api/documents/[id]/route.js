@@ -32,6 +32,36 @@ export async function GET(req, { params }) {
 }
 
 
+export async function PATCH(req, { params }) {
+  const session = await getServerSession();
+  if (!session?.user?.email)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  if (!id) return NextResponse.json({ error: "Missing document id" }, { status: 400 });
+
+  const body = await req.json();
+  const { filename } = body;
+
+  if (!filename?.trim()) {
+    return NextResponse.json({ error: "Filename is required" }, { status: 400 });
+  }
+
+  const doc = await prisma.document.findFirst({
+    where: { id, user: { email: session.user.email } },
+    select: { id: true },
+  });
+  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const updated = await prisma.document.update({
+    where: { id },
+    data: { filename: filename.trim() },
+    select: { id: true, filename: true },
+  });
+
+  return NextResponse.json({ success: true, ...updated });
+}
+
 export async function DELETE(req, { params }) {
     const session = await getServerSession();
     if (!session?.user?.email)

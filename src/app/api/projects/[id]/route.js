@@ -32,6 +32,52 @@ export async function GET(req, { params }) {
   });
 }
 
+export async function PATCH(req, { params }) {
+  const session = await getServerSession();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id: projectId } = await params;
+  if (!projectId) return NextResponse.json({ error: "Missing project id" }, { status: 400 });
+
+  const body = await req.json();
+  const { name, description } = body;
+
+  if (!name?.trim()) {
+    return NextResponse.json({ error: "Project name is required" }, { status: 400 });
+  }
+
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, user: { email: session.user.email } },
+    select: { id: true },
+  });
+  if (!project) {
+    return NextResponse.json({ error: "Project not found or unauthorized" }, { status: 404 });
+  }
+
+  // Check for duplicate name (unique per user)
+  const duplicate = await prisma.project.findFirst({
+    where: {
+      user: { email: session.user.email },
+      name: name.trim(),
+      NOT: { id: projectId },
+    },
+    select: { id: true },
+  });
+  if (duplicate) {
+    return NextResponse.json({ error: "A project with that name already exists" }, { status: 409 });
+  }
+
+  const updated = await prisma.project.update({
+    where: { id: projectId },
+    data: { name: name.trim(), description: description?.trim() ?? null },
+    select: { id: true, name: true, description: true, createdAt: true },
+  });
+
+  return NextResponse.json({ ...updated, created_at: updated.createdAt.toISOString() });
+}
+
 export async function DELETE(req, { params }) {
   const session = await getServerSession();
   if (!session?.user?.email) {

@@ -6,11 +6,13 @@ import DocumentGrid from '@/components/documents/DocumentGrid';
 import FileUpload from '@/components/documents/FileUpload';
 import { Modal, ModalHeader, ModalTitle, ModalContent } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Pencil } from 'lucide-react';
 import { motion } from 'framer-motion';
 import ChatInterface from "@/components/chat/ChatInterface";
 import TwoColumnLayout from "@/components/layout/TwoColumnLayout";
 import DeleteConfirmationModal from '@/components/modals/DeleteConfirmationModal';
+import EditDocumentModal from '@/components/modals/EditDocumentModal';
+import EditProjectModal from '@/components/modals/EditProjectModal';
 import { useSession } from "next-auth/react";
 
 
@@ -23,6 +25,13 @@ function ProjectPageInner() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [documentToDelete, setDocumentToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [documentToRename, setDocumentToRename] = useState(null);
+  const [isRenaming, setIsRenaming] = useState(false);
+
+  const [showEditProjectModal, setShowEditProjectModal] = useState(false);
+  const [isEditingProject, setIsEditingProject] = useState(false);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -126,7 +135,6 @@ function ProjectPageInner() {
   
     const upload = await fetch(url, { method: "POST", body: formData });
     if (!upload.ok) {
-      const errText = await upload.text();
       throw new Error("S3 upload failed");
     }
   
@@ -242,6 +250,63 @@ function ProjectPageInner() {
     }
   };
 
+  const handleRename = (doc) => {
+    setDocumentToRename(doc);
+    setShowRenameModal(true);
+  };
+
+  const handleSaveRename = async (newFilename) => {
+    if (!documentToRename) return;
+    setIsRenaming(true);
+    try {
+      const res = await fetch(`/api/documents/${documentToRename.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: newFilename }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        console.error('Rename failed:', data.error);
+        return;
+      }
+      setDocs((prev) =>
+        prev.map((d) => d.id === documentToRename.id ? { ...d, filename: newFilename } : d)
+      );
+      setShowRenameModal(false);
+      setDocumentToRename(null);
+    } catch (err) {
+      console.error('Rename error:', err);
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
+  const handleEditProject = () => setShowEditProjectModal(true);
+
+  const handleSaveProject = async (name, description) => {
+    if (!projectId) return;
+    setIsEditingProject(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        console.error('Project update failed:', data.error);
+        return;
+      }
+      const updated = await res.json();
+      setProject(updated);
+      setShowEditProjectModal(false);
+    } catch (err) {
+      console.error('Project update error:', err);
+    } finally {
+      setIsEditingProject(false);
+    }
+  };
+
   // const filteredDocs = activeFilter === 'starred' ? docs.filter(d => d.starred) : docs;
 
   const filteredDocs =
@@ -280,14 +345,25 @@ function ProjectPageInner() {
       </div>
 
       <div className="text-center">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-          {project ? project.name : `Project ${projectId}`}
-        </h1>
+        <div className="flex items-center justify-center gap-2">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+            {project ? project.name : `Project ${projectId}`}
+          </h1>
+          {project && (
+            <button
+              onClick={handleEditProject}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+              title="Edit project name and description"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+          )}
+        </div>
         <p className="text-gray-600 dark:text-gray-400 mt-2">
-          {project?.description && <span>{project.description}</span>}
-        </p>
-        <p className="text-gray-600 dark:text-gray-400 mt-2">
-          Manage and organize project files
+          {project?.description
+            ? <span>{project.description}</span>
+            : <span>Manage and organize project files</span>
+          }
         </p>
       </div>
 
@@ -300,6 +376,7 @@ function ProjectPageInner() {
           onDelete={handleDelete}
           onToggleStar={handleToggleStar}
           onToggleSelect={handleToggleSelect}
+          onRename={handleRename}
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
         />
@@ -350,6 +427,24 @@ function ProjectPageInner() {
         confirmText="Delete Document"
         cancelText="Cancel"
         isLoading={isDeleting}
+      />
+
+      {/* Rename Document Modal */}
+      <EditDocumentModal
+        isOpen={showRenameModal}
+        onClose={() => { setShowRenameModal(false); setDocumentToRename(null); }}
+        onSave={handleSaveRename}
+        document={documentToRename}
+        isLoading={isRenaming}
+      />
+
+      {/* Edit Project Modal */}
+      <EditProjectModal
+        isOpen={showEditProjectModal}
+        onClose={() => setShowEditProjectModal(false)}
+        onSave={handleSaveProject}
+        project={project}
+        isLoading={isEditingProject}
       />
 
     </Layout>

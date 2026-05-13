@@ -3,10 +3,11 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Layout from '@/components/layout/Layout';
 import { motion } from 'framer-motion';
-import { Trash2, Plus, Search, SortDesc } from 'lucide-react';
+import { Trash2, Plus, Search, SortAsc, SortDesc, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import DeleteProjectModal from '@/components/modals/DeleteProjectModal';
 import CreateProjectModal from '@/components/modals/CreateProjectModal';
+import EditProjectModal from '@/components/modals/EditProjectModal';
 import { Input } from '@/components/ui/Input';
 import { cn } from '@/lib/utils';
 
@@ -15,6 +16,8 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null); // {id, name}
+  const [editTarget, setEditTarget] = useState(null);     // project object
+  const [isEditingProject, setIsEditingProject] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('date'); // 'name' or 'date'
   const [sortOrder, setSortOrder] = useState('desc'); // 'asc' or 'desc'
@@ -120,6 +123,36 @@ export default function ProjectsPage() {
       console.error('Delete failed:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleEdit = (e, project) => {
+    e.stopPropagation();
+    setEditTarget(project);
+  };
+
+  const handleSaveEdit = async (name, description) => {
+    if (!editTarget) return;
+    setIsEditingProject(true);
+    try {
+      const res = await fetch(`/api/projects/${editTarget.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        alert(result.error || 'Failed to update project');
+        return;
+      }
+      setProjects((prev) =>
+        prev.map((p) => p.id === editTarget.id ? { ...p, name: result.name, description: result.description } : p)
+      );
+      setEditTarget(null);
+    } catch (err) {
+      console.error('Update failed:', err);
+    } finally {
+      setIsEditingProject(false);
     }
   };
 
@@ -318,17 +351,28 @@ export default function ProjectsPage() {
                         </svg>
                       </div>
                       
-                      {/* Delete Button */}
-                      <button
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(project.id, project.name);
-                        }}
-                        title="Delete Project"
-                      >
-                        <Trash2 className="w-4 h-4 text-red-500 hover:text-red-600" />
-                      </button>
+                      <div className="flex items-center space-x-1">
+                        {/* Edit Button */}
+                        <button
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                          onClick={(e) => handleEdit(e, project)}
+                          title="Edit Project"
+                        >
+                          <Pencil className="w-4 h-4 text-blue-500" />
+                        </button>
+
+                        {/* Delete Button */}
+                        <button
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(project.id, project.name);
+                          }}
+                          title="Delete Project"
+                        >
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </button>
+                      </div>
                     </div>
 
                     {/* Project Info */}
@@ -385,6 +429,14 @@ export default function ProjectsPage() {
           }}
         />
       )}
+
+      <EditProjectModal
+        isOpen={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        onSave={handleSaveEdit}
+        project={editTarget}
+        isLoading={isEditingProject}
+      />
     </Layout>
   );
 }

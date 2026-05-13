@@ -7,7 +7,7 @@ export function ThemeProvider({ children }) {
     <NextThemesProvider
       attribute="class"
       defaultTheme="system"
-      enableSystem={false} // 🔥 important: disables system override
+      enableSystem
     >
       {children}
     </NextThemesProvider>

@@ -5,12 +5,10 @@ import {
   List,
   SortAsc,
   SortDesc,
-  Filter,
   Search,
   Upload,
   FileText,
   Star,
-  Trash2,
   CircleOff
 } from 'lucide-react';
 import DocumentCard from './DocumentCard';
@@ -24,11 +22,10 @@ const DocumentGrid = ({
   loading = false,
   onUpload,
   onView,
-  onEdit,
   onDelete,
-  onDownload,
   onToggleStar,
   onToggleSelect,
+  onRename,
   activeFilter = 'all',
   onFilterChange,
   className
@@ -383,11 +380,10 @@ const DocumentGrid = ({
                     document={document}
                     viewMode={viewMode}
                     onView={onView}
-                    onEdit={onEdit}
                     onDelete={onDelete}
-                    onDownload={onDownload}
                     onToggleStar={onToggleStar}
                     onToggleSelect={onToggleSelect}
+                    onRename={onRename}
                   />
                 </motion.div>
               ))}
