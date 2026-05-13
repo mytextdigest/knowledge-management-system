@@ -1,13 +1,16 @@
 import { motion } from 'framer-motion';
-import { 
-  FileText, 
-  MoreVertical, 
-  Star, 
-  Download, 
-  Trash2, 
+import {
+  FileText,
+  MoreVertical,
+  Star,
+  Download,
+  Trash2,
   Edit,
   Calendar,
-  Eye
+  Eye,
+  Loader2,
+  AlertCircle,
+  ScanLine,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -49,6 +52,30 @@ const DocumentCard = ({
   };
 
 
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case 'queued':
+        return { label: 'Queued', icon: Loader2, spin: true, className: 'text-gray-500 dark:text-gray-400' };
+      case 'extracting':
+        return { label: 'Extracting text…', icon: Loader2, spin: true, className: 'text-blue-500 dark:text-blue-400' };
+      case 'running_ocr':
+        return { label: 'Running OCR…', icon: ScanLine, spin: false, className: 'text-purple-600 dark:text-purple-400' };
+      case 'chunked':
+      case 'embedding':
+      case 'embedded':
+        return { label: 'Generating embeddings…', icon: Loader2, spin: true, className: 'text-blue-500 dark:text-blue-400' };
+      case 'summarizing':
+        return { label: 'Generating summary…', icon: Loader2, spin: true, className: 'text-blue-500 dark:text-blue-400' };
+      case 'ocr_failed':
+        return { label: 'OCR failed', icon: AlertCircle, spin: false, className: 'text-red-600 dark:text-red-400' };
+      case 'chunk_failed':
+      case 'error':
+        return { label: 'Processing failed', icon: AlertCircle, spin: false, className: 'text-red-600 dark:text-red-400' };
+      default:
+        return null; // 'ready' or unknown — show nothing
+    }
+  };
+
   const getVisibilityBadge = (visibility) => {
     if (visibility === "public") {
       return {
@@ -63,6 +90,7 @@ const DocumentCard = ({
   };
 
   const visibilityBadge = getVisibilityBadge(document.visibility);
+  const statusBadge = getStatusBadge(document.status);
 
   if (viewMode === 'list') {
     return (
@@ -82,7 +110,7 @@ const DocumentCard = ({
               <IconComponent className="w-5 h-5 text-primary-600 dark:text-primary-400" />
             </div>
           </div>
-          
+
           <div className="card-content-container">
             <h3 className="text-sm font-medium text-gray-900 dark:text-white truncate-responsive">
               {filename}
@@ -104,6 +132,12 @@ const DocumentCard = ({
                 </>
               )}
             </div>
+            {statusBadge && (
+              <div className={cn("flex items-center gap-1 mt-1 text-xs font-medium", statusBadge.className)}>
+                <statusBadge.icon className={cn("w-3 h-3", statusBadge.spin && "animate-spin")} />
+                <span>{statusBadge.label}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -187,9 +221,15 @@ const DocumentCard = ({
                 )}>
                   {visibilityBadge.label}
                 </span>
+                {statusBadge && (
+                  <div className={cn("flex items-center gap-1 mt-1 text-[11px] font-medium", statusBadge.className)}>
+                    <statusBadge.icon className={cn("w-3 h-3", statusBadge.spin && "animate-spin")} />
+                    <span>{statusBadge.label}</span>
+                  </div>
+                )}
               </div>
             </div>
-            
+
             <div className="flex items-center space-x-1">
               <Button
                 variant="ghost"

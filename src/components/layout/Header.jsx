@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { useSession } from "next-auth/react";
 import Image from 'next/image';
+import { useTheme } from 'next-themes';
 // import { applyTheme, getStoredTheme, setStoredTheme } from "@/lib/theme";
 
 
@@ -21,7 +22,7 @@ const Header = ({
   className
 }) => {
   const router = useRouter();
-  const [theme, setTheme] = useState("dark");
+  // const [theme, setTheme] = useState("light");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [activeTab, setActiveTab] = useState('general'); // 'general' or 'apikey'
@@ -36,56 +37,8 @@ const Header = ({
   const [loadingSubscription, setLoadingSubscription] = useState(true);
   const { data: session } = useSession();
 
-
-  useEffect(() => {
-    setIsClient(true);
-    loadApiKey();
-  }, []);
-
-  // useEffect(() => {
-  //   const stored = getStoredTheme();
-  //   setTheme(stored);
-  // }, []);
-
-  useEffect(() => {
-    if (activeTab === "general") {
-      fetch("/api/subscription")
-        .then(res => res.json())
-        .then(data => setSubscription(data))
-        .catch(() => setSubscription(null))
-        .finally(() => setLoadingSubscription(false));
-    }
-  }, [activeTab]);
-
-  const loadTheme = () => {
-    if (typeof window !== 'undefined') {
-      const savedTheme = localStorage.getItem('theme') || 'dark';
-      setTheme(savedTheme);
-      applyTheme(savedTheme);
-    }
-  };
-
-  const applyTheme = (newTheme) => {
-    if (typeof window === 'undefined') return;
-    
-    const root = document.documentElement;
-    
-    if (newTheme === 'light') {
-      root.classList.remove('dark');
-      root.classList.add('light');
-    } else { // dark
-      root.classList.remove('light');
-      root.classList.add('dark');
-    }
-  };
-
-  const handleThemeChange = (newTheme) => {
-    console.log('Theme changing to:', newTheme);
-    setTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
-    applyTheme(newTheme);
-    console.log('Theme changed. Current classes:', document.documentElement.classList.toString());
-  };
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
   const loadApiKey = async () => {
     console.log("Loading api key ...")
@@ -101,6 +54,31 @@ const Header = ({
     console.log("Loaded api key succesfully")
     // }
   };
+
+
+  useEffect(() => {
+    setMounted(true);
+    setIsClient(true);
+    loadApiKey();
+  }, []);
+
+
+
+  useEffect(() => {
+    if (activeTab === "general") {
+      fetch("/api/subscription")
+        .then(res => res.json())
+        .then(data => setSubscription(data))
+        .catch(() => setSubscription(null))
+        .finally(() => setLoadingSubscription(false));
+    }
+  }, [activeTab]);
+
+  if (!mounted) return null;
+
+
+
+  
 
   const handleVerifyApiKey = async () => {
     if (!apiKey.trim()) {
@@ -365,28 +343,29 @@ const Header = ({
                         </div>
                         <div className="flex flex-col space-y-2">
                           <button
-                            onClick={() => handleThemeChange('light')}
-                            className={cn(
-                              "px-4 py-2.5 rounded-lg text-left transition-all",
-                              theme === 'light'
-                                ? "bg-primary-600 text-white"
-                                : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
-                            )}
+                            onClick={() => setTheme("light")}
+                            className={
+                              theme === "light"
+                                ? "bg-primary-600 text-white px-4 py-2.5 rounded-lg"
+                                : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-4 py-2.5 rounded-lg"
+                            }
                           >
-                            <span className="font-medium">☀️ Light</span>
+                            ☀️ Light
                           </button>
+
                           <button
-                            onClick={() => handleThemeChange('dark')}
-                            className={cn(
-                              "px-4 py-2.5 rounded-lg text-left transition-all",
-                              theme === 'dark'
-                                ? "bg-primary-600 text-white"
-                                : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
-                            )}
+                            onClick={() => setTheme("dark")}
+                            className={
+                              theme === "dark"
+                                ? "bg-primary-600 text-white px-4 py-2.5 rounded-lg"
+                                : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-4 py-2.5 rounded-lg"
+                            }
                           >
-                            <span className="font-medium">🌙 Dark</span>
+                            🌙 Dark
                           </button>
                         </div>
+
+
                       </div>
 
                       {/* Subscription */}

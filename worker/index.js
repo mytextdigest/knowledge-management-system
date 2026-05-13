@@ -1,6 +1,7 @@
 import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { extractPdfText } from "./extractPdf.js";
+import { runOCR } from "./runOcr.js";
 import mammoth from "mammoth";
 import { PrismaClient } from "@prisma/client";
 import OpenAI from "openai";
@@ -115,19 +116,47 @@ async function processChunkJob(job) {
 
   if (filename.endsWith(".pdf")) {
     rawText = await extractPdfText(buffer);
+
+    // Detect scanned PDF: text layer is absent or too short to be useful
+    const isLikelyScanned = !rawText || rawText.trim().length < 50;
+
+    if (isLikelyScanned) {
+      endExtract();
+      console.log(`⚠️  Scanned PDF detected for doc ${docId} — starting OCR`);
+
+      await prisma.document.update({
+        where: { id: docId },
+        data: { status: "running_ocr" },
+      });
+
+      const endOcr = startTimer("OCR", { docId });
+      try {
+        const { fullText } = await runOCR(buffer);
+        rawText = fullText;
+      } catch (err) {
+        console.error("❌ OCR failed:", err.message);
+        await prisma.document.update({
+          where: { id: docId },
+          data: { status: "ocr_failed" },
+        });
+        throw Object.assign(err, { errorCode: "OCR_FAILED" });
+      }
+      endOcr();
+    } else {
+      endExtract();
+    }
   } else if (filename.endsWith(".txt")) {
     rawText = buffer.toString("utf8");
+    endExtract();
   } else if (filename.endsWith(".docx")) {
     const result = await mammoth.extractRawText({ buffer });
     rawText = result.value;
+    endExtract();
+  } else {
+    endExtract();
   }
 
-  let text = rawText
-
-  text = forceValidUTF8(sanitizeText(text));
-
-  endExtract();
-
+  let text = forceValidUTF8(sanitizeText(rawText));
 
   if (!text || text.length < 50) {
     await prisma.document.update({
@@ -159,43 +188,6 @@ async function processChunkJob(job) {
     throw new Error(`No valid chunks generated for doc ${docId}`);
   }
 
-
-  // -----------------------------
-  // 5. Insert chunks (atomic, Prisma-safe)
-  // -----------------------------
-  // try {
-  //   // Idempotency: clear old chunks
-  //   await prisma.chunk.deleteMany({
-  //     where: { documentId: docId },
-  //   });
-
-  //   for (let i = 0; i < chunks.length; i++) {
-  //     try {
-  //       await prisma.chunk.create({
-  //         data: {
-  //           documentId: docId,
-  //           chunkIndex: i,
-  //           text: chunks[i],
-  //         },
-  //       });
-  //     } catch (err) {
-  //       console.error("❌ Single chunk insert failed", {
-  //         docId,
-  //         chunkIndex: i,
-  //         sample: chunks[i].slice(0, 200),
-  //       });
-
-  //       throw err; // HARD FAIL → SQS retry
-  //     }
-  //   }
-  // } catch (err) {
-  //   await prisma.document.update({
-  //     where: { id: docId },
-  //     data: { status: "chunk_failed" },
-  //   });
-
-  //   throw err;
-  // }
 
   // -----------------------------
   // 5. Insert chunks (atomic)

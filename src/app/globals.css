@@ -1,6 +1,26 @@
 @import "tailwindcss";
 @import "../styles/scrollbar.css";
 
+/* 🚨 Disable system dark mode completely */
+@media (prefers-color-scheme: dark) {
+  :root:not(.dark) {
+    color-scheme: light !important;
+  }
+}
+
+
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -293,13 +313,6 @@ body {
 }
 
 /* Ensure dark mode applies to html element */
-html.dark {
-  color-scheme: dark;
-}
-
-html.light {
-  color-scheme: light;
-}
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
