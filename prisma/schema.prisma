@@ -52,6 +52,7 @@ model Project {
   createdAt    DateTime              @default(now()) @map("created_at")
   userId       String
   documents    Document[]
+  topics       Topic[]
   user         User                  @relation(fields: [userId], references: [id])
   projectChats ProjectConversation[]
 
@@ -72,11 +73,12 @@ model Document {
   selected      Int            @default(1)
 
   visibility    String         @default("private")
-  
-  chunks        Chunk[]
-  conversations Conversation[]
-  project       Project?       @relation(fields: [projectId], references: [id])
-  user          User           @relation(fields: [userId], references: [id])
+
+  chunks         Chunk[]
+  conversations  Conversation[]
+  topicDocument  TopicDocument?
+  project        Project?       @relation(fields: [projectId], references: [id])
+  user           User           @relation(fields: [userId], references: [id])
 }
 
 model Chunk {
@@ -130,6 +132,37 @@ model ProjectMessage {
 }
 
 
+
+// Topic Clustering
+
+model Topic {
+  id                  String          @id @default(cuid())
+  projectId           String
+  name                String
+  centroidEmbedding   Json?
+  keywordDistribution Json?
+  documentCount       Int             @default(0)
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  topicDocuments TopicDocument[]
+
+  @@index([projectId])
+}
+
+model TopicDocument {
+  id         String   @id @default(cuid())
+  topicId    String
+  documentId String   @unique
+  confidence Float    @default(0.0)
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  topic    Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([topicId])
+}
 
 // Subscription Extension
 
