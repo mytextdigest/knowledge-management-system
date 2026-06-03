@@ -260,11 +260,20 @@ const DocumentCard = ({
           </div>
 
           {/* Content Preview */}
-          <div className="mb-4 overflow-hidden flex-1">
+          {/* <div className="mb-4 overflow-hidden flex-1">
             <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-4 break-words">
               {isProcessing
                 ? 'Extracting text and generating summary…'
                 : document.content || 'No preview available'
+              }
+            </p>
+          </div> */}
+
+          <div className="mb-4 overflow-hidden flex-1">
+            <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-4 break-words">
+              {isProcessing
+                ? 'Extracting text and generating summary…'
+                :''
               }
             </p>
           </div>

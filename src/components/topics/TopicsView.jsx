@@ -134,7 +134,7 @@ export default function TopicsView({
               className={cn(
                 'p-1.5 rounded transition-colors',
                 viewMode === 'grid'
-                  ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-400'
+                  ? 'bg-blue-600 text-white'
                   : 'text-gray-400 hover:text-gray-600'
               )}
               title="Expanded view"
@@ -146,7 +146,7 @@ export default function TopicsView({
               className={cn(
                 'p-1.5 rounded transition-colors',
                 viewMode === 'list'
-                  ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-400'
+                  ? 'bg-blue-600 text-white'
                   : 'text-gray-400 hover:text-gray-600'
               )}
               title="Compact view"
@@ -156,10 +156,8 @@ export default function TopicsView({
           </div>
 
           <Button
-            variant="outline"
-            size="sm"
             onClick={onUpload}
-            className="h-9 text-sm"
+            className="h-9 text-sm bg-blue-600 hover:bg-blue-700"
           >
             <Upload className="w-4 h-4 mr-2" />
             Upload
@@ -203,7 +201,7 @@ export default function TopicsView({
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-xs">
               Upload documents and the workspace will organise them into topics automatically.
             </p>
-            <Button variant="outline" onClick={onUpload}>
+            <Button onClick={onUpload} className="bg-blue-600 hover:bg-blue-700">
               <Upload className="w-4 h-4 mr-2" />
               Upload Documents
             </Button>

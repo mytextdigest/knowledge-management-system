@@ -259,8 +259,7 @@ export default function TopicGroup({
                   >
                     <DocumentCard
                       document={doc}
-                      viewMode="list"
-                      showLabels={showLabels}
+                      viewMode={showLabels ? 'grid' : 'list'}
                       onView={onView}
                       onDelete={onDelete}
                       onToggleStar={onToggleStar}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Menu } from 'lucide-react';
 import Header from './Header';
@@ -14,53 +14,6 @@ const Layout = ({ children, className }) => {
   const [searchValue, setSearchValue] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const { hasApiKey, isLoading, refreshApiKeyStatus } = useApiKeyCheck();
-
-  // Initialize theme based on system preference only
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      // Clean up any old localStorage theme settings
-      localStorage.removeItem('darkMode');
-
-      const systemDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-      // Apply dark mode class to both html and body based on system preference
-      const htmlElement = document.documentElement;
-      const bodyElement = document.body;
-
-      if (systemDarkMode) {
-        htmlElement.classList.add('dark');
-        htmlElement.classList.remove('light');
-        bodyElement.classList.add('dark');
-        bodyElement.classList.remove('light');
-      } else {
-        htmlElement.classList.remove('dark');
-        htmlElement.classList.add('light');
-        bodyElement.classList.remove('dark');
-        bodyElement.classList.add('light');
-      }
-
-      // Listen for system theme changes
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      const handleChange = (e) => {
-        if (e.matches) {
-          htmlElement.classList.add('dark');
-          htmlElement.classList.remove('light');
-          bodyElement.classList.add('dark');
-          bodyElement.classList.remove('light');
-        } else {
-          htmlElement.classList.remove('dark');
-          htmlElement.classList.add('light');
-          bodyElement.classList.remove('dark');
-          bodyElement.classList.add('light');
-        }
-      };
-
-      mediaQuery.addEventListener('change', handleChange);
-
-      // Cleanup listener on unmount
-      return () => mediaQuery.removeEventListener('change', handleChange);
-    }
-  }, []);
 
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
