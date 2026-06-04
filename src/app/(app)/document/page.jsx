@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef, Suspense } from "react";
+import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from 'framer-motion';
 import Layout from '@/components/layout/Layout';
@@ -7,15 +7,18 @@ import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { ArrowLeft, Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Bot, User } from 'lucide-react';
+import { ArrowLeft, Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb } from 'lucide-react';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
+import PdfViewer from "@/components/documents/PdfViewer";
 import { cn } from '@/lib/utils';
 import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
 import MessageActions from "@/components/chat/MessageActions";
 import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
 
 
+
+const WORDS_PER_PAGE = 400;
 
 function DocumentContent() {
   const searchParams = useSearchParams();
@@ -45,6 +48,24 @@ function DocumentContent() {
 
   const [expandedMessage, setExpandedMessage] = useState(null);
 
+  // Reading Guide state
+  const [pagesRead, setPagesRead] = useState(0);
+  const [readingInsights, setReadingInsights] = useState([]);
+  const [isLoadingPageInsight, setIsLoadingPageInsight] = useState(false);
+  const [expandedInsightIndex, setExpandedInsightIndex] = useState(null);
+  const [detectedPage, setDetectedPage] = useState(0);
+  const [pdfTotalPages, setPdfTotalPages] = useState(0);
+  const insightsEndRef = useRef(null);
+  const docScrollRef = useRef(null);
+  const scrollDebounceRef = useRef(null);
+
+  const ext = doc?.filename?.split('.').pop().toLowerCase() ?? '';
+  const totalPages = ext === 'pdf'
+    ? pdfTotalPages
+    : doc?.content
+      ? Math.max(1, Math.ceil(doc.content.split(/\s+/).filter(Boolean).length / WORDS_PER_PAGE))
+      : 0;
+
   const openExpanded = (message) => {
     setExpandedMessage(message);
   };
@@ -53,7 +74,66 @@ function DocumentContent() {
     setExpandedMessage(null);
   };
 
+  // Reading Guide helpers
+  const getContentUpToPage = useCallback((pageNumber) => {
+    if (!doc?.content) return '';
+    const words = doc.content.split(/\s+/).filter(Boolean);
+    if (ext === 'pdf') {
+      const fraction = pageNumber / Math.max(1, pdfTotalPages);
+      return words.slice(0, Math.ceil(words.length * fraction)).join(' ');
+    }
+    return words.slice(0, pageNumber * WORDS_PER_PAGE).join(' ');
+  }, [doc?.content, ext, pdfTotalPages]);
 
+  const handleMarkPageRead = useCallback(async () => {
+    if (isLoadingPageInsight || pagesRead >= totalPages) return;
+    const nextPage = pagesRead + 1;
+    setIsLoadingPageInsight(true);
+    try {
+      const content = getContentUpToPage(nextPage);
+      const res = await fetch('/api/page-insight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageContent: content, pageNumber: nextPage }),
+      }).then(r => r.json());
+
+      if (res?.success) {
+        setReadingInsights(prev => [...prev, { page: nextPage, keyPoints: res.keyPoints, questions: res.questions }]);
+        setExpandedInsightIndex(nextPage - 1);
+        setPagesRead(nextPage);
+      }
+    } catch (err) {
+      console.error('Failed to get page insight:', err);
+    } finally {
+      setIsLoadingPageInsight(false);
+    }
+  }, [isLoadingPageInsight, pagesRead, totalPages, getContentUpToPage]);
+
+  // Auto-trigger chain when reading guide tab is active
+  useEffect(() => {
+    if (activeTab !== 'guide') return;
+    if (detectedPage > pagesRead && !isLoadingPageInsight && totalPages > 0) {
+      handleMarkPageRead();
+    }
+  }, [detectedPage, pagesRead, isLoadingPageInsight, totalPages, activeTab, handleMarkPageRead]);
+
+  const handleDocPageChange = useCallback((pageNum) => {
+    setDetectedPage(pageNum);
+  }, []);
+
+  const handleDocScroll = useCallback((e) => {
+    if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
+    const el = e.currentTarget;
+    scrollDebounceRef.current = setTimeout(() => {
+      const pct = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
+      const page = Math.max(1, Math.ceil(pct * Math.max(1, totalPages)));
+      setDetectedPage(page);
+    }, 800);
+  }, [totalPages]);
+
+  useEffect(() => {
+    insightsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [readingInsights]);
 
 
 
@@ -545,7 +625,7 @@ function DocumentContent() {
 
     if (ext === "txt") {
       return (
-        <div className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
+        <div ref={docScrollRef} onScroll={handleDocScroll} className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
           <pre className="whitespace-pre-wrap text-gray-900 dark:text-gray-100 p-6 font-mono text-sm leading-relaxed max-w-5xl mx-auto">
             {doc.content}
           </pre>
@@ -556,42 +636,17 @@ function DocumentContent() {
     if (ext === "pdf") {
       return (
         <div className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <iframe
-            src={doc.fileUrl}
-            title="PDF Preview"
-            className="w-full h-full"
-            style={{ minHeight: "100%", border: "none" }}
-          />
+          <PdfViewer fileUrl={doc.fileUrl} onPageChange={handleDocPageChange} onTotalPages={setPdfTotalPages} />
         </div>
       );
     }
 
-   
-
-    // if (ext === "docx") {
-    //   return (
-    //     <div className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
-    //       <div
-    //         className="prose prose-gray dark:prose-invert max-w-none p-6"
-    //         dangerouslySetInnerHTML={{ __html: docxHtml || "<p>Loading...</p>" }}
-    //       />
-    //     </div>
-    //   );
-    // }
-
     if (ext === "docx") {
       return (
-        <div className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <DocViewer
-            documents={[
-              {
-                uri: doc.fileUrl,
-                fileType: "docx",
-                fileName: doc.filename,
-              },
-            ]}
-            pluginRenderers={DocViewerRenderers}
-            style={{ height: "100%" }}
+        <div ref={docScrollRef} onScroll={handleDocScroll} className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
+          <div
+            className="prose prose-gray dark:prose-invert max-w-none p-6"
+            dangerouslySetInnerHTML={{ __html: docxHtml || "<p>Loading...</p>" }}
           />
         </div>
       );
@@ -735,12 +790,133 @@ function DocumentContent() {
               <BarChart3 className="h-4 w-4" />
               <span>Summary</span>
             </Button>
+            <Button
+              variant={activeTab === 'guide' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveTab('guide')}
+              className={cn(
+                "flex items-center space-x-2",
+                activeTab === 'guide'
+                  ? "text-white dark:text-gray-200"
+                  : "text-gray-600 dark:text-gray-400"
+              )}
+            >
+              <BookOpen className="h-4 w-4" />
+              <span>Pagewise Summary</span>
+            </Button>
           </div>
         </CardHeader>
 
         <CardContent className="chat-card-content p-0">
-          {/* Content Area - Chat or Summary */}
-          {activeTab === 'chat' ? (
+          {/* Content Area - Chat, Summary, or Reading Guide */}
+          {activeTab === 'guide' ? (
+            <div className="flex flex-col h-full">
+              {/* Progress bar */}
+              {totalPages > 0 && (
+                <div className="shrink-0 px-4 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+                  <div className="flex justify-between text-xs text-gray-500 mb-1.5">
+                    <span>{pagesRead === 0 ? 'Not started' : `Page ${pagesRead} of ${totalPages} read`}</span>
+                    <span>{Math.round((pagesRead / totalPages) * 100)}%</span>
+                  </div>
+                  <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-1.5 bg-primary-600 rounded-full transition-all duration-500"
+                      style={{ width: `${(pagesRead / totalPages) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Scrollable insight cards */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900/50">
+                {readingInsights.length === 0 && !isLoadingPageInsight && (
+                  <div className="flex flex-col items-center justify-center h-full text-center py-12 space-y-3">
+                    <BookOpen className="h-10 w-10 text-gray-300 dark:text-gray-600" />
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Progressive reading mode</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 max-w-[220px]">
+                      Start reading the document. Insights and reflection questions unlock automatically as you scroll through each page.
+                    </p>
+                  </div>
+                )}
+
+                {readingInsights.map((insight, idx) => {
+                  const isExpanded = expandedInsightIndex === idx;
+                  return (
+                    <div key={idx} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                      <button
+                        onClick={() => setExpandedInsightIndex(isExpanded ? null : idx)}
+                        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      >
+                        <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">Page {insight.page}</span>
+                        {isExpanded
+                          ? <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />
+                          : <ChevronRight className="h-4 w-4 text-gray-400 shrink-0" />}
+                      </button>
+
+                      {isExpanded && (
+                        <div className="px-4 pb-4 space-y-4 border-t border-gray-100 dark:border-gray-700">
+                          {insight.keyPoints.length > 0 && (
+                            <div className="pt-3">
+                              <div className="flex items-center space-x-1.5 mb-2">
+                                <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+                                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Key Points</span>
+                              </div>
+                              <ul className="space-y-1.5">
+                                {insight.keyPoints.map((point, i) => (
+                                  <li key={i} className="flex items-start space-x-2">
+                                    <div className="w-1.5 h-1.5 bg-primary-500 rounded-full mt-1.5 shrink-0" />
+                                    <span className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{point}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {insight.questions.length > 0 && (
+                            <div>
+                              <div className="flex items-center space-x-1.5 mb-2">
+                                <HelpCircle className="h-3.5 w-3.5 text-blue-500" />
+                                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">questions to Reflect</span>
+                              </div>
+                              <ol className="space-y-2">
+                                {insight.questions.map((q, i) => (
+                                  <li key={i} className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed pl-3 border-l-2 border-blue-200 dark:border-blue-800">{q}</li>
+                                ))}
+                              </ol>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {isLoadingPageInsight && (
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-4 flex items-center space-x-3">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600 shrink-0" />
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Generating insights for page {pagesRead + 1}…</span>
+                  </div>
+                )}
+
+                <div ref={insightsEndRef} />
+              </div>
+
+              {/* Status footer */}
+              <div className="shrink-0 px-4 py-3 border-t border-gray-200 dark:border-gray-700 text-center">
+                {isLoadingPageInsight ? (
+                  <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
+                    <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-primary-600" />
+                    <span>Generating insights for page {pagesRead + 1}…</span>
+                  </div>
+                ) : pagesRead > 0 && pagesRead >= totalPages ? (
+                  <p className="text-sm text-gray-500">You&apos;ve finished the document.</p>
+                ) : detectedPage > 0 ? (
+                  <p className="text-xs text-gray-400">On page {detectedPage}{totalPages > 0 ? ` of ${totalPages}` : ''}</p>
+                ) : (
+                  <p className="text-xs text-gray-400">Scroll through the document — insights appear automatically.</p>
+                )}
+              </div>
+            </div>
+          ) : activeTab === 'chat' ? (
             <div className="chat-container">
               <div className="chat-messages-area p-4 space-y-4 bg-gray-50 dark:bg-gray-900/50 chat-scrollbar">
                 {chat.map((message) => (
