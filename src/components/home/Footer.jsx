@@ -35,7 +35,7 @@ export default function Footer() {
                 <FileText className="w-5 h-5 text-primary-foreground" />
               </div>
               <span className="font-serif text-lg font-semibold text-foreground">
-                My Text Digest
+                KMS
               </span>
             </Link>
             <p className="text-sm text-muted-foreground max-w-xs mb-6">
@@ -136,7 +136,7 @@ export default function Footer() {
         {/* Bottom Bar */}
         <div className="mt-12 pt-8 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-sm text-muted-foreground">
-            © {new Date().getFullYear()} My Text Digest. All rights reserved.
+            © {new Date().getFullYear()} KMS. All rights reserved.
           </p>
           <p className="text-sm text-muted-foreground">
             Made with care for knowledge workers everywhere.

@@ -29,7 +29,7 @@ export default function Navbar() {
               <div className="flex h-16 w-12 items-center justify-center">
                 <Image
                   src="/logo.png"
-                  alt="My Text Digest Logo"
+                  alt="KMS Logo"
                   width={40}
                   height={40}
                   className="object-contain"
@@ -37,7 +37,7 @@ export default function Navbar() {
               </div>
               <div>
                 <span className="block text-lg font-bold leading-none text-slate-900">
-                  My Text Digest
+                  KMS
                 </span>
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                   Document Intelligence

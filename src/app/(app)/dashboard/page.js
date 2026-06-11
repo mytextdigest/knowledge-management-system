@@ -190,7 +190,7 @@ export default function ProjectsPage() {
           {/* Page Header */}
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              My Text Digest
+              KMS
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
               Document Management System

@@ -56,7 +56,7 @@ export default function SigninPageInner() {
         {/* Product Context */}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-foreground">
-            My Text Digest
+            KMS
           </h1>
           <p className="text-sm text-primary-600 font-medium mt-1">
             Cloud Version
