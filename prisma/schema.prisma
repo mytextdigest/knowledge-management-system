@@ -8,15 +8,15 @@ datasource db {
 }
 
 model User {
-  id            String                @id @default(cuid())
+  id            String   @id @default(cuid())
   name          String?
-  email         String                @unique
+  email         String   @unique
   password      String?
   image         String?
-  createdAt     DateTime              @default(now()) @map("created_at")
-  emailVerified Boolean               @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
+  emailVerified Boolean  @default(false)
 
-  storageUsedBytes BigInt             @default(0)
+  storageUsedBytes BigInt @default(0)
 
   conversations Conversation[]
   documents     Document[]
@@ -24,6 +24,9 @@ model User {
   projectChats  ProjectConversation[]
   settings      Setting[]
   subscription  Subscription?
+
+  orgMembers        OrganizationMember[]
+  departmentMembers DepartmentMember[]
 }
 
 model OtpToken {
@@ -45,40 +48,142 @@ model Setting {
   @@unique([userId, key])
 }
 
-model Project {
-  id           String                @id @default(cuid())
+model Organization {
+  id           String   @id @default(cuid())
   name         String
-  description  String?
-  createdAt    DateTime              @default(now()) @map("created_at")
+  openaiApiKey String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  members     OrganizationMember[]
+  invites     OrganizationInvite[]
+  departments Department[]
+  projects    Project[]
+  documents   Document[]
+
+  @@index([name])
+}
+
+model OrganizationMember {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  role      String   @default("employee")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([orgId])
+  @@index([userId])
+}
+
+model OrganizationInvite {
+  id         String    @id @default(cuid())
+  orgId      String
+  email      String
+  role       String    @default("employee")
+  token      String    @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([email])
+  @@index([token])
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  orgId     String
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  organization Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members      DepartmentMember[]
+  documents    Document[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+model DepartmentMember {
+  id           String   @id @default(cuid())
+  departmentId String
   userId       String
+  role         String   @default("member")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, userId])
+  @@index([departmentId])
+  @@index([userId])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  userId      String
+
+  scope String  @default("private")
+  orgId String?
+
   documents    Document[]
   topics       Topic[]
   user         User                  @relation(fields: [userId], references: [id])
+  organization Organization?         @relation(fields: [orgId], references: [id], onDelete: SetNull)
   projectChats ProjectConversation[]
 
   @@unique([userId, name])
+  @@index([scope])
+  @@index([orgId])
 }
 
 model Document {
-  id            String         @id @default(cuid())
-  filename      String?
-  filePath      String?        @map("file_path")
-  content       String?
-  summary       String?
-  status        String?        @default("pending")
-  createdAt     DateTime       @default(now()) @map("created_at")
-  starred       Int?           @default(0)
-  userId        String
-  projectId     String?
-  selected      Int            @default(1)
+  id        String   @id @default(cuid())
+  filename  String?
+  filePath  String?  @map("file_path")
+  content   String?
+  summary   String?
+  status    String?  @default("pending")
+  createdAt DateTime @default(now()) @map("created_at")
+  starred   Int?     @default(0)
+  userId    String
+  projectId String?
+  selected  Int      @default(1)
 
-  visibility    String         @default("private")
+  visibility String @default("private")
 
-  chunks         Chunk[]
-  conversations  Conversation[]
-  topicDocument  TopicDocument?
-  project        Project?       @relation(fields: [projectId], references: [id])
-  user           User           @relation(fields: [userId], references: [id])
+  scope        String  @default("private")
+  orgId        String?
+  departmentId String?
+  lifecycle    String  @default("published")
+  category     String?
+
+  chunks        Chunk[]
+  conversations Conversation[]
+  topicDocument TopicDocument?
+  project       Project?       @relation(fields: [projectId], references: [id])
+  user          User           @relation(fields: [userId], references: [id])
+  organization  Organization?  @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  department    Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  @@index([scope])
+  @@index([orgId])
+  @@index([departmentId])
+  @@index([lifecycle])
+  @@index([category])
 }
 
 model Chunk {
@@ -132,19 +237,17 @@ model ProjectMessage {
   conversation   ProjectConversation @relation(fields: [conversationId], references: [id])
 }
 
-
-
 // Topic Clustering
 
 model Topic {
-  id                  String          @id @default(cuid())
+  id                  String   @id @default(cuid())
   projectId           String
   name                String
   centroidEmbedding   Json?
   keywordDistribution Json?
-  documentCount       Int             @default(0)
-  createdAt           DateTime        @default(now()) @map("created_at")
-  updatedAt           DateTime        @updatedAt @map("updated_at")
+  documentCount       Int      @default(0)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
   project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   topicDocuments TopicDocument[]
@@ -168,33 +271,31 @@ model TopicDocument {
 // Subscription Extension
 
 model Plan {
-  id               String   @id @default(cuid())
-  name             String   @unique
-  description      String?
-  storageLimitGb   Int      // e.g. 1, 3, 10
-  priceCents       Int      @default(0)// e.g. 999 = $9.99
-  currency         String   @default("USD")
-  stripePriceId    String   @unique
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now()) @map("created_at")
-  billingInterval  String   @default("month")
+  id              String   @id @default(cuid())
+  name            String   @unique
+  description     String?
+  storageLimitGb  Int
+  priceCents      Int      @default(0)
+  currency        String   @default("USD")
+  stripePriceId   String   @unique
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  billingInterval String   @default("month")
 
-  subscriptions    Subscription[]
+  subscriptions Subscription[]
 }
 
-
-
 model Subscription {
-  id                     String   @id @default(cuid())
-  userId                 String   @unique
-  planId                 String
-  status                 String   // active, trialing, past_due, canceled
-  stripeCustomerId       String
-  stripeSubscriptionId   String
-  currentPeriodEnd       DateTime?
-  cancelAtPeriodEnd      Boolean  @default(false)
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  planId               String
+  status               String
+  stripeCustomerId     String
+  stripeSubscriptionId String
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id])
   plan Plan @relation(fields: [planId], references: [id])
