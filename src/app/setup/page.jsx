@@ -143,7 +143,7 @@ export default function SetupPage() {
             transition={{ delay: 0.2 }}
             className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-3"
           >
-            Welcome to My Text Digest
+            Welcome to KMS
           </motion.h1>
 
           <motion.p

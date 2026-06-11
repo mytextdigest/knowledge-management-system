@@ -27,7 +27,7 @@ export default function Navbar() {
             </div>
             <div className="flex flex-col">
               <span className="text-lg font-bold leading-none text-foreground">
-                My Text Digest
+                KMS
               </span>
               <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                 Knowledge Systems

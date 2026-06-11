@@ -1,18 +1,18 @@
 {
-  "name": "my_text_digest_saas",
+  "name": "knowledge-management-system",
   "version": "0.0.0",
   "private": true,
   "author": {
-    "name": "My Text Digest",
-    "email": "mytextdigest@gmail.com"
+    "name": "Knowledge Management System"
   },
-  "description": "My Text Digest — SaaS for document summarization and Q&A",
+  "description": "AI-based Knowledge Management System",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "seed": "node prisma/seed.js"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

@@ -1,6 +1,7 @@
 import SubscribeClient from "@/components/subscribe/SubscribeClient";
 import { prisma } from "@/lib/prisma";
-// import SubscribeClient from "./SubscribeClient";
+
+export const dynamic = "force-dynamic";
 
 export default async function SubscribePage() {
   const plans = await prisma.plan.findMany({

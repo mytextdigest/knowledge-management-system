@@ -12,7 +12,7 @@ export const transporter = nodemailer.createTransport({
 
 export async function sendOtpEmail(email, otp) {
   await transporter.sendMail({
-    from: `"My Text Digest" <${process.env.EMAIL_USER}>`,
+    from: `"KMS" <${process.env.EMAIL_USER}>`,
     to: email,
     subject: "Verify your email",
     html: `

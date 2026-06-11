@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "My Text Digest - Document Management System",
+  title: "KMS - Document Management System",
   description: "A modern document management system for organizing and processing your text files",
 };
 

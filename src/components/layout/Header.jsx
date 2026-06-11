@@ -222,7 +222,7 @@ const Header = ({
             <div className="flex items-center justify-center rounded-lg bg-white dark:bg-gray-900 shadow-md overflow-hidden">
               <Image
                 src="/logo.png"
-                alt="My Text Digest Logo"
+                alt="KMS Logo"
                 width={55}
                 height={55}
                 className="object-contain"
@@ -232,7 +232,7 @@ const Header = ({
 
             <div>
               <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                My Text Digest
+                KMS
               </h1>
               <p className="text-xs text-gray-600 dark:text-gray-400">
                 Document Management System

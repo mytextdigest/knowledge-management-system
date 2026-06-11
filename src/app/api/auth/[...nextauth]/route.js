@@ -50,7 +50,7 @@ export const authOptions = {
       // 2. Only allow production domain
       try {
         const host = new URL(url).host;
-        if (host === "my-text-digest-saas.vercel.app") return url;
+        if (host === process.env.NEXTAUTH_URL?.replace(/^https?:\/\//, "")) return url;
       } catch {}
     
       // Fallback

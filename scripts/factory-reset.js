@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const dbPath = path.join(process.cwd(), "my_text_digest.db");
+const dbPath = path.join(process.cwd(), "knowledge_management.db");
 // adjust this to your actual uploads folder path
 const uploadsDir = path.join(process.cwd(), "uploads");
 
