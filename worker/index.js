@@ -444,7 +444,7 @@ async function processSummarizationJob(job) {
           <p>Hello,</p>
           <p>Your document <strong>${filename}</strong> has a newly regenerated summary.</p>
           <p>You can now review the improved structured summary in your dashboard.</p>
-          <p>— MyTextDigest</p>
+          <p>— Knowledge Management System</p>
         `,
       });
 
@@ -459,7 +459,7 @@ async function processSummarizationJob(job) {
         html: `
           <p>Your document <strong>${filename}</strong> has been fully processed.</p>
           <p>High-level summary and improved chat are now available.</p>
-          <p>— MyTextDigest</p>
+          <p>— Knowledge Management System</p>
         `,
       });
 
