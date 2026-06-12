@@ -50,18 +50,18 @@
 
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
-| `1-A` | Schema: Org + RBAC Data Model | `TODO` | — | — | — | — |
+| `1-A` | Schema: Org + RBAC Data Model | `DONE` | teammate | — | 2026-06-11 | 2026-06-12 |
 | `1-B` | pgvector Migration | `TODO` | — | — | — | — |
 | `1-C` | Org Creation + Invite Flow | `TODO` | — | `1-A` | — | — |
 
 ### Task 1-A — Schema: Org + RBAC Data Model
-- **Status:** `TODO`
-- **Key files to create/modify:**
+- **Status:** `DONE`
+- **Key files created/modified:**
   - `prisma/schema.prisma` (new models + extensions to existing)
-  - New migration file
+  - `prisma/migrations/20260611154517_add_org_rbac_schema/migration.sql` (new)
 - **New models:** `Organization`, `OrganizationMember`, `OrganizationInvite`, `Department`, `DepartmentMember`
-- **Extended models:** `User`, `Project`, `Document`, `Chunk`
-- **Notes:** —
+- **Extended models:** `User` (orgMembers, departmentMembers relations), `Project` (scope, orgId, indexes), `Document` (scope, orgId, departmentId, lifecycle, category, indexes). `Chunk.metadata` was already added in Task 0-A.
+- **Notes:** The teammate applied the migration directly to the KMS AWS RDS database (timestamp `20260611154517`) without committing the migration file to the repo. The migration file was added to the repo retroactively to bring the migration history in sync (`prisma migrate status` shows "Database schema is up to date"). `migrate dev` is blocked by Django table drift on the shared Render DB; the KMS database is the correct target (`DATABASE_URL` in `.env`).
 
 ### Task 1-B — pgvector Migration
 - **Status:** `TODO`
