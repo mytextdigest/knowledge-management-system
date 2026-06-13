@@ -52,7 +52,7 @@
 |---------|-------|--------|----------|------------|---------|-----------|
 | `1-A` | Schema: Org + RBAC Data Model | `DONE` | teammate | — | 2026-06-11 | 2026-06-12 |
 | `1-B` | pgvector Migration | `DONE` | AI agent | — | 2026-06-13 | 2026-06-13 |
-| `1-C` | Org Creation + Invite Flow | `TODO` | — | `1-A` | — | — |
+| `1-C` | Org Creation + Invite Flow | `DONE` | AI agent | `1-A` | 2026-06-13 | 2026-06-13 |
 
 ### Task 1-A — Schema: Org + RBAC Data Model
 - **Status:** `DONE`
@@ -74,18 +74,19 @@
 - **Notes:** Both `embedding Json?` and `embeddingVec vector(1536)?` are kept on the Chunk model. Existing chat routes continue reading from `embedding`; new vector search uses `embedding_vec`. The `<=>` (cosine distance) operator is used for ANN search. Run `node scripts/backfill-embeddings.js` once after applying the migration to backfill existing chunks.
 
 ### Task 1-C — Org Creation + Invite Flow
-- **Status:** `TODO`
-- **Key files to create/modify:**
-  - `src/app/api/org/route.js` (new)
-  - `src/app/api/org/[orgId]/invite/route.js` (new)
-  - `src/app/api/org/[orgId]/settings/route.js` (new)
-  - `src/app/api/org/[orgId]/members/route.js` (new)
-  - `src/app/api/org/invite/[token]/route.js` (new)
-  - `src/app/api/org/invite/[token]/accept/route.js` (new)
-  - `src/components/layout/Sidebar.jsx` (add workspace switcher)
-  - `src/app/(app)/org/[orgId]/settings/page.jsx` (new)
-  - `src/app/(app)/org/invite/[token]/page.jsx` (new)
-- **Notes:** —
+- **Status:** `DONE`
+- **Key files created/modified:**
+  - `src/app/api/org/route.js` (new — GET list orgs, POST create org + auto super_admin)
+  - `src/app/api/org/[orgId]/settings/route.js` (new — GET org info, PATCH name/API key; super_admin only)
+  - `src/app/api/org/[orgId]/members/route.js` (new — GET member list; all org members)
+  - `src/app/api/org/[orgId]/invite/route.js` (new — POST send invite email with token; super_admin only)
+  - `src/app/api/org/invite/[token]/route.js` (new — GET public token validation)
+  - `src/app/api/org/invite/[token]/accept/route.js` (new — POST create member record, mark invite accepted)
+  - `src/components/layout/Header.jsx` (modified — workspace switcher dropdown: Personal + orgs + Create Org)
+  - `src/components/org/CreateOrgModal.jsx` (new — modal for org creation)
+  - `src/app/(app)/org/[orgId]/settings/page.jsx` (new — General/Members/API Key tabs; invite form)
+  - `src/app/org/invite/[token]/page.jsx` (new — invite acceptance page, outside (app) group to skip API-key guard)
+- **Notes:** Workspace switcher placed in `Header.jsx` (global, all pages) rather than the document-filter `Sidebar.jsx`. The invite page lives outside `(app)/` to allow new members who haven't set up a personal OpenAI key to accept invitations. Invite tokens expire in 7 days; email sent via existing nodemailer transporter. `NEXT_PUBLIC_APP_URL` env var controls the base URL in invite emails (falls back to `NEXTAUTH_URL` then `localhost:3000`).
 
 ---
 
@@ -93,19 +94,22 @@
 
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
-| `2-A` | Repository API Layer | `TODO` | — | `1-A` | — | — |
+| `2-A` | Repository API Layer | `DONE` | AI agent | `1-A` | 2026-06-13 | 2026-06-13 |
 | `2-B` | Department Management | `TODO` | — | `1-A`, `1-C` | — | — |
 | `2-C` | Repository UI | `TODO` | — | `2-A` | — | — |
 
 ### Task 2-A — Repository API Layer
-- **Status:** `TODO`
-- **Key files to create/modify:**
-  - `src/lib/orgGuard.js` (new — RBAC middleware)
-  - `src/app/api/documents/route.js` (extend upload to accept repo scope)
-  - `src/app/api/org/[orgId]/repository/route.js` (new)
-  - `src/app/api/documents/[docId]/lifecycle/route.js` (new)
-  - `src/app/api/projects/[projectId]/scope/route.js` (new)
-- **Notes:** —
+- **Status:** `DONE`
+- **Key files created/modified:**
+  - `src/lib/orgGuard.js` (new — `resolveOrgRole(email, orgId)`, `isSuperAdmin()`, `isOrgAdmin()` helpers)
+  - `src/app/api/org/[orgId]/repository/route.js` (new — GET with dept/category/lifecycle/fileType/date/page filters; RBAC in WHERE; draft hidden from non-admins)
+  - `src/app/api/documents/[id]/lifecycle/route.js` (new — PATCH; enforces valid transition table; super_admin or dept_admin only)
+  - `src/app/api/projects/[id]/scope/route.js` (new — PATCH; super_admin only; sets scope=org + orgId)
+  - `src/app/api/documents/ingest/route.js` (extended — accepts scope, orgId, departmentId, category; projectId optional for repository scope; org membership verified; orgId forwarded in SQS message)
+  - `src/app/api/org/[orgId]/settings/route.js` (refactored to use shared resolveOrgRole)
+  - `src/app/api/org/[orgId]/members/route.js` (refactored to use shared resolveOrgRole)
+  - `src/app/api/org/[orgId]/invite/route.js` (refactored to use shared resolveOrgRole)
+- **Notes:** Lifecycle endpoint only applies to `scope=repository` documents. Repository listing merges Source A (scope=repository, orgId match, dept RBAC) and Source B (docs from org-scoped projects) using a single `AND [{ OR: [A, B] }, ...filters]` Prisma query. Lifecycle transition table mirrors the diagram in ARCHITECTURE_DECISIONS.md; `archived → published` is included as a restore path for super_admin.
 
 ### Task 2-B — Department Management
 - **Status:** `TODO`
