@@ -330,10 +330,14 @@ async function processEmbeddingJob(job) {
       input: chunk.text.slice(0, 8000),
     });
 
+    const embVec = emb.data[0].embedding;
     await prisma.chunk.update({
       where: { id: chunk.id },
-      data: { embedding: emb.data[0].embedding },
+      data: { embedding: embVec },
     });
+
+    const embStr = JSON.stringify(embVec);
+    await prisma.$executeRaw`UPDATE "Chunk" SET "embedding_vec" = ${embStr}::vector WHERE id = ${chunk.id}`;
   }
 
   // Mark as embedded
