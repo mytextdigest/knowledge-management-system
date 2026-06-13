@@ -51,7 +51,7 @@
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
 | `1-A` | Schema: Org + RBAC Data Model | `DONE` | teammate | — | 2026-06-11 | 2026-06-12 |
-| `1-B` | pgvector Migration | `TODO` | — | — | — | — |
+| `1-B` | pgvector Migration | `DONE` | AI agent | — | 2026-06-13 | 2026-06-13 |
 | `1-C` | Org Creation + Invite Flow | `TODO` | — | `1-A` | — | — |
 
 ### Task 1-A — Schema: Org + RBAC Data Model
@@ -64,14 +64,14 @@
 - **Notes:** The teammate applied the migration directly to the KMS AWS RDS database (timestamp `20260611154517`) without committing the migration file to the repo. The migration file was added to the repo retroactively to bring the migration history in sync (`prisma migrate status` shows "Database schema is up to date"). `migrate dev` is blocked by Django table drift on the shared Render DB; the KMS database is the correct target (`DATABASE_URL` in `.env`).
 
 ### Task 1-B — pgvector Migration
-- **Status:** `TODO`
-- **Key files to create/modify:**
-  - `prisma/schema.prisma` (Chunk.embedding type change)
-  - New migration file (with `CREATE EXTENSION IF NOT EXISTS vector`)
-  - `worker/openai.js` (use `$executeRaw` for vector insert)
-  - `src/lib/vectorSearch.js` (new — core similarity search utility)
-  - Backfill script (one-time, e.g. `scripts/backfill-embeddings.js`)
-- **Notes:** —
+- **Status:** `DONE`
+- **Key files created/modified:**
+  - `prisma/schema.prisma` (added `embeddingVec Unsupported("vector(1536)")? @map("embedding_vec")` alongside existing `embedding Json?`; added `@@index([documentId])` — done by teammate in commit 5f7607c)
+  - `prisma/migrations/20260613000000_add_pgvector/migration.sql` (new — enables vector extension, adds `embedding_vec` column, creates document_id index)
+  - `worker/index.js` (processEmbeddingJob now writes to both `embedding` JSON and `embedding_vec` vector column via `$executeRaw`)
+  - `src/lib/vectorSearch.js` (new — `similaritySearch()` for project-scoped pgvector search; `orgSearch()` for RBAC-filtered org-wide search)
+  - `scripts/backfill-embeddings.js` (new — one-time script to populate `embedding_vec` from existing JSON embeddings)
+- **Notes:** Both `embedding Json?` and `embeddingVec vector(1536)?` are kept on the Chunk model. Existing chat routes continue reading from `embedding`; new vector search uses `embedding_vec`. The `<=>` (cosine distance) operator is used for ANN search. Run `node scripts/backfill-embeddings.js` once after applying the migration to backfill existing chunks.
 
 ### Task 1-C — Org Creation + Invite Flow
 - **Status:** `TODO`
