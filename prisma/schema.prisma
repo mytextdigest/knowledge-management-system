@@ -187,14 +187,17 @@ model Document {
 }
 
 model Chunk {
-  id         String   @id @default(cuid())
-  chunkIndex Int?     @map("chunk_index")
-  text       String?
-  summary    String?
-  embedding  Json?
-  metadata   Json?
-  documentId String   @map("document_id")
-  document   Document @relation(fields: [documentId], references: [id])
+  id           String                       @id @default(cuid())
+  chunkIndex   Int?                         @map("chunk_index")
+  text         String?
+  summary      String?
+  embedding    Json?
+  embeddingVec Unsupported("vector(1536)")? @map("embedding_vec")
+  metadata     Json?
+  documentId   String                       @map("document_id")
+  document     Document                     @relation(fields: [documentId], references: [id])
+
+  @@index([documentId])
 }
 
 model Conversation {
