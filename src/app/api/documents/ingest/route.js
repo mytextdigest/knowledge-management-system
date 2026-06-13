@@ -8,7 +8,6 @@ import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
-import { resolveOrgRole } from "@/lib/orgGuard";
 
 export async function POST(req) {
   try {
@@ -17,30 +16,17 @@ export async function POST(req) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const formData = await req.formData();
-    const projectId    = formData.get("projectId")    || null;
-    const s3Key        = formData.get("s3Key");
-    const visibility   = formData.get("visibility")   || "private";
-    const scope        = formData.get("scope")        || "private";
-    const orgId        = formData.get("orgId")        || null;
-    const departmentId = formData.get("departmentId") || null;
-    const category     = formData.get("category")     || null;
+    const projectId = formData.get("projectId");
+    const s3Key = formData.get("s3Key");
+    const visibility = formData.get("visibility") || "private";
 
-    if (!s3Key)
-      return NextResponse.json({ error: "Missing s3Key" }, { status: 400 });
 
-    if (!["public", "private"].includes(visibility))
+    if (!projectId || !s3Key) {
+      return NextResponse.json({ error: "Missing projectId or s3Key" }, { status: 400 });
+    }
+
+    if (!["public", "private"].includes(visibility)) {
       return NextResponse.json({ error: "Invalid visibility" }, { status: 400 });
-
-    if (!["private", "project", "repository"].includes(scope))
-      return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
-
-    // repository-scoped uploads require an orgId; all others require a projectId
-    if (scope === "repository") {
-      if (!orgId)
-        return NextResponse.json({ error: "orgId is required for repository scope" }, { status: 400 });
-    } else {
-      if (!projectId)
-        return NextResponse.json({ error: "projectId is required" }, { status: 400 });
     }
 
     const filename = s3Key.split("/").pop();
@@ -56,19 +42,12 @@ export async function POST(req) {
     
     if (!dbUser)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
-
+    
     if (!dbUser.subscription || !dbUser.subscription.plan) {
       return NextResponse.json(
         { error: "No active subscription" },
         { status: 403 }
       );
-    }
-
-    // Verify org membership before accepting a repository-scoped upload
-    if (scope === "repository") {
-      const { role } = await resolveOrgRole(session.user.email, orgId);
-      if (!role)
-        return NextResponse.json({ error: "Forbidden: not an org member" }, { status: 403 });
     }
 
 
@@ -119,11 +98,7 @@ export async function POST(req) {
           filePath: s3Key,
           status: "queued",
           visibility,
-          scope,
-          ...(projectId    ? { project:      { connect: { id: projectId    } } } : {}),
-          ...(orgId        ? { organization: { connect: { id: orgId        } } } : {}),
-          ...(departmentId ? { department:   { connect: { id: departmentId } } } : {}),
-          ...(category     ? { category }                                         : {}),
+          project: { connect: { id: projectId } },
           user: { connect: { id: dbUser.id } },
         },
       }),
@@ -149,7 +124,6 @@ export async function POST(req) {
       filename,
       projectId,
       userId: dbUser.id,
-      orgId,              // worker uses this to resolve the correct OpenAI API key
       visibility,
       regenerate: false
     });

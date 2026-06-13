@@ -1,17 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, Search, Settings, X, Key, CheckCircle2, XCircle, Loader2, Eye, EyeOff, ExternalLink, HelpCircle, Building2, ChevronDown, Plus, User } from 'lucide-react';
+import { FileText, Search, Settings, X, Key, CheckCircle2, XCircle, Loader2, Eye, EyeOff, ExternalLink, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
 import LogoutButton from '../ui/LogoutButton';
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { useSession } from "next-auth/react";
 import Image from 'next/image';
 import { useTheme } from 'next-themes';
-import CreateOrgModal from '@/components/org/CreateOrgModal';
 // import { applyTheme, getStoredTheme, setStoredTheme } from "@/lib/theme";
 
 
@@ -23,36 +22,8 @@ const Header = ({
   className
 }) => {
   const router = useRouter();
-  const pathname = usePathname();
+  // const [theme, setTheme] = useState("light");
   const [settingsOpen, setSettingsOpen] = useState(false);
-
-  // Workspace switcher state
-  const [orgs, setOrgs] = useState([]);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
-  const [showCreateOrgModal, setShowCreateOrgModal] = useState(false);
-  const switcherRef = useRef(null);
-
-  // Derive active org from URL
-  const orgIdFromPath = pathname?.match(/^\/org\/([^/]+)/)?.[1] ?? null;
-  const activeOrg = orgs.find((o) => o.id === orgIdFromPath) ?? null;
-
-  useEffect(() => {
-    fetch("/api/org")
-      .then((r) => r.json())
-      .then((data) => Array.isArray(data) && setOrgs(data))
-      .catch(() => {});
-  }, []);
-
-  // Close switcher on outside click
-  useEffect(() => {
-    function handleClickOutside(e) {
-      if (switcherRef.current && !switcherRef.current.contains(e.target)) {
-        setSwitcherOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
   const [isClient, setIsClient] = useState(false);
   const [activeTab, setActiveTab] = useState('general'); // 'general' or 'apikey'
   const [apiKey, setApiKey] = useState('');
@@ -268,78 +239,6 @@ const Header = ({
               </p>
             </div>
           </motion.div>
-
-          {/* Workspace Switcher */}
-          <div className="relative" ref={switcherRef}>
-            <button
-              onClick={() => setSwitcherOpen((o) => !o)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-            >
-              {activeOrg ? (
-                <Building2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-              ) : (
-                <User className="h-4 w-4 text-gray-500" />
-              )}
-              <span className="max-w-[120px] truncate">
-                {activeOrg ? activeOrg.name : "Personal"}
-              </span>
-              <ChevronDown className="h-3 w-3 text-gray-400" />
-            </button>
-
-            <AnimatePresence>
-              {switcherOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6, scale: 0.97 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                  transition={{ duration: 0.12 }}
-                  className="absolute left-0 top-full mt-1 w-52 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-50 py-1"
-                >
-                  {/* Personal */}
-                  <button
-                    onClick={() => { router.push("/dashboard"); setSwitcherOpen(false); }}
-                    className={cn(
-                      "w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800",
-                      !activeOrg ? "text-blue-600 dark:text-blue-400 font-medium" : "text-gray-700 dark:text-gray-300"
-                    )}
-                  >
-                    <User className="h-4 w-4" />
-                    Personal
-                    {!activeOrg && <CheckCircle2 className="h-3.5 w-3.5 ml-auto" />}
-                  </button>
-
-                  {orgs.length > 0 && (
-                    <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
-                  )}
-
-                  {orgs.map((org) => (
-                    <button
-                      key={org.id}
-                      onClick={() => { router.push(`/org/${org.id}/settings`); setSwitcherOpen(false); }}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800",
-                        activeOrg?.id === org.id ? "text-blue-600 dark:text-blue-400 font-medium" : "text-gray-700 dark:text-gray-300"
-                      )}
-                    >
-                      <Building2 className="h-4 w-4" />
-                      <span className="truncate">{org.name}</span>
-                      {activeOrg?.id === org.id && <CheckCircle2 className="h-3.5 w-3.5 ml-auto flex-shrink-0" />}
-                    </button>
-                  ))}
-
-                  <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
-
-                  <button
-                    onClick={() => { setShowCreateOrgModal(true); setSwitcherOpen(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Create Organization
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
 
           {/* Actions */}
           <div className="flex items-center space-x-2">
@@ -784,16 +683,6 @@ const Header = ({
           </>
         )}
       </AnimatePresence>
-
-      {showCreateOrgModal && (
-        <CreateOrgModal
-          onClose={() => setShowCreateOrgModal(false)}
-          onCreate={(org) => {
-            setOrgs((prev) => [...prev, org]);
-            router.push(`/org/${org.id}/settings`);
-          }}
-        />
-      )}
     </motion.header>
   );
 };
