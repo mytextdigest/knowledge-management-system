@@ -21,7 +21,7 @@ export async function GET(req, { params }) {
       id: projectId,
       user: { email: session.user.email },
     },
-    select: { id: true, name: true, description: true, createdAt: true },
+    select: { id: true, name: true, description: true, createdAt: true,scope: true, orgId: true },
   });
 
   if (!project) return NextResponse.json(null, { status: 404 });
