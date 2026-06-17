@@ -11,7 +11,7 @@ export async function GET(req, { params }) {
   const { orgId } = await params;
   const { user, role } = await resolveOrgRole(session.user.email, orgId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
-  if (role !== "super_admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
@@ -23,6 +23,7 @@ export async function GET(req, { params }) {
     id: org.id,
     name: org.name,
     hasApiKey: !!org.openaiApiKey,
+    role,
   });
 }
 
