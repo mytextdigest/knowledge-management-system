@@ -14,6 +14,7 @@ const CATEGORIES = [
 
 export default function UploadToRepositoryModal({
   orgId,
+  userId,
   departments = [],
   open,
   onClose,
@@ -36,27 +37,56 @@ export default function UploadToRepositoryModal({
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("scope", "repository");
-    formData.append("orgId", orgId);
-    formData.append("category", category);
-
-    if (departmentId) {
-      formData.append("departmentId", departmentId);
+    if (!userId) {
+      setError("You must be signed in to upload.");
+      return;
     }
 
     try {
       setIsUploading(true);
 
-      const res = await fetch("/api/documents", {
+      const presignRes = await fetch("/api/s3/upload", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type,
+          userId,
+          orgId,
+        }),
+      });
+      const presignData = await presignRes.json().catch(() => ({}));
+
+      if (!presignRes.ok) {
+        throw new Error(presignData.error || "Failed to prepare upload.");
+      }
+
+      const { url, fields, key } = presignData;
+
+      const s3Form = new FormData();
+      Object.entries(fields).forEach(([k, v]) => s3Form.append(k, v));
+      s3Form.append("file", file);
+
+      const s3Res = await fetch(url, { method: "POST", body: s3Form });
+      if (!s3Res.ok) {
+        throw new Error("S3 upload failed.");
+      }
+
+      const ingestForm = new FormData();
+      ingestForm.append("s3Key", key);
+      ingestForm.append("scope", "repository");
+      ingestForm.append("orgId", orgId);
+      ingestForm.append("category", category);
+      if (departmentId) ingestForm.append("departmentId", departmentId);
+
+      const ingestRes = await fetch("/api/documents/ingest", {
+        method: "POST",
+        body: ingestForm,
       });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Upload failed.");
+      if (!ingestRes.ok) {
+        const data = await ingestRes.json().catch(() => ({}));
+        throw new Error(data.error || "Ingestion failed.");
       }
 
       setFile(null);

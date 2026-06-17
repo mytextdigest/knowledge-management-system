@@ -73,7 +73,7 @@ const Sidebar = ({
         },
         {
           label: "Departments",
-          href: `/org/${orgId}/departments`,
+          href: `/org/${orgId}/settings?tab=departments`,
           icon: Users,
         },
         {

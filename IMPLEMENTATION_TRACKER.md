@@ -96,7 +96,7 @@
 |---------|-------|--------|----------|------------|---------|-----------|
 | `2-A` | Repository API Layer | `DONE` | AI agent | `1-A` | 2026-06-13 | 2026-06-13 |
 | `2-B` | Department Management | `DONE` | SimranSattar + AI agent | `1-A`, `1-C` | 2026-06-16 | 2026-06-17 |
-| `2-C` | Repository UI | `TODO` | — | `2-A` | — | — |
+| `2-C` | Repository UI | `DONE` | Sandeep Raj Katipagala + AI agent | `2-A` | 2026-06-16 | 2026-06-17 |
 
 ### Task 2-A — Repository API Layer
 - **Status:** `DONE`
@@ -125,15 +125,17 @@
 - **Notes:** The original PR (commit `79fbbc4`, SimranSattar) only implemented department list/create — no member assignment was possible, so the acceptance criteria around dept_admin-scoped member management and document-access scoping by department couldn't be exercised. Completed by adding the member sub-resource routes and UI, and wiring the per-department admin check (`DepartmentMember.role`) distinct from the org-wide `dept_admin` role. Verified with `next build` (production build compiles and all routes register correctly).
 
 ### Task 2-C — Repository UI
-- **Status:** `TODO`
-- **Key files to create/modify:**
-  - `src/app/(app)/org/[orgId]/repository/page.jsx` (new)
-  - `src/components/repository/RepositoryDocumentCard.jsx` (new)
-  - `src/components/repository/RepositoryFilters.jsx` (new)
-  - `src/components/repository/UploadToRepositoryModal.jsx` (new)
-  - `src/components/layout/Sidebar.jsx` (org nav items)
-  - `src/app/(app)/project/page.jsx` (add promote-to-org toggle)
-- **Notes:** —
+- **Status:** `DONE`
+- **Key files created/modified:**
+  - `src/app/(app)/org/[orgId]/repository/page.jsx` (PR base — filter bar, document grid, upload button, pagination; fixed to call the singular `/api/org/[orgId]/department` route, map the `departmentId` filter to the API's `dept` query param, reset to page 1 on filter change, and surface `total`/`totalPages` from the repository API)
+  - `src/components/repository/RepositoryDocumentCard.jsx` (PR base — lifecycle badge colors, dept/category tags, file type — unchanged)
+  - `src/components/repository/RepositoryFilters.jsx` (PR base — dept/category/fileType/lifecycle selects; added the missing date-range (`dateFrom`/`dateTo`) inputs from the plan's filter bar spec)
+  - `src/components/repository/UploadToRepositoryModal.jsx` (PR base posted the raw file straight to `POST /api/documents`, which has no POST handler — uploads always 405'd. Rewired to the real flow: presign via `/api/s3/upload` → upload to S3 → `POST /api/documents/ingest` with `s3Key`, `scope=repository`, `orgId`, `departmentId`, `category`, matching the pattern already used by `project/page.jsx`)
+  - `src/app/api/s3/upload/route.js` (extended — `projectId` was hard-required, blocking repository-scoped uploads which have no project; now accepts `orgId` as an alternative, builds the S3 key as `uploads/{userId}/org/{orgId}/{fileName}`, and skips the project-scoped duplicate-filename check in that path. Project-scoped uploads are unaffected.)
+  - `src/components/layout/Sidebar.jsx` (org nav items — fixed the "Departments" link from a non-existent standalone `/org/[orgId]/departments` page to `/org/[orgId]/settings?tab=departments`, since department management lives inside the Settings tabs per Task 2-B)
+  - `src/app/(app)/org/[orgId]/settings/page.jsx` (added `?tab=` deep-link support so the Sidebar's Departments link opens directly on the Departments tab)
+  - `src/app/(app)/project/page.jsx` (PR base — "Share with Organization" toggle, org picker, confirmation dialog, calls `PATCH /api/projects/[id]/scope`; verified correct, no changes needed)
+- **Notes:** The original PR (commit `82a551c`, Sandeep Raj Katipagala) was built against the pre-2-B API surface and had a critical bug (upload always failed — wrong endpoint, wrong flow) plus two endpoint/param naming mismatches against the real 2-A/2-B routes (`/departments` vs `/department`, `departmentId` vs `dept`), and was missing the date-range filter from the plan. All fixed; pagination added on top of the existing `page`/`totalPages` API response fields, which the original UI never surfaced. Verified with `next build` (production build compiles, all routes register correctly).
 
 ---
 

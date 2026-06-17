@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   Building2, Users, Key, Eye, EyeOff, Loader2,
@@ -22,6 +22,8 @@ const INVITE_ROLES = ['dept_admin', 'employee', 'guest'];
 export default function OrgSettingsPage() {
   const { orgId } = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get('tab');
 
   const [org, setOrg] = useState(null);
   const [members, setMembers] = useState([]);
@@ -69,7 +71,15 @@ export default function OrgSettingsPage() {
       setEditName(settingsData.name);
       setMembers(Array.isArray(membersData) ? membersData : []);
       setDepartments(Array.isArray(departmentsData) ? departmentsData : []);
-      setActiveTab(settingsData.role === 'super_admin' ? 'general' : 'members');
+
+      const validTabs = settingsData.role === 'super_admin'
+        ? ['general', 'members', 'departments', 'apikey']
+        : ['members', 'departments'];
+      setActiveTab(
+        validTabs.includes(requestedTab)
+          ? requestedTab
+          : (settingsData.role === 'super_admin' ? 'general' : 'members')
+      );
     }).finally(() => setLoading(false));
   }, [orgId]);
 

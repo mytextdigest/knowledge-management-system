@@ -4,20 +4,40 @@ import RepositoryDocumentCard from "@/components/repository/RepositoryDocumentCa
 import RepositoryFilters from "@/components/repository/RepositoryFilters";
 import UploadToRepositoryModal from "@/components/repository/UploadToRepositoryModal";
 import { use, useEffect, useMemo, useState } from "react";
+import { useSession } from "next-auth/react";
+
+// Keys here are RepositoryFilters' own field names; values are the query
+// param names the GET /api/org/[orgId]/repository route actually reads.
+const FILTER_PARAM_MAP = {
+  departmentId: "dept",
+  category: "category",
+  lifecycle: "lifecycle",
+  fileType: "fileType",
+  dateFrom: "dateFrom",
+  dateTo: "dateTo",
+};
+
 const initialFilters = {
   departmentId: "",
   category: "",
   lifecycle: "",
   fileType: "",
+  dateFrom: "",
+  dateTo: "",
 };
 
 export default function RepositoryPage({ params }) {
   const resolvedParams = use(params);
   const orgId = resolvedParams?.orgId;
+  const { data: session } = useSession();
+  const userId = session?.user?.id;
 
   const [documents, setDocuments] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [filters, setFilters] = useState(initialFilters);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -26,11 +46,12 @@ export default function RepositoryPage({ params }) {
     const search = new URLSearchParams();
 
     Object.entries(filters).forEach(([key, value]) => {
-      if (value) search.set(key, value);
+      if (value) search.set(FILTER_PARAM_MAP[key] || key, value);
     });
+    search.set("page", String(page));
 
     return search.toString();
-  }, [filters]);
+  }, [filters, page]);
 
   async function loadRepository() {
     if (!orgId) return;
@@ -53,6 +74,8 @@ export default function RepositoryPage({ params }) {
       const data = await res.json();
 
       setDocuments(data.documents || data || []);
+      setTotalPages(data.totalPages || 1);
+      setTotal(data.total ?? (Array.isArray(data) ? data.length : 0));
     } catch (err) {
       setError(err.message || "Failed to load repository.");
       setDocuments([]);
@@ -65,12 +88,12 @@ export default function RepositoryPage({ params }) {
     if (!orgId) return;
 
     try {
-      const res = await fetch(`/api/org/${orgId}/departments`);
+      const res = await fetch(`/api/org/${orgId}/department`);
 
       if (!res.ok) return;
 
       const data = await res.json();
-      setDepartments(data.departments || data || []);
+      setDepartments(Array.isArray(data) ? data : []);
     } catch {
       setDepartments([]);
     }
@@ -79,6 +102,18 @@ export default function RepositoryPage({ params }) {
   useEffect(() => {
     loadDepartments();
   }, [orgId]);
+
+  // Any filter change should reset back to page 1
+  useEffect(() => {
+    setPage(1);
+  }, [
+    filters.departmentId,
+    filters.category,
+    filters.lifecycle,
+    filters.fileType,
+    filters.dateFrom,
+    filters.dateTo,
+  ]);
 
   useEffect(() => {
     loadRepository();
@@ -141,8 +176,35 @@ export default function RepositoryPage({ params }) {
         </div>
       )}
 
+      {!loading && documents.length > 0 && totalPages > 1 ? (
+        <div className="flex items-center justify-between rounded-xl border bg-white p-3 text-sm text-gray-600">
+          <span>
+            Page {page} of {totalPages} ({total} documents)
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded-md border px-3 py-1.5 disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="rounded-md border px-3 py-1.5 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <UploadToRepositoryModal
         orgId={orgId}
+        userId={userId}
         departments={departments}
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
