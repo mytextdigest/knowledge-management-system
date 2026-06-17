@@ -22,3 +22,16 @@ export function isSuperAdmin(role) {
 export function isOrgAdmin(role) {
   return role === "super_admin" || role === "dept_admin";
 }
+
+// super_admin can manage any department; an org-level dept_admin can only
+// manage departments where they hold a DepartmentMember.role of "admin".
+export async function canManageDepartment(orgRole, departmentId, userId) {
+  if (orgRole === "super_admin") return true;
+  if (orgRole !== "dept_admin") return false;
+
+  const membership = await prisma.departmentMember.findUnique({
+    where: { departmentId_userId: { departmentId, userId } },
+    select: { role: true },
+  });
+  return membership?.role === "admin";
+}

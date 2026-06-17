@@ -95,7 +95,7 @@
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
 | `2-A` | Repository API Layer | `DONE` | AI agent | `1-A` | 2026-06-13 | 2026-06-13 |
-| `2-B` | Department Management | `TODO` | — | `1-A`, `1-C` | — | — |
+| `2-B` | Department Management | `DONE` | SimranSattar + AI agent | `1-A`, `1-C` | 2026-06-16 | 2026-06-17 |
 | `2-C` | Repository UI | `TODO` | — | `2-A` | — | — |
 
 ### Task 2-A — Repository API Layer
@@ -112,12 +112,17 @@
 - **Notes:** Lifecycle endpoint only applies to `scope=repository` documents. Repository listing merges Source A (scope=repository, orgId match, dept RBAC) and Source B (docs from org-scoped projects) using a single `AND [{ OR: [A, B] }, ...filters]` Prisma query. Lifecycle transition table mirrors the diagram in ARCHITECTURE_DECISIONS.md; `archived → published` is included as a restore path for super_admin.
 
 ### Task 2-B — Department Management
-- **Status:** `TODO`
-- **Key files to create/modify:**
-  - `src/app/api/org/[orgId]/departments/route.js` (new)
-  - `src/app/api/org/[orgId]/departments/[deptId]/members/route.js` (new)
-  - `src/app/(app)/org/[orgId]/settings/page.jsx` (add departments tab)
-- **Notes:** —
+- **Status:** `DONE`
+- **Key files created/modified:**
+  - `src/app/api/org/[orgId]/department/route.js` (PR base — GET list w/ member+doc counts, POST create; `isOrgAdmin` only)
+  - `src/app/api/org/[orgId]/department/[deptId]/members/route.js` (new — GET list dept members, POST add/update a member's dept role; upserts by email, requires target user to already be an org member)
+  - `src/app/api/org/[orgId]/department/[deptId]/members/[userId]/route.js` (new — DELETE removes a member from the department)
+  - `src/lib/orgGuard.js` (added `canManageDepartment(orgRole, departmentId, userId)` — true for `super_admin`; for org-level `dept_admin` only if they hold a `DepartmentMember.role = "admin"` row for that specific department)
+  - `src/app/(app)/org/[orgId]/settings/page.jsx` (added "Departments" tab: create form, expandable department list showing member counts, per-department member list with add/remove and admin/member role select; gated `General`/`API Key` tabs to `super_admin` only and the invite form likewise, since the settings GET route is no longer super_admin-only)
+  - `src/app/api/org/[orgId]/settings/route.js` (GET relaxed from `super_admin`-only to any org member, now also returns the caller's `role` so the frontend can branch on it; PATCH unchanged/still `super_admin`-only)
+  - `src/app/(app)/org/[orgId]/department/page.jsx` (removed — orphaned standalone page from the original PR, not linked from any nav; functionality folded into the Settings "Departments" tab per the plan)
+  - `src/app/api/org/[orgId]/invite/route.js` (unrelated pre-existing bug fixed in passing — `role` was destructured twice in the same function scope, a `SyntaxError` that broke the production build; renamed the caller's role to `callerRole`)
+- **Notes:** The original PR (commit `79fbbc4`, SimranSattar) only implemented department list/create — no member assignment was possible, so the acceptance criteria around dept_admin-scoped member management and document-access scoping by department couldn't be exercised. Completed by adding the member sub-resource routes and UI, and wiring the per-department admin check (`DepartmentMember.role`) distinct from the org-wide `dept_admin` role. Verified with `next build` (production build compiles and all routes register correctly).
 
 ### Task 2-C — Repository UI
 - **Status:** `TODO`

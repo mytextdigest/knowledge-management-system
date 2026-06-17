@@ -13,9 +13,9 @@ export async function POST(req, { params }) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { orgId } = await params;
-  const { user, role } = await resolveOrgRole(session.user.email, orgId);
+  const { user, role: callerRole } = await resolveOrgRole(session.user.email, orgId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
-  if (role !== "super_admin")
+  if (callerRole !== "super_admin")
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { email, role = "employee" } = await req.json();

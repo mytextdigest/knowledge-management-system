@@ -4,7 +4,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   Building2, Users, Key, Eye, EyeOff, Loader2,
-  CheckCircle2, ArrowLeft, Mail, Shield,
+  CheckCircle2, ArrowLeft, Mail, Shield, Layers,
+  Plus, ChevronDown, ChevronUp, UserPlus, Trash2,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
@@ -44,17 +45,123 @@ export default function OrgSettingsPage() {
   const [inviting, setInviting] = useState(false);
   const [inviteStatus, setInviteStatus] = useState(null);
 
+  // Departments
+  const [departments, setDepartments] = useState([]);
+  const [deptName, setDeptName] = useState('');
+  const [creatingDept, setCreatingDept] = useState(false);
+  const [deptError, setDeptError] = useState('');
+  const [expandedDeptId, setExpandedDeptId] = useState(null);
+  const [deptMembers, setDeptMembers] = useState([]);
+  const [loadingDeptMembers, setLoadingDeptMembers] = useState(false);
+  const [addMemberEmail, setAddMemberEmail] = useState('');
+  const [addMemberRole, setAddMemberRole] = useState('member');
+  const [addingMember, setAddingMember] = useState(false);
+  const [memberActionError, setMemberActionError] = useState('');
+
   useEffect(() => {
     Promise.all([
       fetch(`/api/org/${orgId}/settings`).then((r) => r.json()),
       fetch(`/api/org/${orgId}/members`).then((r) => r.json()),
-    ]).then(([settingsData, membersData]) => {
+      fetch(`/api/org/${orgId}/department`).then((r) => r.json()),
+    ]).then(([settingsData, membersData, departmentsData]) => {
       if (settingsData.error) { router.replace('/dashboard'); return; }
       setOrg(settingsData);
       setEditName(settingsData.name);
       setMembers(Array.isArray(membersData) ? membersData : []);
+      setDepartments(Array.isArray(departmentsData) ? departmentsData : []);
+      setActiveTab(settingsData.role === 'super_admin' ? 'general' : 'members');
     }).finally(() => setLoading(false));
   }, [orgId]);
+
+  const canManageDepartments = org?.role === 'super_admin' || org?.role === 'dept_admin';
+
+  const createDepartment = async () => {
+    if (!deptName.trim()) return;
+    setCreatingDept(true);
+    setDeptError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/department`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: deptName }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setDeptError(data.error || 'Failed to create department.'); return; }
+      setDepartments((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      setDeptName('');
+    } catch { setDeptError('Failed to create department.'); }
+    finally { setCreatingDept(false); }
+  };
+
+  const toggleDepartment = async (deptId) => {
+    if (expandedDeptId === deptId) {
+      setExpandedDeptId(null);
+      setDeptMembers([]);
+      return;
+    }
+    setExpandedDeptId(deptId);
+    setMemberActionError('');
+    setLoadingDeptMembers(true);
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${deptId}/members`);
+      const data = await res.json();
+      setDeptMembers(Array.isArray(data) ? data : []);
+    } catch {
+      setDeptMembers([]);
+    } finally {
+      setLoadingDeptMembers(false);
+    }
+  };
+
+  const bumpMemberCount = (deptId, delta) => {
+    setDepartments((prev) =>
+      prev.map((d) =>
+        d.id === deptId
+          ? { ...d, _count: { ...d._count, members: (d._count?.members || 0) + delta } }
+          : d
+      )
+    );
+  };
+
+  const addDeptMember = async (deptId) => {
+    if (!addMemberEmail.trim()) return;
+    setAddingMember(true);
+    setMemberActionError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${deptId}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: addMemberEmail, role: addMemberRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMemberActionError(data.error || 'Failed to add member.'); return; }
+      setDeptMembers((prev) => {
+        const exists = prev.some((m) => m.userId === data.userId);
+        if (exists) return prev.map((m) => (m.userId === data.userId ? data : m));
+        bumpMemberCount(deptId, 1);
+        return [...prev, data];
+      });
+      setAddMemberEmail('');
+      setAddMemberRole('member');
+    } catch { setMemberActionError('Failed to add member.'); }
+    finally { setAddingMember(false); }
+  };
+
+  const removeDeptMember = async (deptId, userId) => {
+    setMemberActionError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${deptId}/members/${userId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setMemberActionError(data.error || 'Failed to remove member.');
+        return;
+      }
+      setDeptMembers((prev) => prev.filter((m) => m.userId !== userId));
+      bumpMemberCount(deptId, -1);
+    } catch { setMemberActionError('Failed to remove member.'); }
+  };
 
   const saveName = async () => {
     if (!editName.trim() || editName === org.name) return;
@@ -120,9 +227,10 @@ export default function OrgSettingsPage() {
   }
 
   const tabs = [
-    { id: 'general', label: 'General', icon: Building2 },
+    ...(org?.role === 'super_admin' ? [{ id: 'general', label: 'General', icon: Building2 }] : []),
     { id: 'members', label: 'Members', icon: Users },
-    { id: 'apikey', label: 'API Key', icon: Key },
+    { id: 'departments', label: 'Departments', icon: Layers },
+    ...(org?.role === 'super_admin' ? [{ id: 'apikey', label: 'API Key', icon: Key }] : []),
   ];
 
   return (
@@ -236,42 +344,181 @@ export default function OrgSettingsPage() {
             </div>
 
             {/* Invite form */}
-            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
-                <Mail className="h-4 w-4" /> Invite Member
-              </h3>
-              <div className="flex gap-2 flex-wrap">
-                <input
-                  type="email"
-                  placeholder="email@example.com"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  className="flex-1 min-w-0 p-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value)}
-                  className="p-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {INVITE_ROLES.map((r) => (
-                    <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={sendInvite}
-                  disabled={inviting || !inviteEmail.trim()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-                >
-                  {inviting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Send Invite
-                </button>
+            {org?.role === 'super_admin' && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+                  <Mail className="h-4 w-4" /> Invite Member
+                </h3>
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    type="email"
+                    placeholder="email@example.com"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="flex-1 min-w-0 p-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <select
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value)}
+                    className="p-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {INVITE_ROLES.map((r) => (
+                      <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={sendInvite}
+                    disabled={inviting || !inviteEmail.trim()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {inviting && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Send Invite
+                  </button>
+                </div>
+                {inviteStatus && (
+                  <p className={cn('mt-2 text-sm', inviteStatus.type === 'success' ? 'text-green-600' : 'text-red-600')}>
+                    {inviteStatus.msg}
+                  </p>
+                )}
               </div>
-              {inviteStatus && (
-                <p className={cn('mt-2 text-sm', inviteStatus.type === 'success' ? 'text-green-600' : 'text-red-600')}>
-                  {inviteStatus.msg}
-                </p>
-              )}
-            </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* Departments tab */}
+        {activeTab === 'departments' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            {canManageDepartments && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+                  <Plus className="h-4 w-4" /> Create Department
+                </h3>
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    type="text"
+                    placeholder="Example: Engineering"
+                    value={deptName}
+                    onChange={(e) => setDeptName(e.target.value)}
+                    className="flex-1 min-w-0 p-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={createDepartment}
+                    disabled={creatingDept || !deptName.trim()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {creatingDept && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Create
+                  </button>
+                </div>
+                {deptError && <p className="mt-2 text-sm text-red-600">{deptError}</p>}
+              </div>
+            )}
+
+            {departments.length === 0 ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-8 text-center text-sm text-gray-500">
+                No departments yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {departments.map((dept) => (
+                  <div key={dept.id} className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <button
+                      onClick={() => toggleDepartment(dept.id)}
+                      className="w-full flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Layers className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <span className="font-medium text-gray-900 dark:text-gray-100">{dept.name}</span>
+                        <span className="text-xs text-gray-500">
+                          {dept._count?.members || 0} member{dept._count?.members === 1 ? '' : 's'} ·{' '}
+                          {dept._count?.documents || 0} doc{dept._count?.documents === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      {expandedDeptId === dept.id ? (
+                        <ChevronUp className="h-4 w-4 text-gray-500" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-gray-500" />
+                      )}
+                    </button>
+
+                    {expandedDeptId === dept.id && (
+                      <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800/50 space-y-4">
+                        {loadingDeptMembers ? (
+                          <div className="flex justify-center py-6">
+                            <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                          </div>
+                        ) : deptMembers.length === 0 ? (
+                          <p className="text-sm text-gray-500">No members in this department yet.</p>
+                        ) : (
+                          <ul className="space-y-2">
+                            {deptMembers.map((m) => (
+                              <li
+                                key={m.userId}
+                                className="flex items-center justify-between rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 px-3 py-2"
+                              >
+                                <div>
+                                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{m.name || m.email}</p>
+                                  <p className="text-xs text-gray-500">{m.email}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className={cn(
+                                    'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+                                    m.role === 'admin'
+                                      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                                      : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                                  )}>
+                                    {m.role === 'admin' && <Shield className="h-3 w-3" />}
+                                    {m.role === 'admin' ? 'Admin' : 'Member'}
+                                  </span>
+                                  {canManageDepartments && (
+                                    <button
+                                      onClick={() => removeDeptMember(dept.id, m.userId)}
+                                      className="text-gray-400 hover:text-red-600"
+                                      title="Remove from department"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {canManageDepartments && (
+                          <div className="flex gap-2 flex-wrap pt-2 border-t border-gray-200 dark:border-gray-700">
+                            <input
+                              type="email"
+                              placeholder="email@example.com"
+                              value={addMemberEmail}
+                              onChange={(e) => setAddMemberEmail(e.target.value)}
+                              className="flex-1 min-w-0 p-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <select
+                              value={addMemberRole}
+                              onChange={(e) => setAddMemberRole(e.target.value)}
+                              className="p-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="member">Member</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                            <button
+                              onClick={() => addDeptMember(dept.id)}
+                              disabled={addingMember || !addMemberEmail.trim()}
+                              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 text-sm"
+                            >
+                              {addingMember ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                              Add
+                            </button>
+                          </div>
+                        )}
+                        {memberActionError && <p className="text-sm text-red-600">{memberActionError}</p>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </motion.div>
         )}
 
