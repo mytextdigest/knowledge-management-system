@@ -199,10 +199,10 @@ export default function DepartmentPage({ params }) {
       <div>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
               {department?.name || "Department"}
             </h1>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Documents and projects scoped to this department.
             </p>
           </div>
@@ -228,12 +228,14 @@ export default function DepartmentPage({ params }) {
         </div>
       </div>
 
-      <div className="flex gap-1 border-b border-gray-200">
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
         <button
           type="button"
           onClick={() => setTab("documents")}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            tab === "documents" ? "border-black text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"
+            tab === "documents"
+              ? "border-black dark:border-white text-gray-900 dark:text-gray-100"
+              : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
           }`}
         >
           Documents
@@ -242,7 +244,9 @@ export default function DepartmentPage({ params }) {
           type="button"
           onClick={() => setTab("projects")}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            tab === "projects" ? "border-black text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"
+            tab === "projects"
+              ? "border-black dark:border-white text-gray-900 dark:text-gray-100"
+              : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
           }`}
         >
           Projects
@@ -254,19 +258,19 @@ export default function DepartmentPage({ params }) {
           <RepositoryFilters filters={filters} hideDepartmentFilter onChange={setFilters} />
 
           {docsError ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
               {docsError}
             </div>
           ) : null}
 
           {docsLoading ? (
-            <div className="rounded-xl border bg-white p-6 text-sm text-gray-500">
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-500 dark:text-gray-400">
               Loading documents...
             </div>
           ) : documents.length === 0 ? (
-            <div className="rounded-xl border bg-white p-8 text-center">
-              <h2 className="text-lg font-semibold text-gray-900">No documents found</h2>
-              <p className="mt-2 text-sm text-gray-500">
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">No documents found</h2>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
                 Upload documents or adjust filters to see this department's knowledge.
               </p>
             </div>
@@ -279,14 +283,14 @@ export default function DepartmentPage({ params }) {
           )}
 
           {!docsLoading && documents.length > 0 && totalPages > 1 ? (
-            <div className="flex items-center justify-between rounded-xl border bg-white p-3 text-sm text-gray-600">
+            <div className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-sm text-gray-600 dark:text-gray-300">
               <span>Page {page} of {totalPages} ({total} documents)</span>
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="rounded-md border px-3 py-1.5 disabled:opacity-50"
+                  className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 disabled:opacity-50"
                 >
                   Previous
                 </button>
@@ -294,7 +298,7 @@ export default function DepartmentPage({ params }) {
                   type="button"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="rounded-md border px-3 py-1.5 disabled:opacity-50"
+                  className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 disabled:opacity-50"
                 >
                   Next
                 </button>
@@ -314,16 +318,16 @@ export default function DepartmentPage({ params }) {
       ) : (
         <>
           {projectsLoading ? (
-            <div className="rounded-xl border bg-white p-6 text-sm text-gray-500">
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-500 dark:text-gray-400">
               Loading projects...
             </div>
           ) : projects.length === 0 ? (
-            <div className="rounded-xl border bg-white p-8 text-center">
-              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                <FolderKanban className="w-8 h-8 text-gray-500" />
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
+                <FolderKanban className="w-8 h-8 text-gray-500 dark:text-gray-400" />
               </div>
-              <h2 className="text-lg font-semibold text-gray-900">No projects yet</h2>
-              <p className="mt-2 text-sm text-gray-500 mb-4">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">No projects yet</h2>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 mb-4">
                 Create the first project for this department.
               </p>
               <button
@@ -339,7 +343,7 @@ export default function DepartmentPage({ params }) {
               {projects.map((project) => (
                 <div
                   key={project.id}
-                  className="group relative bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-all hover:shadow-lg overflow-hidden"
+                  className="group relative bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-all hover:shadow-lg overflow-hidden"
                 >
                   <div className="relative p-6">
                     <div className="flex items-center justify-between mb-4">
@@ -348,14 +352,14 @@ export default function DepartmentPage({ params }) {
                       </div>
                       <div className="flex items-center space-x-1">
                         <button
-                          className="opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-lg hover:bg-blue-50"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20"
                           onClick={(e) => { e.stopPropagation(); setEditTarget(project); }}
                           title="Edit Project"
                         >
                           <Pencil className="w-4 h-4 text-blue-500" />
                         </button>
                         <button
-                          className="opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-lg hover:bg-red-50"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
                           onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: project.id, name: project.name }); }}
                           title="Delete Project"
                         >
@@ -365,13 +369,13 @@ export default function DepartmentPage({ params }) {
                     </div>
 
                     <div onClick={() => openProject(project.id)} className="cursor-pointer">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2 group-hover:text-primary-600 transition-colors">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
                         {project.name}
                       </h3>
-                      <p className="text-gray-600 mb-4 text-sm line-clamp-2">
+                      <p className="text-gray-600 dark:text-gray-400 mb-4 text-sm line-clamp-2">
                         {project.description || "No description provided"}
                       </p>
-                      <span className="text-sm text-gray-500">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">
                         {new Date(project.created_at).toLocaleDateString()} · {project.user?.name || project.user?.email}
                       </span>
                     </div>
