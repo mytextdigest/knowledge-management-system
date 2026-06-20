@@ -7,7 +7,8 @@ import TopicsView from '@/components/topics/TopicsView';
 import FileUpload from '@/components/documents/FileUpload';
 import { Modal, ModalHeader, ModalTitle, ModalContent } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Pencil } from 'lucide-react';
+import { Pencil } from 'lucide-react';
+import BackButton from '@/components/ui/BackButton';
 import { motion } from 'framer-motion';
 import ChatInterface from "@/components/chat/ChatInterface";
 import TwoColumnLayout from "@/components/layout/TwoColumnLayout";
@@ -46,11 +47,6 @@ function ProjectPageInner() {
   const [showEditProjectModal, setShowEditProjectModal] = useState(false);
   const [isEditingProject, setIsEditingProject] = useState(false);
 
-  const [orgs, setOrgs] = useState([]);
-  const [selectedOrgId, setSelectedOrgId] = useState("");
-  const [isSharingProject, setIsSharingProject] = useState(false);
-  const [shareError, setShareError] = useState("");
-
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("id");
@@ -68,10 +64,6 @@ function ProjectPageInner() {
   };
 
   useEffect(() => {
-    loadOrgs();
-  }, []);
-
-  useEffect(() => {
     setDocs([]);
     setTopics([]);
     setProject(null);
@@ -85,22 +77,6 @@ function ProjectPageInner() {
 
     return () => stopPolling();
   }, [projectId]);
-
-  const loadOrgs = async () => {
-    try {
-      const res = await fetch("/api/org");
-      if (!res.ok) return;
-
-      const data = await res.json();
-      setOrgs(data || []);
-
-      if (data?.length > 0) {
-        setSelectedOrgId(data[0].id);
-      }
-    } catch (err) {
-      console.error("Failed to load organizations:", err);
-    }
-  };
 
   const loadProject = async () => {
     try {
@@ -257,46 +233,6 @@ function ProjectPageInner() {
 
     await loadDocuments();
   }
-
-  const handleShareWithOrg = async () => {
-    if (!projectId || !selectedOrgId) return;
-
-    const confirmed = window.confirm(
-      "Share this project with the selected organization? All documents in this project will become accessible to organization members."
-    );
-
-    if (!confirmed) return;
-
-    setIsSharingProject(true);
-    setShareError("");
-
-    try {
-      const res = await fetch(`/api/projects/${projectId}/scope`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scope: "org",
-          orgId: selectedOrgId,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to share project.");
-      }
-
-      setProject((prev) => ({
-        ...prev,
-        scope: data.scope,
-        orgId: data.orgId,
-      }));
-    } catch (err) {
-      setShareError(err.message || "Failed to share project.");
-    } finally {
-      setIsSharingProject(false);
-    }
-  };
 
   const handleDelete = async (id) => {
     const docToDelete = docs.find((doc) => doc.id === id);
@@ -491,20 +427,14 @@ function ProjectPageInner() {
       className="h-full flex flex-col space-y-6 pt-2.5"
     >
       <div className="flex items-center justify-between mb-4">
-        <Button
-          variant="ghost"
-          onClick={() => router.push('/dashboard/')}
-          className="flex items-center space-x-2 text-gray-600 dark:text-gray-400"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = '#000000';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = '';
-          }}
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span>Back to Projects</span>
-        </Button>
+        <BackButton
+          href={
+            project?.orgId && project?.departmentId
+              ? `/org/${project.orgId}/department/${project.departmentId}`
+              : '/welcome-back'
+          }
+          label={project?.department?.name ? `Back to ${project.department.name}` : 'Back'}
+        />
       </div>
 
       <div className="text-center">
@@ -532,44 +462,6 @@ function ProjectPageInner() {
           )}
         </p>
 
-        <div className="mt-4 flex flex-col items-center gap-2">
-          {project?.scope === "org" ? (
-            <div className="rounded-full border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-700">
-              Shared with organization
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-2 sm:flex-row">
-              <select
-                value={selectedOrgId}
-                onChange={(e) => setSelectedOrgId(e.target.value)}
-                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-              >
-                {orgs.length === 0 ? (
-                  <option value="">No organizations available</option>
-                ) : (
-                  orgs.map((org) => (
-                    <option key={org.id} value={org.id}>
-                      {org.name}
-                    </option>
-                  ))
-                )}
-              </select>
-
-              <Button
-                type="button"
-                onClick={handleShareWithOrg}
-                disabled={!selectedOrgId || isSharingProject}
-                size="sm"
-              >
-                {isSharingProject ? "Sharing..." : "Share with Organization"}
-              </Button>
-            </div>
-          )}
-
-          {shareError ? (
-            <p className="text-sm text-red-600">{shareError}</p>
-          ) : null}
-        </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -603,7 +495,7 @@ function ProjectPageInner() {
   );
 
   return (
-    <Layout>
+    <Layout orgId={project?.orgId}>
       <div className="h-[calc(100vh-8rem)]">
         <TwoColumnLayout
           leftColumn={documentPanel}

@@ -7,7 +7,8 @@ import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { ArrowLeft, Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet } from 'lucide-react';
+import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet } from 'lucide-react';
+import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
 import PdfViewer from "@/components/documents/PdfViewer";
@@ -721,29 +722,16 @@ function DocumentContent() {
     >
       {/* Header with Back Button */}
       <div className="flex items-center justify-between">
-        <Button
-          variant="ghost"
-          onClick={() => {
-            if (doc?.projectId) {
-              router.push(`/project?id=${doc.projectId}`);
-            } else {
-              router.push("/dashboard/");
-            }
-          }}
-          className="flex items-center space-x-2 text-gray-600 dark:text-gray-400"
-          style={{
-            '--hover-text-color': '#000000',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = '#000000';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = '';
-          }}
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span>Back to Documents</span>
-        </Button>
+        <BackButton
+          href={
+            doc?.projectId
+              ? `/project?id=${doc.projectId}`
+              : doc?.orgId
+                ? `/org/${doc.orgId}/repository`
+                : '/welcome-back'
+          }
+          label={doc?.projectId ? 'Back to Project' : 'Back to Repository'}
+        />
       </div>
 
       {/* Document Info */}
@@ -1279,7 +1267,7 @@ function DocumentContent() {
   );
 
   return (
-    <Layout>
+    <Layout orgId={doc?.orgId}>
       <div className="h-[calc(100vh-8rem)]">
         <TwoColumnLayout
           leftColumn={documentPanel}
