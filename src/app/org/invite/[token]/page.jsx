@@ -49,7 +49,7 @@ export default function InvitePage() {
         return;
       }
       setResult({ success: true, message: `Welcome to ${invite.orgName}!` });
-      setTimeout(() => router.push(`/org/${data.orgId}/settings`), 1800);
+      setTimeout(() => router.push(`/org/${data.orgId}`), 1800);
     } catch {
       setResult({ success: false, message: 'Something went wrong.' });
     } finally {
@@ -57,7 +57,7 @@ export default function InvitePage() {
     }
   };
 
-  const handleDecline = () => router.push('/dashboard');
+  const handleDecline = () => router.push('/welcome-back');
 
   if (loading) {
     return (
@@ -77,10 +77,10 @@ export default function InvitePage() {
           </h1>
           <p className="text-gray-500 mb-6">{loadError}</p>
           <button
-            onClick={() => router.push('/dashboard')}
+            onClick={() => router.push('/welcome-back')}
             className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
-            Go to Dashboard
+            Go to my organizations
           </button>
         </div>
       </div>
