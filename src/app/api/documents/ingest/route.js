@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { resolveOrgRole } from "@/lib/orgGuard";
+import { getUserSubscription } from "@/lib/subscription";
 
 export async function POST(req) {
   try {
@@ -47,17 +48,14 @@ export async function POST(req) {
 
     const dbUser = await prisma.user.findUnique({
       where: { email: session.user.email },
-      include: {
-        subscription: {
-          include: { plan: true }
-        }
-      }
     });
-    
+
     if (!dbUser)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-    if (!dbUser.subscription || !dbUser.subscription.plan) {
+    const userSubscription = await getUserSubscription(dbUser.id);
+
+    if (!userSubscription || !userSubscription.plan) {
       return NextResponse.json(
         { error: "No active subscription" },
         { status: 403 }
@@ -93,7 +91,7 @@ export async function POST(req) {
 
 
     const planLimitBytes =
-      dbUser.subscription.plan.storageLimitGb * 1024 * 1024 * 1024;
+      userSubscription.plan.storageLimitGb * 1024 * 1024 * 1024;
 
     const currentUsage = BigInt(dbUser.storageUsedBytes);
     const incomingSize = BigInt(fileSizeBytes);
@@ -103,7 +101,7 @@ export async function POST(req) {
       return NextResponse.json(
         {
           error: "Storage limit exceeded",
-          limitGb: dbUser.subscription.plan.storageLimitGb,
+          limitGb: userSubscription.plan.storageLimitGb,
           usedBytes: Number(currentUsage),
           incomingBytes: Number(incomingSize)
         },

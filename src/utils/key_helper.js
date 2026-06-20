@@ -10,4 +10,12 @@ export async function getUserOpenAIKey(userId) {
   
     return setting?.value || null;
 }
-  
+
+export async function getOrgOpenAIKey(orgId) {
+    const org = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { openaiApiKey: true },
+    });
+
+    return org?.openaiApiKey || null;
+}

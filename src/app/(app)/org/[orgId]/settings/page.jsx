@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import {
   Building2, Users, Key, Eye, EyeOff, Loader2,
   CheckCircle2, ArrowLeft, Mail, Shield, Layers,
-  Plus, ChevronDown, ChevronUp, UserPlus, Trash2,
+  Plus, ChevronDown, ChevronUp, UserPlus, Trash2, ExternalLink,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
@@ -66,7 +66,7 @@ export default function OrgSettingsPage() {
       fetch(`/api/org/${orgId}/members`).then((r) => r.json()),
       fetch(`/api/org/${orgId}/department`).then((r) => r.json()),
     ]).then(([settingsData, membersData, departmentsData]) => {
-      if (settingsData.error) { router.replace('/dashboard'); return; }
+      if (settingsData.error) { router.replace('/welcome-back'); return; }
       setOrg(settingsData);
       setEditName(settingsData.name);
       setMembers(Array.isArray(membersData) ? membersData : []);
@@ -228,7 +228,7 @@ export default function OrgSettingsPage() {
 
   if (loading) {
     return (
-      <Layout>
+      <Layout orgId={orgId}>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
         </div>
@@ -244,15 +244,15 @@ export default function OrgSettingsPage() {
   ];
 
   return (
-    <Layout>
+    <Layout orgId={orgId}>
       <div className="max-w-3xl mx-auto py-8 px-4">
         {/* Back link */}
         <button
-          onClick={() => router.push('/dashboard')}
+          onClick={() => router.push('/welcome-back')}
           className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 mb-6"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Personal
+          Back to organizations
         </button>
 
         {/* Header */}
@@ -444,11 +444,22 @@ export default function OrgSettingsPage() {
                           {dept._count?.documents || 0} doc{dept._count?.documents === 1 ? '' : 's'}
                         </span>
                       </div>
-                      {expandedDeptId === dept.id ? (
-                        <ChevronUp className="h-4 w-4 text-gray-500" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4 text-gray-500" />
-                      )}
+                      <div className="flex items-center gap-2">
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); router.push(`/org/${orgId}/department/${dept.id}`); }}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Open
+                        </span>
+                        {expandedDeptId === dept.id ? (
+                          <ChevronUp className="h-4 w-4 text-gray-500" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 text-gray-500" />
+                        )}
+                      </div>
                     </button>
 
                     {expandedDeptId === dept.id && (

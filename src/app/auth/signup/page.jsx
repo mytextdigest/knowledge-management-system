@@ -37,8 +37,10 @@ export default function SignupPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      if (res.status === 201) {
-        router.push(`/auth/verify-otp?email=${encodeURIComponent(email)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const mode = data.existingAccount ? "existing" : "new";
+        router.push(`/auth/verify-otp?email=${encodeURIComponent(email)}&mode=${mode}`);
       } else {
         const msg = await res.text();
         setError(msg || "Signup failed");

@@ -143,25 +143,37 @@
 
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
-| `3-A` | Org-Wide Semantic Search | `TODO` | — | `1-B`, `2-A` | — | — |
-| `3-B` | Enterprise Chat | `TODO` | — | `3-A` | — | — |
+| `3-A` | Org-Wide Semantic Search | `DONE` | AI agent | `1-B`, `2-A` | 2026-06-17 | 2026-06-17 |
+| `3-B` | Enterprise Chat | `DONE` | AI agent | `3-A` | 2026-06-17 | 2026-06-17 |
+| `3-C` | UI/UX Refinement (post-launch review) | `DONE` | AI agent | `1-C`, `2-C`, `3-B` | 2026-06-17 | 2026-06-17 |
 
 ### Task 3-A — Org-Wide Semantic Search
-- **Status:** `TODO`
-- **Key files to create/modify:**
-  - `src/lib/vectorSearch.js` (extend with `orgSearch()`)
-  - Existing search API route (add `scope=org` mode)
-- **Notes:** —
+- **Status:** `DONE`
+- **Key files created/modified:**
+  - `src/lib/vectorSearch.js` (`orgSearch()` already existed from Task 1-B — RBAC-filtered Source A/Source B query was correct as-is; extended the `SELECT` to also join `Department.name` and return `category`, needed for citations)
+  - `src/utils/key_helper.js` (added `getOrgOpenAIKey(orgId)` alongside the existing `getUserOpenAIKey()`, per the plan's API key resolution rule — org pays via `Organization.openaiApiKey`)
+  - `src/app/api/org/[orgId]/search/route.js` (new — `POST`, body `{ query, limit }`; any org member; embeds the query with `text-embedding-3-small` using the org's key, calls `orgSearch()`, returns chunks with `filename`/`department`/`category`/`distance` for citation use)
+  - `prisma/migrations/20260617000000_add_chunk_embedding_vec_index/migration.sql` (new — `ivfflat` ANN index on `Chunk.embedding_vec` using `vector_cosine_ops`; without it every `<=>` query is a full sequential scan, which the plan's "performance acceptable for 1000+ documents" criterion calls out explicitly. Applied to `knowledge_management_db_dev` via `prisma migrate deploy` on 2026-06-17.)
+- **Notes:** The plan says "Extend existing search API route" assuming one already existed — it didn't; there was no semantic search endpoint anywhere in the codebase (the in-app "search" box in `Header.jsx` is a client-side filename filter only, untouched here). Created `POST /api/org/[orgId]/search` as the new endpoint instead. RBAC is enforced entirely in `orgSearch()`'s SQL `WHERE` clause (department membership via `DepartmentMember` join), not post-query filtering, per the plan's explicit requirement. Personal/project search is untouched. Verified with `next build`.
 
 ### Task 3-B — Enterprise Chat
-- **Status:** `TODO`
-- **Key files to create/modify:**
-  - `prisma/schema.prisma` (add `OrgConversation`, `OrgMessage`)
-  - New migration file
-  - `src/app/api/org/[orgId]/chat/route.js` (new — streaming RAG)
-  - `src/app/(app)/org/[orgId]/chat/page.jsx` (new)
-  - `src/components/chat/` (extend or create org chat variant)
-- **Notes:** —
+- **Status:** `DONE`
+- **Key files created/modified:**
+  - `prisma/schema.prisma` (added `OrgConversation { id, orgId, userId, createdAt }` and `OrgMessage { id, conversationId, role, content, createdAt }`, plus back-relations on `Organization`/`User`)
+  - `prisma/migrations/20260617010000_add_org_chat/migration.sql` (new — `CREATE TABLE` for both models + FKs/indexes, hand-written matching the existing repo convention since `prisma migrate dev` is blocked by drift on the shared DB. Applied to `knowledge_management_db_dev` via `prisma migrate deploy` on 2026-06-17.)
+  - `src/app/api/org/[orgId]/chat/route.js` (new — `GET` lists the caller's `OrgConversation`s in this org with a preview of the first message, for the history sidebar; `POST` asks a question: creates/continues a conversation, embeds the question with the org's OpenAI key, calls `orgSearch()` for RAG context grouped by document+department, runs short-term memory (last 6 messages) through `gpt-4o-mini`, persists both the user and assistant `OrgMessage` rows, returns `{ conversationId, answer, sources }` where `sources` is `[{ filename, department }]`)
+  - `src/app/api/org/[orgId]/chat/[conversationId]/route.js` (new — `GET` loads a specific conversation's messages, scoped to `orgId` + the caller's `userId` so users can't read each other's org chat history)
+  - `src/app/(app)/org/[orgId]/chat/page.jsx` (new — "Chat with Organization" page: history sidebar listing past conversations by preview text, "New Conversation" button, message thread with user/assistant bubbles, source citation chips rendered as `filename → department`, surfaces a clear message if the org has no OpenAI key configured rather than a raw error)
+- **Notes:** The plan describes this as a "streaming endpoint (same pattern as existing project chat)" — but the existing project chat (`/api/projects/ask`) is not actually streaming either (plain `chat.completions.create` + one-shot JSON response); the plan's claim didn't match the codebase. Implemented as the same non-streaming JSON pattern for consistency with what already exists, rather than introducing the only streaming endpoint in the app. Citations are not persisted to `OrgMessage` (the model has no field for them per the plan's schema) — they're recomputed in the response and not retained on reload of old conversations; flagging this as a known gap if persisted citations matter later. RBAC for context retrieval is fully delegated to `orgSearch()` from Task 3-A. Verified with `next build`.
+
+### Task 3-C — UI/UX Refinement (post-launch review)
+- **Status:** `DONE`
+- **Trigger:** Manual UI walkthrough after 3-B surfaced that creating/switching to an organization always redirected to `/org/[orgId]/settings` — there was no org "home" page at all, so Settings was acting as a default by accident rather than by design.
+- **Key files created/modified:**
+  - `src/app/(app)/org/[orgId]/page.jsx` (new — org home/dashboard: fetches `settings`/`members`/`department`/`repository` in parallel for doc/member/department counts; shows a "Set up" prompt linking to `?tab=apikey` when a `super_admin` hasn't configured the org's OpenAI key yet; quick-link cards to Repository/Chat/Settings)
+  - `src/components/layout/Header.jsx` (the "Create Organization" success redirect and the workspace-switcher "select org" redirect both hardcoded `/org/${org.id}/settings` — repointed both to `/org/${org.id}`, the new home page)
+  - `src/components/layout/Sidebar.jsx` (fixed `isActive` for org nav links to strip the query string before comparing against `usePathname()` — the Departments link added in Task 2-C points to `/org/[orgId]/settings?tab=departments`, and `pathname` never includes the query string, so the old exact-equality check could never match)
+- **Notes:** The "show active org in the switcher" suggestion turned out to already be implemented (`Header.jsx` already renders a `CheckCircle2` + blue highlight for `activeOrg?.id === org.id`) — verified by reading the code rather than assuming, no change needed there. Verified the rest with `next build`; confirmed previously-static pages (`/auth/signup`, `/landing`, `/setup`) stayed static after the Sidebar change, i.e. no dynamic-rendering regression from touching a component used by every page's `Layout`.
 
 ---
 

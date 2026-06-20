@@ -2,6 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { motion } from "framer-motion";
 import { Mail, RefreshCcw, ShieldCheck } from "lucide-react";
 import { Input } from "@/components/ui/Input";
@@ -12,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 export default function VerifyOtpClient() {
   const params = useSearchParams();
   const email = params.get("email");
+  const mode = params.get("mode") === "existing" ? "existing" : "new";
   const router = useRouter();
 
   const [otp, setOtp] = useState("");
@@ -33,6 +35,20 @@ export default function VerifyOtpClient() {
 
     setLoading(true);
     setError("");
+
+    if (mode === "existing") {
+      // Existing-email collision: verify the OTP and log the user in via
+      // NextAuth's "otp" provider in the same step, no password needed.
+      const result = await signIn("otp", { email, otp, redirect: false });
+      if (result?.ok) {
+        await fetch("/api/org/active", { method: "DELETE" }).catch(() => {});
+        router.push("/welcome-back");
+      } else {
+        setError("Invalid or expired code.");
+      }
+      setLoading(false);
+      return;
+    }
 
     const res = await fetch("/api/auth/verify-otp", {
       method: "POST",

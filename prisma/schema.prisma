@@ -18,15 +18,18 @@ model User {
 
   storageUsedBytes BigInt @default(0)
 
+  hasCompletedOnboarding Boolean @default(false) @map("has_completed_onboarding")
+
   conversations Conversation[]
   documents     Document[]
   projects      Project[]
   projectChats  ProjectConversation[]
   settings      Setting[]
-  subscription  Subscription?
+  managedSubscriptions Subscription[]
 
   orgMembers        OrganizationMember[]
   departmentMembers DepartmentMember[]
+  orgConversations  OrgConversation[]
 }
 
 model OtpToken {
@@ -55,25 +58,31 @@ model Organization {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  members     OrganizationMember[]
-  invites     OrganizationInvite[]
-  departments Department[]
-  projects    Project[]
-  documents   Document[]
+  storageUsedBytes BigInt @default(0) @map("storage_used_bytes")
+
+  members      OrganizationMember[]
+  invites      OrganizationInvite[]
+  departments  Department[]
+  projects     Project[]
+  documents    Document[]
+  conversations OrgConversation[]
+  subscription Subscription?
 
   @@index([name])
 }
 
 model OrganizationMember {
-  id        String   @id @default(cuid())
-  orgId     String
-  userId    String
-  role      String   @default("employee")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(cuid())
+  orgId            String
+  userId           String
+  role             String   @default("employee")
+  lastDepartmentId String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastDepartment Department?  @relation(fields: [lastDepartmentId], references: [id], onDelete: SetNull)
 
   @@unique([orgId, userId])
   @@index([orgId])
@@ -105,9 +114,11 @@ model Department {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  organization Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  members      DepartmentMember[]
-  documents    Document[]
+  organization         Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members              DepartmentMember[]
+  documents            Document[]
+  projects             Project[]
+  lastVisitedByMembers OrganizationMember[]
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -129,6 +140,33 @@ model DepartmentMember {
   @@index([userId])
 }
 
+model OrgConversation {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  title     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages     OrgMessage[]
+
+  @@index([orgId])
+  @@index([userId])
+}
+
+model OrgMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String
+  content        String
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation OrgConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
 model Project {
   id          String   @id @default(cuid())
   name        String
@@ -136,18 +174,21 @@ model Project {
   createdAt   DateTime @default(now()) @map("created_at")
   userId      String
 
-  scope String  @default("private")
-  orgId String?
+  scope        String @default("org")
+  orgId        String
+  departmentId String
 
   documents    Document[]
   topics       Topic[]
   user         User                  @relation(fields: [userId], references: [id])
-  organization Organization?         @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  organization Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  department   Department            @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   projectChats ProjectConversation[]
 
-  @@unique([userId, name])
+  @@unique([departmentId, name])
   @@index([scope])
   @@index([orgId])
+  @@index([departmentId])
 }
 
 model Document {
@@ -165,7 +206,7 @@ model Document {
 
   visibility String @default("private")
 
-  scope        String  @default("private")
+  scope        String  @default("project")
   orgId        String?
   departmentId String?
   lifecycle    String  @default("published")
@@ -290,7 +331,12 @@ model Plan {
 
 model Subscription {
   id                   String    @id @default(cuid())
-  userId               String    @unique
+  // Legacy per-user billing key. Nullable + no longer unique going forward;
+  // retained only as "who originally purchased this" denormalization once
+  // billing moves to orgId. Will be fully retired after the org-mandatory
+  // pivot's data migration completes.
+  managedByUserId      String?
+  orgId                String    @unique
   planId               String
   status               String
   stripeCustomerId     String
@@ -300,6 +346,7 @@ model Subscription {
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id])
-  plan Plan @relation(fields: [planId], references: [id])
+  managedByUser User?        @relation(fields: [managedByUserId], references: [id])
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  plan          Plan         @relation(fields: [planId], references: [id])
 }

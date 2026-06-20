@@ -16,12 +16,13 @@ export default function UploadToRepositoryModal({
   orgId,
   userId,
   departments = [],
+  fixedDepartmentId,
   open,
   onClose,
   onUploaded,
 }) {
   const [file, setFile] = useState(null);
-  const [departmentId, setDepartmentId] = useState("");
+  const [departmentId, setDepartmentId] = useState(fixedDepartmentId || "");
   const [category, setCategory] = useState("Policies");
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState("");
@@ -90,7 +91,7 @@ export default function UploadToRepositoryModal({
       }
 
       setFile(null);
-      setDepartmentId("");
+      setDepartmentId(fixedDepartmentId || "");
       setCategory("Policies");
 
       onUploaded?.();
@@ -132,19 +133,21 @@ export default function UploadToRepositoryModal({
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
 
-          <select
-            className="w-full rounded-md border p-2"
-            value={departmentId}
-            onChange={(e) => setDepartmentId(e.target.value)}
-          >
-            <option value="">Org-wide document</option>
+          {fixedDepartmentId ? null : (
+            <select
+              className="w-full rounded-md border p-2"
+              value={departmentId}
+              onChange={(e) => setDepartmentId(e.target.value)}
+            >
+              <option value="">Org-wide document</option>
 
-            {departments.map((dept) => (
-              <option key={dept.id} value={dept.id}>
-                {dept.name}
-              </option>
-            ))}
-          </select>
+              {departments.map((dept) => (
+                <option key={dept.id} value={dept.id}>
+                  {dept.name}
+                </option>
+              ))}
+            </select>
+          )}
 
           <select
             className="w-full rounded-md border p-2"
@@ -176,7 +179,7 @@ export default function UploadToRepositoryModal({
 
             <button
               type="submit"
-              className="rounded-md bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
+              className="rounded-md bg-primary-600 hover:bg-primary-700 px-4 py-2 text-sm text-white disabled:opacity-60"
               disabled={isUploading}
             >
               {isUploading ? "Uploading..." : "Upload"}

@@ -44,8 +44,13 @@ export async function POST(req) {
     return NextResponse.json({ error: "Organization name is required" }, { status: 400 });
 
   const org = await prisma.organization.create({ data: { name: name.trim() } });
+  // Slack creates a default #general channel for every new workspace —
+  // mirror that with a default department so a new org is never empty.
+  const defaultDept = await prisma.department.create({
+    data: { orgId: org.id, name: "General" },
+  });
   await prisma.organizationMember.create({
-    data: { orgId: org.id, userId: user.id, role: "super_admin" },
+    data: { orgId: org.id, userId: user.id, role: "super_admin", lastDepartmentId: defaultDept.id },
   });
 
   return NextResponse.json({ id: org.id, name: org.name, role: "super_admin" }, { status: 201 });

@@ -3,6 +3,7 @@
 import RepositoryDocumentCard from "@/components/repository/RepositoryDocumentCard";
 import RepositoryFilters from "@/components/repository/RepositoryFilters";
 import UploadToRepositoryModal from "@/components/repository/UploadToRepositoryModal";
+import Layout from "@/components/layout/Layout";
 import { use, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 
@@ -120,7 +121,8 @@ export default function RepositoryPage({ params }) {
   }, [orgId, queryString]);
 
   return (
-    <main className="space-y-6 p-6">
+    <Layout orgId={orgId}>
+    <main className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
@@ -134,7 +136,7 @@ export default function RepositoryPage({ params }) {
         <button
           type="button"
           onClick={() => setUploadOpen(true)}
-          className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+          className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
         >
           Upload Document
         </button>
@@ -211,5 +213,6 @@ export default function RepositoryPage({ params }) {
         onUploaded={loadRepository}
       />
     </main>
+    </Layout>
   );
 }
