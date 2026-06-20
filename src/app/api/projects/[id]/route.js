@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
-import { resolveOrgRole, isOrgAdmin } from "@/lib/orgGuard";
+import { resolveOrgRole, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -64,8 +64,10 @@ export async function PATCH(req, { params }) {
   }
 
   const { user, role } = await resolveOrgRole(session.user.email, project.orgId);
-  if (!role || (project.userId !== user.id && !isOrgAdmin(role))) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (project.userId !== user.id && !isSuperAdmin(role)) {
+    const canManage = role === "dept_admin" && (await canManageDepartment(role, project.departmentId, user.id));
+    if (!canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // Check for duplicate name (unique per department)
@@ -101,15 +103,17 @@ export async function DELETE(req, { params }) {
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, orgId: true, userId: true },
+    select: { id: true, orgId: true, userId: true, departmentId: true },
   });
   if (!project) {
     return NextResponse.json({ success: false, error: "Project not found" }, { status: 404 });
   }
 
   const { user, role } = await resolveOrgRole(session.user.email, project.orgId);
-  if (!role || (project.userId !== user.id && !isOrgAdmin(role))) {
-    return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+  if (!role) return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+  if (project.userId !== user.id && !isSuperAdmin(role)) {
+    const canManage = role === "dept_admin" && (await canManageDepartment(role, project.departmentId, user.id));
+    if (!canManage) return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
   }
 
   try {

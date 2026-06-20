@@ -18,17 +18,30 @@ export async function POST(req, { params }) {
   if (callerRole !== "super_admin")
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const { email, role = "employee" } = await req.json();
+  const { email, role = "employee", departmentIds = [] } = await req.json();
   if (!email?.trim())
     return NextResponse.json({ error: "Email is required" }, { status: 400 });
   if (!VALID_ROLES.includes(role))
     return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+  if (role === "dept_admin" && (!Array.isArray(departmentIds) || departmentIds.length === 0))
+    return NextResponse.json(
+      { error: "At least one department is required for a Dept Admin invite" },
+      { status: 400 }
+    );
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
     select: { name: true },
   });
   if (!org) return NextResponse.json({ error: "Org not found" }, { status: 404 });
+
+  if (role === "dept_admin") {
+    const validCount = await prisma.department.count({
+      where: { id: { in: departmentIds }, orgId },
+    });
+    if (validCount !== departmentIds.length)
+      return NextResponse.json({ error: "Invalid department selection" }, { status: 400 });
+  }
 
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -38,6 +51,7 @@ export async function POST(req, { params }) {
       orgId,
       email: email.trim().toLowerCase(),
       role,
+      departmentIds: role === "dept_admin" ? departmentIds : [],
       token,
       expiresAt,
     },

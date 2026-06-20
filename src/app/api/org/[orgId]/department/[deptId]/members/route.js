@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { resolveOrgRole, canManageDepartment } from "@/lib/orgGuard";
+import { resolveOrgRole, canManageDepartment, isSuperAdmin } from "@/lib/orgGuard";
 
 async function loadDepartment(orgId, deptId) {
   return prisma.department.findFirst({ where: { id: deptId, orgId } });
@@ -19,6 +19,13 @@ export async function GET(req, { params }) {
 
   const department = await loadDepartment(orgId, deptId);
   if (!department) return NextResponse.json({ error: "Department not found" }, { status: 404 });
+
+  if (!isSuperAdmin(role)) {
+    const membership = await prisma.departmentMember.findUnique({
+      where: { departmentId_userId: { departmentId: deptId, userId: user.id } },
+    });
+    if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const members = await prisma.departmentMember.findMany({
     where: { departmentId: deptId },

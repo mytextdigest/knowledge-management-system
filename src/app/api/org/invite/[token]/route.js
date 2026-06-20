@@ -12,10 +12,18 @@ export async function GET(req, { params }) {
   if (!invite || invite.acceptedAt || invite.expiresAt < new Date())
     return NextResponse.json({ error: "Invite not found or expired" }, { status: 404 });
 
+  const departments = invite.departmentIds.length
+    ? await prisma.department.findMany({
+        where: { id: { in: invite.departmentIds } },
+        select: { id: true, name: true },
+      })
+    : [];
+
   return NextResponse.json({
     orgId: invite.orgId,
     orgName: invite.organization.name,
     role: invite.role,
     email: invite.email,
+    departments,
   });
 }

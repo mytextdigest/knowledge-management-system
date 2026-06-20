@@ -44,8 +44,16 @@ export default function OrgSettingsPage() {
   // Invite form
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('employee');
+  const [inviteDeptIds, setInviteDeptIds] = useState([]);
   const [inviting, setInviting] = useState(false);
   const [inviteStatus, setInviteStatus] = useState(null);
+
+  // Manage departments modal (editing an existing dept_admin's assignments)
+  const [manageTarget, setManageTarget] = useState(null); // member object
+  const [manageDeptIds, setManageDeptIds] = useState([]);
+  const [manageLoading, setManageLoading] = useState(false);
+  const [manageSaving, setManageSaving] = useState(false);
+  const [manageError, setManageError] = useState('');
 
   // Departments
   const [departments, setDepartments] = useState([]);
@@ -210,20 +218,69 @@ export default function OrgSettingsPage() {
 
   const sendInvite = async () => {
     if (!inviteEmail.trim()) return;
+    if (inviteRole === 'dept_admin' && inviteDeptIds.length === 0) {
+      setInviteStatus({ type: 'error', msg: 'Select at least one department for a Dept Admin invite.' });
+      return;
+    }
     setInviting(true);
     setInviteStatus(null);
     try {
       const res = await fetch(`/api/org/${orgId}/invite`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole, departmentIds: inviteDeptIds }),
       });
       const data = await res.json();
       if (!res.ok) { setInviteStatus({ type: 'error', msg: data.error }); return; }
       setInviteEmail('');
+      setInviteDeptIds([]);
       setInviteStatus({ type: 'success', msg: `Invite sent to ${inviteEmail}.` });
     } catch { setInviteStatus({ type: 'error', msg: 'Failed to send invite.' }); }
     finally { setInviting(false); }
+  };
+
+  const toggleInviteDept = (deptId) => {
+    setInviteDeptIds((prev) =>
+      prev.includes(deptId) ? prev.filter((id) => id !== deptId) : [...prev, deptId]
+    );
+  };
+
+  const openManageDepartments = async (member) => {
+    setManageTarget(member);
+    setManageError('');
+    setManageLoading(true);
+    try {
+      const res = await fetch(`/api/org/${orgId}/members/${member.userId}/departments`);
+      const data = await res.json();
+      setManageDeptIds(Array.isArray(data.departmentIds) ? data.departmentIds : []);
+    } catch {
+      setManageError('Failed to load department assignments.');
+    } finally {
+      setManageLoading(false);
+    }
+  };
+
+  const toggleManageDept = (deptId) => {
+    setManageDeptIds((prev) =>
+      prev.includes(deptId) ? prev.filter((id) => id !== deptId) : [...prev, deptId]
+    );
+  };
+
+  const saveManageDepartments = async () => {
+    if (!manageTarget) return;
+    setManageSaving(true);
+    setManageError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/members/${manageTarget.userId}/departments`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ departmentIds: manageDeptIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setManageError(data.error || 'Failed to save.'); return; }
+      setManageTarget(null);
+    } catch { setManageError('Failed to save.'); }
+    finally { setManageSaving(false); }
   };
 
   if (loading) {
@@ -327,6 +384,7 @@ export default function OrgSettingsPage() {
                   <tr>
                     <th className="text-left px-4 py-3 font-medium text-gray-600 dark:text-gray-400">Member</th>
                     <th className="text-left px-4 py-3 font-medium text-gray-600 dark:text-gray-400">Role</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600 dark:text-gray-400"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -347,11 +405,74 @@ export default function OrgSettingsPage() {
                           {ROLE_LABELS[m.role] ?? m.role}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        {m.role === 'dept_admin' && org?.role === 'super_admin' && (
+                          <button
+                            onClick={() => openManageDepartments(m)}
+                            className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                          >
+                            Manage departments
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            {manageTarget && (
+              <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+                <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-5 w-full max-w-sm">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                    Manage departments
+                  </h3>
+                  <p className="text-xs text-gray-500 mb-3">
+                    {manageTarget.name || manageTarget.email}
+                  </p>
+
+                  {manageLoading ? (
+                    <div className="flex justify-center py-6">
+                      <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                    </div>
+                  ) : departments.length === 0 ? (
+                    <p className="text-sm text-gray-500">No departments yet.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {departments.map((dept) => (
+                        <label key={dept.id} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={manageDeptIds.includes(dept.id)}
+                            onChange={() => toggleManageDept(dept.id)}
+                          />
+                          {dept.name}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {manageError && <p className="mt-2 text-sm text-red-600">{manageError}</p>}
+
+                  <div className="flex gap-2 mt-4">
+                    <button
+                      onClick={() => setManageTarget(null)}
+                      className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={saveManageDepartments}
+                      disabled={manageSaving || manageLoading}
+                      className="flex-1 px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+                    >
+                      {manageSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Invite form */}
             {org?.role === 'super_admin' && (
@@ -369,7 +490,7 @@ export default function OrgSettingsPage() {
                   />
                   <select
                     value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value)}
+                    onChange={(e) => { setInviteRole(e.target.value); setInviteDeptIds([]); }}
                     className="p-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     {INVITE_ROLES.map((r) => (
@@ -378,13 +499,38 @@ export default function OrgSettingsPage() {
                   </select>
                   <button
                     onClick={sendInvite}
-                    disabled={inviting || !inviteEmail.trim()}
+                    disabled={inviting || !inviteEmail.trim() || (inviteRole === 'dept_admin' && inviteDeptIds.length === 0)}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
                   >
                     {inviting && <Loader2 className="h-4 w-4 animate-spin" />}
                     Send Invite
                   </button>
                 </div>
+
+                {inviteRole === 'dept_admin' && (
+                  <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                      Departments this Dept Admin will manage
+                    </p>
+                    {departments.length === 0 ? (
+                      <p className="text-xs text-gray-500">No departments yet. Create one first.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-3">
+                        {departments.map((dept) => (
+                          <label key={dept.id} className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                            <input
+                              type="checkbox"
+                              checked={inviteDeptIds.includes(dept.id)}
+                              onChange={() => toggleInviteDept(dept.id)}
+                            />
+                            {dept.name}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {inviteStatus && (
                   <p className={cn('mt-2 text-sm', inviteStatus.type === 'success' ? 'text-green-600' : 'text-red-600')}>
                     {inviteStatus.msg}

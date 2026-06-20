@@ -37,6 +37,13 @@ export async function POST(req, { params }) {
     prisma.organizationMember.create({
       data: { orgId: invite.orgId, userId: user.id, role: invite.role },
     }),
+    ...invite.departmentIds.map((departmentId) =>
+      prisma.departmentMember.upsert({
+        where: { departmentId_userId: { departmentId, userId: user.id } },
+        update: { role: "admin" },
+        create: { departmentId, userId: user.id, role: "admin" },
+      })
+    ),
     prisma.organizationInvite.update({
       where: { token },
       data: { acceptedAt: new Date() },

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { resolveOrgRole } from "@/lib/orgGuard";
+import { resolveOrgRole, canManageDepartment } from "@/lib/orgGuard";
 
 // allowed[currentState][targetState] = roles permitted to make that transition
 const ALLOWED_TRANSITIONS = {
@@ -38,7 +38,7 @@ export async function PATCH(req, { params }) {
   // Lifecycle management only applies to repository-scoped documents
   const doc = await prisma.document.findFirst({
     where: { id, scope: "repository" },
-    select: { id: true, orgId: true, lifecycle: true },
+    select: { id: true, orgId: true, departmentId: true, lifecycle: true },
   });
   if (!doc || !doc.orgId)
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -56,6 +56,12 @@ export async function PATCH(req, { params }) {
   }
   if (!permittedRoles.includes(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  // dept_admin can only transition documents in a department they administer;
+  // org-wide documents (departmentId null) require super_admin
+  if (role === "dept_admin") {
+    const allowed = doc.departmentId && (await canManageDepartment(role, doc.departmentId, user.id));
+    if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const updated = await prisma.document.update({

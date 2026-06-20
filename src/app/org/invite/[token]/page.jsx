@@ -125,6 +125,12 @@ export default function InvitePage() {
         </p>
         <p className="text-sm text-gray-500 mb-6">
           Role: <span className="font-medium">{ROLE_LABELS[invite.role] ?? invite.role}</span>
+          {invite.role === 'dept_admin' && invite.departments?.length > 0 && (
+            <>
+              {' '}&middot; Departments:{' '}
+              <span className="font-medium">{invite.departments.map((d) => d.name).join(', ')}</span>
+            </>
+          )}
         </p>
 
         {result?.success === false && (
