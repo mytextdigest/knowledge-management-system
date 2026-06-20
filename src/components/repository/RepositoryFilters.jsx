@@ -13,25 +13,28 @@ const CATEGORIES = [
 export default function RepositoryFilters({
   filters,
   departments = [],
+  hideDepartmentFilter = false,
   onChange,
 }) {
   return (
     <div className="grid gap-4 rounded-xl border bg-white p-4 md:grid-cols-4">
-      <select
-        className="rounded-md border p-2"
-        value={filters.departmentId || ""}
-        onChange={(e) =>
-          onChange({ ...filters, departmentId: e.target.value })
-        }
-      >
-        <option value="">All Departments</option>
+      {hideDepartmentFilter ? null : (
+        <select
+          className="rounded-md border p-2"
+          value={filters.departmentId || ""}
+          onChange={(e) =>
+            onChange({ ...filters, departmentId: e.target.value })
+          }
+        >
+          <option value="">All Departments</option>
 
-        {departments.map((dept) => (
-          <option key={dept.id} value={dept.id}>
-            {dept.name}
-          </option>
-        ))}
-      </select>
+          {departments.map((dept) => (
+            <option key={dept.id} value={dept.id}>
+              {dept.name}
+            </option>
+          ))}
+        </select>
+      )}
 
       <select
         className="rounded-md border p-2"
