@@ -7,24 +7,18 @@ export async function getOpenAIForDocument(docId) {
   const doc = await prisma.document.findUnique({
     where: { id: docId },
     select: {
-      userId: true,
-      user: {
-        select: {
-          settings: {
-            where: { key: "openai_api_key" },
-            select: { value: true },
-            take: 1,
-          },
-        },
+      orgId: true,
+      organization: {
+        select: { openaiApiKey: true },
       },
     },
   });
 
-  if (!doc?.user?.settings?.[0]?.value) {
+  if (!doc?.organization?.openaiApiKey) {
     throw new Error("OPENAI_KEY_MISSING");
   }
 
   return new OpenAI({
-    apiKey: doc.user.settings[0].value,
+    apiKey: doc.organization.openaiApiKey,
   });
 }
