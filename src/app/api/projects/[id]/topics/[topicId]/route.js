@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
+import { resolveOrgRole } from "@/lib/orgGuard";
 
 async function verifyTopicOwnership(session, projectId, topicId) {
   const topic = await prisma.topic.findFirst({
-    where: {
-      id:      topicId,
-      project: { id: projectId, user: { email: session.user.email } },
-    },
+    where: { id: topicId, project: { id: projectId } },
+    select: { id: true, project: { select: { orgId: true } } },
   });
+  if (!topic) return null;
+
+  const { role } = await resolveOrgRole(session.user.email, topic.project.orgId);
+  if (!role) return null;
+
   return topic;
 }
 

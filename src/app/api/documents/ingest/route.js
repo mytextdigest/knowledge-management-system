@@ -22,7 +22,7 @@ export async function POST(req) {
     const s3Key        = formData.get("s3Key");
     const visibility   = formData.get("visibility")   || "private";
     const scope        = formData.get("scope")        || "private";
-    const orgId        = formData.get("orgId")        || null;
+    let   orgId        = formData.get("orgId")        || null;
     const departmentId = formData.get("departmentId") || null;
     const category     = formData.get("category")     || null;
 
@@ -42,6 +42,15 @@ export async function POST(req) {
     } else {
       if (!projectId)
         return NextResponse.json({ error: "projectId is required" }, { status: 400 });
+    }
+
+    // every project belongs to an org; backfill orgId when the caller only sent projectId
+    if (projectId && !orgId) {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { orgId: true },
+      });
+      orgId = project?.orgId || null;
     }
 
     const filename = s3Key.split("/").pop();

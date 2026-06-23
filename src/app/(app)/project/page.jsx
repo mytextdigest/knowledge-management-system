@@ -495,8 +495,8 @@ function ProjectPageInner() {
   );
 
   return (
-    <Layout orgId={project?.orgId}>
-      <div className="h-[calc(100vh-8rem)]">
+    <Layout orgId={project?.orgId} fullBleed>
+      <div className="h-[calc(100vh-8rem)] px-4 py-8 sm:px-6 lg:px-8">
         <TwoColumnLayout
           leftColumn={documentPanel}
           rightColumn={chatPanel}
