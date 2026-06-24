@@ -74,8 +74,30 @@ export async function POST(req) {
     // Verify org membership before accepting a repository-scoped upload
     if (scope === "repository") {
       const { role } = await resolveOrgRole(session.user.email, orgId);
-      if (!role)
-        return NextResponse.json({ error: "Forbidden: not an org member" }, { status: 403 });
+
+      if (!role) {
+        return NextResponse.json(
+          { error: "Forbidden: not an org member" },
+          { status: 403 }
+        );
+      }
+
+      if (departmentId) {
+        const department = await prisma.department.findFirst({
+          where: {
+            id: departmentId,
+            orgId,
+          },
+          select: { id: true },
+        });
+
+        if (!department) {
+          return NextResponse.json(
+            { error: "Invalid department for this organization" },
+            { status: 400 }
+          );
+        }
+      }
     }
 
 
@@ -179,3 +201,5 @@ export async function POST(req) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
+
+

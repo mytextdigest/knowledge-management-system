@@ -22,7 +22,10 @@ export async function GET(req, { params }) {
   if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { searchParams } = new URL(req.url);
-  const deptFilter  = searchParams.get("dept")      || null;
+  const deptFilter =
+  searchParams.get("departmentId") ||
+  searchParams.get("dept") ||
+  null;
   const category    = searchParams.get("category")  || null;
   const lifecycle   = searchParams.get("lifecycle") || null;
   const fileType    = searchParams.get("fileType")  || null;
