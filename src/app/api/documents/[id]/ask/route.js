@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import OpenAI from "openai";
-import { getUserOpenAIKey } from "@/utils/key_helper";
+import { resolveOpenAIKey } from "@/utils/key_helper";
 import { activeRequests } from "@/lib/requestCancellation";
 
 // const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -47,7 +47,10 @@ export async function POST(req, { params }) {
 
     const userId = doc.userId;
 
-    const apiKey = await getUserOpenAIKey(userId);
+    const apiKey = await resolveOpenAIKey({
+      userId,
+      orgId: doc.orgId,
+    });
 
     if (!apiKey) {
       return NextResponse.json(
@@ -338,3 +341,5 @@ export async function POST(req, { params }) {
     );
   }
 }
+
+
