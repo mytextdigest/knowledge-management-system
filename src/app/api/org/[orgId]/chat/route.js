@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
-import { resolveOrgRole } from "@/lib/orgGuard";
+import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { orgSearch } from "@/lib/vectorSearch";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 
@@ -98,7 +98,12 @@ export async function POST(req, { params }) {
   });
   const queryEmbedding = embRes.data[0].embedding;
 
-  const chunks = await orgSearch(queryEmbedding, { userId: user.id, orgId, limit: 8 });
+  const chunks = await orgSearch(queryEmbedding, {
+    userId: user.id,
+    orgId,
+    limit: 8,
+    isSuperAdmin: isSuperAdmin(role),
+  });
 
   const grouped = chunks.reduce((acc, c) => {
     const key = c.filename || c.document_id;

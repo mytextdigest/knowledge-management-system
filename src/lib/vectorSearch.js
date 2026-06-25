@@ -15,7 +15,7 @@ export async function similaritySearch(queryEmbedding, { projectId, limit = 8 })
   `;
 }
 
-export async function orgSearch(queryEmbedding, { userId, orgId, limit = 8 }) {
+export async function orgSearch(queryEmbedding, { userId, orgId, limit = 8, isSuperAdmin = false }) {
   const embStr = JSON.stringify(queryEmbedding);
   return prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
@@ -32,13 +32,20 @@ export async function orgSearch(queryEmbedding, { userId, orgId, limit = 8 }) {
       AND (
         (d.scope = 'repository'
          AND d.lifecycle = 'published'
-         AND (d."departmentId" IS NULL OR dm."userId" IS NOT NULL))
+         AND (${isSuperAdmin} OR d."departmentId" IS NULL OR dm."userId" IS NOT NULL))
         OR
         EXISTS (
           SELECT 1 FROM "Project" p
           WHERE p.id = d."projectId"
             AND p.scope = 'org'
             AND p."orgId" = ${orgId}
+            AND (
+              ${isSuperAdmin}
+              OR EXISTS (
+                SELECT 1 FROM "DepartmentMember" pm
+                WHERE pm."departmentId" = p."departmentId" AND pm."userId" = ${userId}
+              )
+            )
         )
       )
     ORDER BY distance ASC
