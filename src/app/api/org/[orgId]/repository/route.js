@@ -22,7 +22,10 @@ export async function GET(req, { params }) {
   if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { searchParams } = new URL(req.url);
-  const deptFilter  = searchParams.get("dept")      || null;
+  const deptFilter =
+  searchParams.get("departmentId") ||
+  searchParams.get("dept") ||
+  null;
   const category    = searchParams.get("category")  || null;
   const lifecycle   = searchParams.get("lifecycle") || null;
   const fileType    = searchParams.get("fileType")  || null;
@@ -38,15 +41,18 @@ export async function GET(req, { params }) {
   const userDeptIds = memberships.map((m) => m.departmentId);
 
   // Source A: documents directly scoped to the org repository
-  // User can see org-wide docs (no dept) or docs in their own depts
-  const sourceA = {
-    scope: "repository",
-    orgId,
-    OR: [
-      { departmentId: null },
-      { departmentId: { in: userDeptIds } },
-    ],
-  };
+  // Org admins can see every department's docs; everyone else only sees
+  // org-wide docs (no dept) or docs in their own depts
+  const sourceA = isOrgAdmin(role)
+    ? { scope: "repository", orgId }
+    : {
+        scope: "repository",
+        orgId,
+        OR: [
+          { departmentId: null },
+          { departmentId: { in: userDeptIds } },
+        ],
+      };
 
   // Source B: documents from projects promoted to org scope
   const sourceB = {
