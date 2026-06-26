@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
-import { resolveOrgRole } from "@/lib/orgGuard";
+import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { orgSearch } from "@/lib/vectorSearch";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
+import { generateSignedUrl } from "@/lib/s3SignedUrl";
 
 const SYSTEM_PROMPT = `
 You are an expert assistant that answers questions using only the
@@ -98,22 +99,39 @@ export async function POST(req, { params }) {
   });
   const queryEmbedding = embRes.data[0].embedding;
 
-  const chunks = await orgSearch(queryEmbedding, { userId: user.id, orgId, limit: 8 });
+  const chunks = await orgSearch(queryEmbedding, {
+    userId: user.id,
+    orgId,
+    limit: 8,
+    isSuperAdmin: isSuperAdmin(role),
+  });
 
   const grouped = chunks.reduce((acc, c) => {
-    const key = c.filename || c.document_id;
-    acc[key] = acc[key] || { filename: c.filename, department: c.department_name, texts: [] };
+    const key = c.document_id;
+    acc[key] = acc[key] || {
+      documentId: c.document_id,
+      filename: c.filename,
+      filePath: c.filePath,
+      department: c.department_name,
+      project: c.project_name,
+      texts: [],
+    };
     acc[key].texts.push(String(c.text || "").slice(0, 600).replace(/\n+/g, " "));
     return acc;
   }, {});
 
-  const sources = Object.values(grouped).map((g) => ({
-    filename: g.filename,
-    department: g.department || null,
-  }));
+  const sources = await Promise.all(
+    Object.values(grouped).map(async (g) => ({
+      documentId: g.documentId,
+      filename: g.filename,
+      department: g.department || null,
+      project: g.project || null,
+      url: g.filePath ? await generateSignedUrl(g.filePath).catch(() => null) : null,
+    }))
+  );
 
   const contextBlocks = Object.values(grouped).map(
-    (g) => `Document: ${g.filename}${g.department ? ` (Department: ${g.department})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
+    (g) => `Document: ${g.filename}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
   );
   const context = contextBlocks.length > 0
     ? contextBlocks.join("\n\n")

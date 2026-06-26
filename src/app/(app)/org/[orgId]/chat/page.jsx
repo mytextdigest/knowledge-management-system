@@ -291,16 +291,31 @@ export default function OrgChatPage() {
 
                       {m.sources?.length > 0 && (
                         <div className="flex flex-wrap gap-2">
-                          {m.sources.map((s, i) => (
-                            <span
-                              key={i}
-                              className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
-                            >
-                              <FileText className="h-3 w-3" />
-                              {s.filename}
-                              {s.department ? ` → ${s.department}` : ''}
-                            </span>
-                          ))}
+                          {m.sources.map((s, i) => {
+                            const label = [s.filename, s.department, s.project]
+                              .filter(Boolean)
+                              .join(' → ');
+                            const className =
+                              'inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-600 hover:border-blue-300 hover:text-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-blue-700 dark:hover:text-blue-400';
+
+                            return s.url ? (
+                              <a
+                                key={i}
+                                href={s.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={className}
+                              >
+                                <FileText className="h-3 w-3" />
+                                {label}
+                              </a>
+                            ) : (
+                              <span key={i} className={className}>
+                                <FileText className="h-3 w-3" />
+                                {label}
+                              </span>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
