@@ -19,12 +19,14 @@ export async function orgSearch(queryEmbedding, { userId, orgId, limit = 8, isSu
   const embStr = JSON.stringify(queryEmbedding);
   return prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
-           d.filename, d."orgId", d."departmentId", d.scope, d.category,
+           d.filename, d.file_path AS "filePath", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
            dept.name AS department_name,
+           proj.name AS project_name,
            (c.embedding_vec <=> ${embStr}::vector) AS distance
     FROM "Chunk" c
     JOIN "Document" d ON c.document_id = d.id
     LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
     LEFT JOIN "DepartmentMember" dm
       ON d."departmentId" = dm."departmentId" AND dm."userId" = ${userId}
     WHERE d."orgId" = ${orgId}
