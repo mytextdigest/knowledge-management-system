@@ -7,12 +7,13 @@ import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet } from 'lucide-react';
+import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
 import PdfViewer from "@/components/documents/PdfViewer";
 import { cn } from '@/lib/utils';
+import { copySummary, printSummary } from '@/lib/summaryActions';
 import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
 import MessageActions from "@/components/chat/MessageActions";
 import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
@@ -35,6 +36,7 @@ function DocumentContent() {
   const [activeTab, setActiveTab] = useState('chat'); // 'chat' or 'summary'
   const [summary, setSummary] = useState(null);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [summaryCopied, setSummaryCopied] = useState(false);
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -1213,8 +1215,8 @@ function DocumentContent() {
                     </div>
                   )}
 
-                  {/* Regenerate Button */}
-                  <div className="text-center">
+                  {/* Regenerate / Copy / Print */}
+                  <div className="flex items-center justify-center gap-2">
                     <Button
                       variant="outline"
                       onClick={generateSummary}
@@ -1222,6 +1224,30 @@ function DocumentContent() {
                     >
                       <BarChart3 className="h-4 w-4" />
                       <span>Regenerate Summary</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={async () => {
+                        await copySummary(summary, { sheets, isSpreadsheet });
+                        setSummaryCopied(true);
+                        setTimeout(() => setSummaryCopied(false), 2000);
+                      }}
+                      className="flex items-center space-x-2"
+                    >
+                      {summaryCopied ? (
+                        <Check className="h-4 w-4" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                      <span>{summaryCopied ? "Copied" : "Copy"}</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => printSummary(summary, { sheets, isSpreadsheet })}
+                      className="flex items-center space-x-2"
+                    >
+                      <Printer className="h-4 w-4" />
+                      <span>Print</span>
                     </Button>
                   </div>
                 </motion.div>
