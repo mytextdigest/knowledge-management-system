@@ -24,17 +24,24 @@ export async function GET(req, { params }) {
       scope: true,
       orgId: true,
       departmentId: true,
+      userId: true,
       department: { select: { id: true, name: true } },
     },
   });
 
   if (!project) return NextResponse.json(null, { status: 404 });
 
-  const { role } = await resolveOrgRole(session.user.email, project.orgId);
+  const { user, role } = await resolveOrgRole(session.user.email, project.orgId);
   if (!role) return NextResponse.json(null, { status: 404 });
+
+  const canManage =
+    project.userId === user.id ||
+    isSuperAdmin(role) ||
+    (role === "dept_admin" && (await canManageDepartment(role, project.departmentId, user.id)));
 
   return NextResponse.json({
     ...project,
+    canManage,
     created_at: project.createdAt.toISOString(),
   });
 }
