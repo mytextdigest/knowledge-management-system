@@ -10,7 +10,7 @@ import DeleteConfirmationModal from '@/components/modals/DeleteConfirmationModal
 import MessageActions from './MessageActions';
 import ExpandedMessageModal from './ExpandedMessageModal';
 
-const ChatInterface = ({ className, projectId }) => {
+const ChatInterface = ({ className, projectId, canManage = false }) => {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -266,18 +266,20 @@ const ChatInterface = ({ className, projectId }) => {
           </div>
 
           {/* Right Side - Delete Button */}
-          <div className="relative">
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleClearChat}
-                className="hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-600 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </motion.div>
-          </div>
+          {canManage ? (
+            <div className="relative">
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleClearChat}
+                  className="hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-600 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </motion.div>
+            </div>
+          ) : null}
         </div>
 
         {/* Left Side - Title and Subtitle */}

@@ -79,14 +79,14 @@ export default function RepositoryFilters({
         <option value="retired">Retired</option>
       </select>
 
-      <div className="flex items-center gap-2 md:col-span-2">
+      <div className="flex flex-wrap items-center gap-2 md:col-span-2">
         <label className="text-sm text-gray-500" htmlFor="repo-date-from">
           From
         </label>
         <input
           id="repo-date-from"
           type="date"
-          className="flex-1 rounded-md border p-2"
+          className="min-w-0 flex-1 rounded-md border p-2"
           value={filters.dateFrom || ""}
           onChange={(e) => onChange({ ...filters, dateFrom: e.target.value })}
         />
@@ -97,7 +97,7 @@ export default function RepositoryFilters({
         <input
           id="repo-date-to"
           type="date"
-          className="flex-1 rounded-md border p-2"
+          className="min-w-0 flex-1 rounded-md border p-2"
           value={filters.dateTo || ""}
           onChange={(e) => onChange({ ...filters, dateTo: e.target.value })}
         />

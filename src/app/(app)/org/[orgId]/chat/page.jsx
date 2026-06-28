@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Bot, Check, FileText, Loader2, MessageSquarePlus, Pencil, Send, Trash2, User, X,
+  Bot, Check, FileText, History, Loader2, MessageSquarePlus, Pencil, Send, Trash2, User, X,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
@@ -106,6 +106,7 @@ export default function OrgChatPage() {
   const [sending, setSending] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [error, setError] = useState('');
+  const [convListOpen, setConvListOpen] = useState(false);
   const messagesEndRef = useRef(null);
 
   const loadConversations = async () => {
@@ -214,9 +215,23 @@ export default function OrgChatPage() {
   return (
     <Layout orgId={orgId} fullBleed>
       <div className="flex h-screen bg-white dark:bg-gray-900">
-        <aside className="w-72 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto p-3">
+        {/* Mobile backdrop for conversation list */}
+        {convListOpen && (
+          <div
+            className="fixed inset-0 z-30 bg-black/50 md:hidden"
+            onClick={() => setConvListOpen(false)}
+          />
+        )}
+
+        <aside
+          className={cn(
+            'fixed inset-y-0 left-0 z-40 w-72 flex-shrink-0 overflow-y-auto border-r border-gray-200 bg-white p-3 transition-transform duration-200 dark:border-gray-700 dark:bg-gray-900',
+            'md:static md:z-auto md:translate-x-0',
+            convListOpen ? 'translate-x-0' : '-translate-x-full'
+          )}
+        >
           <button
-            onClick={startNewConversation}
+            onClick={() => { startNewConversation(); setConvListOpen(false); }}
             className="mb-3 flex w-full items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800"
           >
             <MessageSquarePlus className="h-4 w-4" />
@@ -229,7 +244,7 @@ export default function OrgChatPage() {
                 key={c.id}
                 conversation={c}
                 active={conversationId === c.id}
-                onSelect={() => loadConversation(c.id)}
+                onSelect={() => { loadConversation(c.id); setConvListOpen(false); }}
                 onRename={renameConversation}
                 onDelete={deleteConversation}
               />
@@ -240,13 +255,22 @@ export default function OrgChatPage() {
           </div>
         </aside>
 
-        <main className="flex flex-1 flex-col">
-          <div className="border-b border-gray-200 dark:border-gray-700 px-6 py-4">
-            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Chat with Organization</h1>
-            <p className="text-sm text-gray-500">Ask questions across your organization's knowledge repository.</p>
+        <main className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-700 px-4 py-4 sm:px-6">
+            <button
+              onClick={() => setConvListOpen(true)}
+              className="flex-shrink-0 rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 md:hidden"
+              title="Conversation history"
+            >
+              <History className="h-4 w-4" />
+            </button>
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-bold text-gray-900 dark:text-gray-100">Chat with Organization</h1>
+              <p className="truncate text-sm text-gray-500">Ask questions across your organization's knowledge repository.</p>
+            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 sm:px-6">
             {loadingHistory ? (
               <div className="flex justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
@@ -277,7 +301,7 @@ export default function OrgChatPage() {
                       )}
                     </div>
 
-                    <div className={cn('max-w-[75%] space-y-2', m.role === 'user' ? 'items-end' : 'items-start')}>
+                    <div className={cn('max-w-[85%] min-w-0 space-y-2 sm:max-w-[75%]', m.role === 'user' ? 'items-end' : 'items-start')}>
                       <div
                         className={cn(
                           'rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap',
@@ -296,7 +320,7 @@ export default function OrgChatPage() {
                               .filter(Boolean)
                               .join(' → ');
                             const className =
-                              'inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-600 hover:border-blue-300 hover:text-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-blue-700 dark:hover:text-blue-400';
+                              'inline-flex max-w-[220px] items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-600 hover:border-blue-300 hover:text-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-blue-700 dark:hover:text-blue-400';
 
                             return s.url ? (
                               <a
@@ -304,15 +328,16 @@ export default function OrgChatPage() {
                                 href={s.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
+                                title={label}
                                 className={className}
                               >
-                                <FileText className="h-3 w-3" />
-                                {label}
+                                <FileText className="h-3 w-3 flex-shrink-0" />
+                                <span className="truncate">{label}</span>
                               </a>
                             ) : (
-                              <span key={i} className={className}>
-                                <FileText className="h-3 w-3" />
-                                {label}
+                              <span key={i} title={label} className={className}>
+                                <FileText className="h-3 w-3 flex-shrink-0" />
+                                <span className="truncate">{label}</span>
                               </span>
                             );
                           })}
@@ -335,12 +360,12 @@ export default function OrgChatPage() {
           </div>
 
           {error && (
-            <div className="mx-6 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+            <div className="mx-4 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 sm:mx-6">
               {error}
             </div>
           )}
 
-          <form onSubmit={sendMessage} className="border-t border-gray-200 dark:border-gray-700 px-6 py-4">
+          <form onSubmit={sendMessage} className="border-t border-gray-200 dark:border-gray-700 px-4 py-4 sm:px-6">
             <div className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
               <input
                 value={input}

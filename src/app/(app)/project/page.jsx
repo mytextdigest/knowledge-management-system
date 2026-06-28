@@ -490,7 +490,7 @@ function ProjectPageInner() {
 
   const chatPanel = (
     <div className="h-full">
-      <ChatInterface className="h-full" projectId={projectId} />
+      <ChatInterface className="h-full" projectId={projectId} canManage={!!project?.canManage} />
     </div>
   );
 

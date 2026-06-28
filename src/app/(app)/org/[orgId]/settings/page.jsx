@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
@@ -57,6 +57,7 @@ export default function OrgSettingsPage() {
 
   // Departments
   const [departments, setDepartments] = useState([]);
+  const [departmentsError, setDepartmentsError] = useState('');
   const [deptName, setDeptName] = useState('');
   const [creatingDept, setCreatingDept] = useState(false);
   const [deptError, setDeptError] = useState('');
@@ -67,18 +68,28 @@ export default function OrgSettingsPage() {
   const [addMemberRole, setAddMemberRole] = useState('member');
   const [addingMember, setAddingMember] = useState(false);
   const [memberActionError, setMemberActionError] = useState('');
+  const deptMembersRequestRef = useRef(null);
 
   useEffect(() => {
+    setDepartmentsError('');
     Promise.all([
       fetch(`/api/org/${orgId}/settings`).then((r) => r.json()),
       fetch(`/api/org/${orgId}/members`).then((r) => r.json()),
-      fetch(`/api/org/${orgId}/department`).then((r) => r.json()),
-    ]).then(([settingsData, membersData, departmentsData]) => {
+      fetch(`/api/org/${orgId}/department`).then((r) =>
+        r.json().then((data) => ({ ok: r.ok, data }))
+      ),
+    ]).then(([settingsData, membersData, departmentsResult]) => {
       if (settingsData.error) { router.replace('/welcome-back'); return; }
       setOrg(settingsData);
       setEditName(settingsData.name);
       setMembers(Array.isArray(membersData) ? membersData : []);
-      setDepartments(Array.isArray(departmentsData) ? departmentsData : []);
+
+      if (departmentsResult.ok && Array.isArray(departmentsResult.data)) {
+        setDepartments(departmentsResult.data);
+      } else {
+        setDepartments([]);
+        setDepartmentsError(departmentsResult.data?.error || 'Failed to load departments.');
+      }
 
       const validTabs = settingsData.role === 'super_admin'
         ? ['general', 'members', 'departments', 'apikey']
@@ -112,22 +123,33 @@ export default function OrgSettingsPage() {
   };
 
   const toggleDepartment = async (deptId) => {
+    // Reset the add-member form so values typed for one department don't
+    // bleed into the next department's panel.
+    setAddMemberEmail('');
+    setAddMemberRole('member');
+    setMemberActionError('');
+
     if (expandedDeptId === deptId) {
+      deptMembersRequestRef.current = null;
       setExpandedDeptId(null);
       setDeptMembers([]);
       return;
     }
+
+    deptMembersRequestRef.current = deptId;
     setExpandedDeptId(deptId);
-    setMemberActionError('');
+    setDeptMembers([]);
     setLoadingDeptMembers(true);
     try {
       const res = await fetch(`/api/org/${orgId}/department/${deptId}/members`);
       const data = await res.json();
+      // Ignore stale responses from a department the user has since switched away from.
+      if (deptMembersRequestRef.current !== deptId) return;
       setDeptMembers(Array.isArray(data) ? data : []);
     } catch {
-      setDeptMembers([]);
+      if (deptMembersRequestRef.current === deptId) setDeptMembers([]);
     } finally {
-      setLoadingDeptMembers(false);
+      if (deptMembersRequestRef.current === deptId) setLoadingDeptMembers(false);
     }
   };
 
@@ -570,7 +592,11 @@ export default function OrgSettingsPage() {
               </div>
             )}
 
-            {departments.length === 0 ? (
+            {departmentsError ? (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
+                {departmentsError}
+              </div>
+            ) : departments.length === 0 ? (
               <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-8 text-center text-sm text-gray-500">
                 No departments yet.
               </div>
