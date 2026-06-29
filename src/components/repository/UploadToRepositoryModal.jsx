@@ -105,13 +105,13 @@ export default function UploadToRepositoryModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+      <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-gray-800">
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               Upload to Repository
             </h2>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Add a document to the organization knowledge repository.
             </p>
           </div>
@@ -119,7 +119,7 @@ export default function UploadToRepositoryModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-gray-500 hover:bg-gray-100"
+            className="rounded-md px-2 py-1 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
           >
             X
           </button>
@@ -128,14 +128,14 @@ export default function UploadToRepositoryModal({
         <form onSubmit={handleUpload} className="space-y-4">
           <input
             type="file"
-            className="w-full rounded-md border p-2"
+            className="w-full rounded-md border border-gray-300 bg-white p-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
             accept=".pdf,.txt,.md,.csv,.xlsx,.xls"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
 
           {fixedDepartmentId ? null : (
             <select
-              className="w-full rounded-md border p-2"
+              className="w-full rounded-md border border-gray-300 bg-white p-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
               value={departmentId}
               onChange={(e) => setDepartmentId(e.target.value)}
             >
@@ -150,7 +150,7 @@ export default function UploadToRepositoryModal({
           )}
 
           <select
-            className="w-full rounded-md border p-2"
+            className="w-full rounded-md border border-gray-300 bg-white p-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
           >
@@ -162,7 +162,7 @@ export default function UploadToRepositoryModal({
           </select>
 
           {error ? (
-            <p className="rounded-md bg-red-50 p-2 text-sm text-red-700">
+            <p className="rounded-md bg-red-50 p-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
               {error}
             </p>
           ) : null}
@@ -171,7 +171,7 @@ export default function UploadToRepositoryModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border px-4 py-2 text-sm"
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-200"
               disabled={isUploading}
             >
               Cancel

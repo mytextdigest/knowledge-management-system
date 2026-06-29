@@ -1,5 +1,8 @@
 "use client";
 
+const FIELD_CLASS =
+  "rounded-md border border-gray-300 bg-white p-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100";
+
 const CATEGORIES = [
   "Policies",
   "SOPs",
@@ -17,10 +20,10 @@ export default function RepositoryFilters({
   onChange,
 }) {
   return (
-    <div className="grid gap-4 rounded-xl border bg-white p-4 md:grid-cols-4">
+    <div className="grid gap-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 md:grid-cols-4">
       {hideDepartmentFilter ? null : (
         <select
-          className="rounded-md border p-2"
+          className="rounded-md border border-gray-300 bg-white p-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
           value={filters.departmentId || ""}
           onChange={(e) =>
             onChange({ ...filters, departmentId: e.target.value })
@@ -37,7 +40,7 @@ export default function RepositoryFilters({
       )}
 
       <select
-        className="rounded-md border p-2"
+        className={FIELD_CLASS}
         value={filters.category || ""}
         onChange={(e) =>
           onChange({ ...filters, category: e.target.value })
@@ -53,7 +56,7 @@ export default function RepositoryFilters({
       </select>
 
       <select
-        className="rounded-md border p-2"
+        className={FIELD_CLASS}
         value={filters.fileType || ""}
         onChange={(e) =>
           onChange({ ...filters, fileType: e.target.value })
@@ -66,7 +69,7 @@ export default function RepositoryFilters({
       </select>
 
       <select
-        className="rounded-md border p-2"
+        className={FIELD_CLASS}
         value={filters.lifecycle || ""}
         onChange={(e) =>
           onChange({ ...filters, lifecycle: e.target.value })
@@ -80,24 +83,24 @@ export default function RepositoryFilters({
       </select>
 
       <div className="flex flex-wrap items-center gap-2 md:col-span-2">
-        <label className="text-sm text-gray-500" htmlFor="repo-date-from">
+        <label className="text-sm text-gray-500 dark:text-gray-400" htmlFor="repo-date-from">
           From
         </label>
         <input
           id="repo-date-from"
           type="date"
-          className="min-w-0 flex-1 rounded-md border p-2"
+          className={`min-w-0 flex-1 ${FIELD_CLASS}`}
           value={filters.dateFrom || ""}
           onChange={(e) => onChange({ ...filters, dateFrom: e.target.value })}
         />
 
-        <label className="text-sm text-gray-500" htmlFor="repo-date-to">
+        <label className="text-sm text-gray-500 dark:text-gray-400" htmlFor="repo-date-to">
           To
         </label>
         <input
           id="repo-date-to"
           type="date"
-          className="min-w-0 flex-1 rounded-md border p-2"
+          className={`min-w-0 flex-1 ${FIELD_CLASS}`}
           value={filters.dateTo || ""}
           onChange={(e) => onChange({ ...filters, dateTo: e.target.value })}
         />

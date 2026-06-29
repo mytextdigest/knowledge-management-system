@@ -72,12 +72,17 @@ export async function GET(req, { params }) {
   if (deptFilter) andConditions.push({ departmentId: deptFilter });
 
   if (dateFrom || dateTo) {
-    andConditions.push({
-      createdAt: {
-        ...(dateFrom ? { gte: new Date(dateFrom) } : {}),
-        ...(dateTo   ? { lte: new Date(dateTo) }   : {}),
-      },
-    });
+    const range = {};
+    if (dateFrom) range.gte = new Date(dateFrom);
+    if (dateTo) {
+      // dateTo is a date-only string (e.g. "2026-06-29"); new Date() parses it
+      // as UTC midnight, which would exclude same-day uploads made later that
+      // day. Push the bound to the end of that calendar day instead.
+      const end = new Date(dateTo);
+      end.setUTCHours(23, 59, 59, 999);
+      range.lte = end;
+    }
+    andConditions.push({ createdAt: range });
   }
 
   const extList = fileType && fileType !== "all" ? FILE_TYPE_EXTS[fileType] : null;

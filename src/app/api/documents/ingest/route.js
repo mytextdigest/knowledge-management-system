@@ -82,6 +82,13 @@ export async function POST(req) {
         );
       }
 
+      if (role === "guest") {
+        return NextResponse.json(
+          { error: "Forbidden: guests cannot upload to the repository" },
+          { status: 403 }
+        );
+      }
+
       if (departmentId) {
         const department = await prisma.department.findFirst({
           where: {
