@@ -46,6 +46,8 @@ export default function DepartmentPage({ params }) {
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [orgRole, setOrgRole] = useState(null);
+  const canUpload = orgRole !== null && orgRole !== "guest";
 
   // Projects tab state
   const [projects, setProjects] = useState([]);
@@ -79,6 +81,11 @@ export default function DepartmentPage({ params }) {
     // (Slack-style "back to your last channel"), persisted server-side so
     // it survives logout/login.
     fetch(`/api/org/${orgId}/department/${deptId}/visit`, { method: "POST" }).catch(() => {});
+
+    fetch(`/api/org/${orgId}/settings`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setOrgRole(data?.role || null))
+      .catch(() => setOrgRole(null));
   }, [orgId, deptId]);
 
   async function loadDocuments() {
@@ -208,13 +215,15 @@ export default function DepartmentPage({ params }) {
           </div>
 
           {tab === "documents" ? (
-            <button
-              type="button"
-              onClick={() => setUploadOpen(true)}
-              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
-            >
-              Upload Document
-            </button>
+            canUpload ? (
+              <button
+                type="button"
+                onClick={() => setUploadOpen(true)}
+                className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+              >
+                Upload Document
+              </button>
+            ) : null
           ) : (
             <button
               type="button"
@@ -310,7 +319,7 @@ export default function DepartmentPage({ params }) {
             orgId={orgId}
             userId={userId}
             fixedDepartmentId={deptId}
-            open={uploadOpen}
+            open={canUpload && uploadOpen}
             onClose={() => setUploadOpen(false)}
             onUploaded={loadDocuments}
           />

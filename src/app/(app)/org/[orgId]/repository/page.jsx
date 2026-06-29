@@ -4,7 +4,7 @@ import RepositoryDocumentCard from "@/components/repository/RepositoryDocumentCa
 import RepositoryFilters from "@/components/repository/RepositoryFilters";
 import UploadToRepositoryModal from "@/components/repository/UploadToRepositoryModal";
 import Layout from "@/components/layout/Layout";
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 
 // Keys here are RepositoryFilters' own field names; values are the query
@@ -42,6 +42,9 @@ export default function RepositoryPage({ params }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [orgRole, setOrgRole] = useState(null);
+  const latestRequestId = useRef(0);
+  const canUpload = orgRole !== null && orgRole !== "guest";
 
   const queryString = useMemo(() => {
     const search = new URLSearchParams();
@@ -56,6 +59,12 @@ export default function RepositoryPage({ params }) {
 
   async function loadRepository() {
     if (!orgId) return;
+
+    // Changing a filter resets the page to 1 in a separate effect, which can
+    // fire a second request (new filters + stale page) before this one
+    // settles. Only the most recently issued request is allowed to update
+    // state, so a slow stale response can't overwrite a newer one.
+    const requestId = ++latestRequestId.current;
 
     setLoading(true);
     setError("");
@@ -74,14 +83,31 @@ export default function RepositoryPage({ params }) {
 
       const data = await res.json();
 
+      if (requestId !== latestRequestId.current) return;
+
       setDocuments(data.documents || data || []);
       setTotalPages(data.totalPages || 1);
       setTotal(data.total ?? (Array.isArray(data) ? data.length : 0));
     } catch (err) {
+      if (requestId !== latestRequestId.current) return;
       setError(err.message || "Failed to load repository.");
       setDocuments([]);
     } finally {
-      setLoading(false);
+      if (requestId === latestRequestId.current) setLoading(false);
+    }
+  }
+
+  async function loadOrgRole() {
+    if (!orgId) return;
+
+    try {
+      const res = await fetch(`/api/org/${orgId}/settings`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      setOrgRole(data.role || null);
+    } catch {
+      setOrgRole(null);
     }
   }
 
@@ -102,6 +128,7 @@ export default function RepositoryPage({ params }) {
 
   useEffect(() => {
     loadDepartments();
+    loadOrgRole();
   }, [orgId]);
 
   // Any filter change should reset back to page 1
@@ -125,21 +152,23 @@ export default function RepositoryPage({ params }) {
     <main className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
             Knowledge Repository
           </h1>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             Browse, filter, and upload organization knowledge documents.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setUploadOpen(true)}
-          className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
-        >
-          Upload Document
-        </button>
+        {canUpload ? (
+          <button
+            type="button"
+            onClick={() => setUploadOpen(true)}
+            className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+          >
+            Upload Document
+          </button>
+        ) : null}
       </div>
 
       <RepositoryFilters
@@ -149,21 +178,21 @@ export default function RepositoryPage({ params }) {
       />
 
       {error ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
           {error}
         </div>
       ) : null}
 
       {loading ? (
-        <div className="rounded-xl border bg-white p-6 text-sm text-gray-500">
+        <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
           Loading repository documents...
         </div>
       ) : documents.length === 0 ? (
-        <div className="rounded-xl border bg-white p-8 text-center">
-          <h2 className="text-lg font-semibold text-gray-900">
+        <div className="rounded-xl border border-gray-200 bg-white p-8 text-center dark:border-gray-700 dark:bg-gray-800">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             No repository documents found
           </h2>
-          <p className="mt-2 text-sm text-gray-500">
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
             Upload documents or adjust filters to see organization knowledge.
           </p>
         </div>
@@ -179,7 +208,7 @@ export default function RepositoryPage({ params }) {
       )}
 
       {!loading && documents.length > 0 && totalPages > 1 ? (
-        <div className="flex items-center justify-between rounded-xl border bg-white p-3 text-sm text-gray-600">
+        <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
           <span>
             Page {page} of {totalPages} ({total} documents)
           </span>
@@ -188,7 +217,7 @@ export default function RepositoryPage({ params }) {
               type="button"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className="rounded-md border px-3 py-1.5 disabled:opacity-50"
+              className="rounded-md border border-gray-300 px-3 py-1.5 disabled:opacity-50 dark:border-gray-600"
             >
               Previous
             </button>
@@ -196,7 +225,7 @@ export default function RepositoryPage({ params }) {
               type="button"
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="rounded-md border px-3 py-1.5 disabled:opacity-50"
+              className="rounded-md border border-gray-300 px-3 py-1.5 disabled:opacity-50 dark:border-gray-600"
             >
               Next
             </button>
@@ -208,7 +237,7 @@ export default function RepositoryPage({ params }) {
         orgId={orgId}
         userId={userId}
         departments={departments}
-        open={uploadOpen}
+        open={canUpload && uploadOpen}
         onClose={() => setUploadOpen(false)}
         onUploaded={loadRepository}
       />
