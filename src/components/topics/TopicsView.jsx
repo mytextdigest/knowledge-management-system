@@ -22,7 +22,6 @@ export default function TopicsView({
   onUpload,
   onView,
   onDelete,
-  onToggleStar,
   onToggleSelect,
   onRename,
   onTopicsChange,
@@ -61,7 +60,7 @@ export default function TopicsView({
     }
   }
 
-  const docCallbacks = { onView, onDelete, onToggleStar, onToggleSelect, onRename };
+  const docCallbacks = { onView, onDelete, onToggleSelect, onRename };
 
   const handleDragStart = ({ active }) => {
     setActiveDocData(active?.data?.current ?? null);
@@ -80,6 +79,13 @@ export default function TopicsView({
 
     try {
       if (targetId === 'unassigned') {
+        const canUnassign = active.data.current?.permissions?.canUnassign !== false;
+
+        if (!canUnassign) {
+          console.warn('User does not have permission to unassign this document.');
+          return;
+        }
+
         await fetch(`/api/documents/${docId}/unassign`, { method: 'POST' });
       } else {
         await fetch(`/api/documents/${docId}/move-to-topic`, {

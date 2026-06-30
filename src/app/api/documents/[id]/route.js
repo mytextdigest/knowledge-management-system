@@ -29,6 +29,11 @@ export async function GET(req, { params }) {
     ...doc,
     fileUrl: signedUrl,
     created_at: doc.createdAt.toISOString(),
+    permissions: {
+      canRegenerate: true,
+      canStar: true,
+      canUnassign: true,
+    },
   });
 }
 
