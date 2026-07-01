@@ -17,6 +17,7 @@ import { copySummary, printSummary } from '@/lib/summaryActions';
 import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
 import MessageActions from "@/components/chat/MessageActions";
 import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
+import { useToast } from "@/components/ui/Toast";
 
 
 
@@ -55,6 +56,7 @@ function DocumentContent() {
   const [pagesRead, setPagesRead] = useState(0);
   const [readingInsights, setReadingInsights] = useState([]);
   const [isLoadingPageInsight, setIsLoadingPageInsight] = useState(false);
+  const [pageInsightError, setPageInsightError] = useState(null);
   const [expandedInsightIndex, setExpandedInsightIndex] = useState(null);
   const [detectedPage, setDetectedPage] = useState(0);
   const [pdfTotalPages, setPdfTotalPages] = useState(0);
@@ -62,8 +64,11 @@ function DocumentContent() {
   const docScrollRef = useRef(null);
   const scrollDebounceRef = useRef(null);
 
+  const toast = useToast();
+
   const ext = doc?.filename?.split('.').pop().toLowerCase() ?? '';
   const isSpreadsheet = ['csv', 'xlsx', 'xls'].includes(ext);
+  const canRegenerateSummary = doc?.permissions?.canRegenerate !== false;
 
   // Derive a per-sheet breakdown from chunk metadata stored during ingestion
   // (workbookName, sheetName, rowRange, columnHeaders — see worker/extractSpreadsheet.js)
@@ -125,23 +130,48 @@ function DocumentContent() {
 
   const handleMarkPageRead = useCallback(async () => {
     if (isLoadingPageInsight || pagesRead >= totalPages) return;
+
     const nextPage = pagesRead + 1;
+    const content = getContentUpToPage(nextPage);
+
+    if (!content?.trim()) {
+      setPageInsightError('Page-wise summaries are not available because this document does not have readable text yet.');
+      return;
+    }
+
+    setPageInsightError(null);
     setIsLoadingPageInsight(true);
+
     try {
-      const content = getContentUpToPage(nextPage);
-      const res = await fetch('/api/page-insight', {
+      const response = await fetch('/api/page-insight', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pageContent: content, pageNumber: nextPage }),
-      }).then(r => r.json());
+      });
 
-      if (res?.success) {
-        setReadingInsights(prev => [...prev, { page: nextPage, keyPoints: res.keyPoints, questions: res.questions }]);
-        setExpandedInsightIndex(nextPage - 1);
-        setPagesRead(nextPage);
+      const res = await response.json().catch(() => null);
+
+      if (!response.ok || !res?.success) {
+        throw new Error(res?.error || res?.message || 'The page insight request failed.');
       }
+
+      const keyPoints = Array.isArray(res.keyPoints) ? res.keyPoints : [];
+      const questions = Array.isArray(res.questions) ? res.questions : [];
+
+      if (keyPoints.length === 0 && questions.length === 0) {
+        setPageInsightError('No page-wise summary was generated for this page. Please try again after the document finishes processing.');
+        return;
+      }
+
+      setReadingInsights(prev => [
+        ...prev,
+        { page: nextPage, keyPoints, questions },
+      ]);
+      setExpandedInsightIndex(nextPage - 1);
+      setPagesRead(nextPage);
     } catch (err) {
       console.error('Failed to get page insight:', err);
+      setPageInsightError('Could not generate page-wise insights right now. Please try again.');
     } finally {
       setIsLoadingPageInsight(false);
     }
@@ -356,19 +386,27 @@ function DocumentContent() {
   const generateSummary = async () => {
     if (!doc) return;
 
+    if (!canRegenerateSummary) {
+      toast.warning("Summary regeneration is unavailable while the document is being processed. Try again once processing is complete.");
+      return;
+    }
+
     setIsGeneratingSummary(true);
 
     try {
-
-      const docId = doc.id 
-      const res = await fetch(`/api/documents/${docId}/regenerate`, {
+      const docId = doc.id;
+      const response = await fetch(`/api/documents/${docId}/regenerate`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" }
-      }).then(r => r.json());
+        headers: { "Content-Type": "application/json" },
+      });
+      const res = await response.json().catch(() => null);
 
-      if (!res?.success) {
-        throw new Error(res?.error || "Failed to queue regenerate summary");
+      if (!response.ok || !res?.success) {
+        const message = res?.error || "Failed to queue summary regeneration.";
+        toast.warning(message);
+        setIsGeneratingSummary(false);
+        return;
       }
 
       // Immediately re-fetch the doc once to get updated status
@@ -457,6 +495,7 @@ function DocumentContent() {
       }
     } catch (error) {
       console.error("Error generating summary:", error);
+      toast.error("Could not regenerate summary. Please try again.");
       setSummary({
         title: doc.filename,
         overview: "Unable to regenerate summary at this time. Please try again later.",
@@ -854,13 +893,28 @@ function DocumentContent() {
 
               {/* Scrollable insight cards */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900/50">
-                {readingInsights.length === 0 && !isLoadingPageInsight && (
+                {readingInsights.length === 0 && !isLoadingPageInsight && !pageInsightError && (
                   <div className="flex flex-col items-center justify-center h-full text-center py-12 space-y-3">
                     <BookOpen className="h-10 w-10 text-gray-300 dark:text-gray-600" />
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Progressive reading mode</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 max-w-[220px]">
-                      Start reading the document. Insights and reflection questions unlock automatically as you scroll through each page.
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Page-wise summary mode</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 max-w-[260px]">
+                      Start reading or scroll through the document. Key points and reflection questions will appear automatically for each page.
                     </p>
+                    {totalPages === 0 && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 max-w-[260px]">
+                        Page-wise summaries will appear after readable document text is available.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {pageInsightError && (
+                  <div className="bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800 px-4 py-4 flex items-start space-x-3">
+                    <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-red-700 dark:text-red-300">Page-wise summary unavailable</p>
+                      <p className="text-xs text-red-600 dark:text-red-400">{pageInsightError}</p>
+                    </div>
                   </div>
                 )}
 
@@ -916,9 +970,12 @@ function DocumentContent() {
                 })}
 
                 {isLoadingPageInsight && (
-                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-4 flex items-center space-x-3">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600 shrink-0" />
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Generating insights for page {pagesRead + 1}…</span>
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-4 flex items-start space-x-3">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Analyzing page {pagesRead + 1}…</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Extracting key points and generating reflection questions.</p>
+                    </div>
                   </div>
                 )}
 
@@ -930,12 +987,16 @@ function DocumentContent() {
                 {isLoadingPageInsight ? (
                   <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
                     <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-primary-600" />
-                    <span>Generating insights for page {pagesRead + 1}…</span>
+                    <span>Analyzing page {pagesRead + 1}…</span>
                   </div>
-                ) : pagesRead > 0 && pagesRead >= totalPages ? (
+                ) : pageInsightError ? (
+                  <p className="text-xs text-red-500 dark:text-red-400">Resolve the issue above, then scroll again to retry.</p>
+                ) : pagesRead > 0 && totalPages > 0 && pagesRead >= totalPages ? (
                   <p className="text-sm text-gray-500">You&apos;ve finished the document.</p>
                 ) : detectedPage > 0 ? (
                   <p className="text-xs text-gray-400">On page {detectedPage}{totalPages > 0 ? ` of ${totalPages}` : ''}</p>
+                ) : totalPages === 0 ? (
+                  <p className="text-xs text-gray-400">Waiting for readable document text before page-wise summaries can start.</p>
                 ) : (
                   <p className="text-xs text-gray-400">Scroll through the document — insights appear automatically.</p>
                 )}
@@ -1220,6 +1281,7 @@ function DocumentContent() {
                     <Button
                       variant="outline"
                       onClick={generateSummary}
+                      disabled={!canRegenerateSummary || isGeneratingSummary}
                       className="flex items-center space-x-2"
                     >
                       <BarChart3 className="h-4 w-4" />
@@ -1260,6 +1322,7 @@ function DocumentContent() {
                     </p>
                     <Button
                       onClick={generateSummary}
+                      disabled={!canRegenerateSummary || isGeneratingSummary}
                       className="flex items-center space-x-2"
                     >
                       <BarChart3 className="h-4 w-4" />
@@ -1277,6 +1340,7 @@ function DocumentContent() {
                     </p>
                     <Button
                       onClick={generateSummary}
+                      disabled={!canRegenerateSummary || isGeneratingSummary}
                       className="flex items-center space-x-2"
                     >
                       <BarChart3 className="h-4 w-4" />
@@ -1329,3 +1393,5 @@ export default function DocumentPage() {
     </Suspense>
   );
 }
+
+

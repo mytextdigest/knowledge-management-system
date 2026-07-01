@@ -30,6 +30,17 @@ export async function POST(req, { params }) {
 
     if (!doc) return NextResponse.json({ error: "Document not found" }, { status: 404 });
 
+    const BLOCKING_STATUSES = new Set([
+      'queued', 'extracting', 'running_ocr', 'chunked',
+      'embedding', 'embedded', 'summarizing', 'clustering',
+    ]);
+    if (BLOCKING_STATUSES.has(doc.status)) {
+      return NextResponse.json(
+        { error: "Document is currently being processed. Wait until processing completes before regenerating the summary." },
+        { status: 409 }
+      );
+    }
+
     if (!doc.filePath)
       return NextResponse.json(
         { error: "Document filePath missing (cannot regenerate)" },
