@@ -13,6 +13,7 @@ import TopicGroup from './TopicGroup';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/components/ui/Toast';
 
 export default function TopicsView({
   topics = [],
@@ -30,6 +31,8 @@ export default function TopicsView({
   onFilterChange,
   className,
 }) {
+  const toast = useToast();
+
   const [viewMode, setViewMode]       = useState('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeDocData, setActiveDocData] = useState(null);
@@ -82,7 +85,7 @@ export default function TopicsView({
         const canUnassign = active.data.current?.permissions?.canUnassign !== false;
 
         if (!canUnassign) {
-          console.warn('User does not have permission to unassign this document.');
+          toast.warning("You don't have permission to unassign this document.");
           return;
         }
 

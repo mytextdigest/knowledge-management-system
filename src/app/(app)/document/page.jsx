@@ -17,6 +17,7 @@ import { copySummary, printSummary } from '@/lib/summaryActions';
 import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
 import MessageActions from "@/components/chat/MessageActions";
 import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
+import { useToast } from "@/components/ui/Toast";
 
 
 
@@ -62,6 +63,8 @@ function DocumentContent() {
   const insightsEndRef = useRef(null);
   const docScrollRef = useRef(null);
   const scrollDebounceRef = useRef(null);
+
+  const toast = useToast();
 
   const ext = doc?.filename?.split('.').pop().toLowerCase() ?? '';
   const isSpreadsheet = ['csv', 'xlsx', 'xls'].includes(ext);
@@ -381,21 +384,29 @@ function DocumentContent() {
   // regenerate document summary
   // Generate summary when user clicks "Regenerate summary"
   const generateSummary = async () => {
-    if (!doc || !canRegenerateSummary) return;
+    if (!doc) return;
+
+    if (!canRegenerateSummary) {
+      toast.warning("Summary regeneration is unavailable while the document is being processed. Try again once processing is complete.");
+      return;
+    }
 
     setIsGeneratingSummary(true);
 
     try {
-
-      const docId = doc.id 
-      const res = await fetch(`/api/documents/${docId}/regenerate`, {
+      const docId = doc.id;
+      const response = await fetch(`/api/documents/${docId}/regenerate`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" }
-      }).then(r => r.json());
+        headers: { "Content-Type": "application/json" },
+      });
+      const res = await response.json().catch(() => null);
 
-      if (!res?.success) {
-        throw new Error(res?.error || "Failed to queue regenerate summary");
+      if (!response.ok || !res?.success) {
+        const message = res?.error || "Failed to queue summary regeneration.";
+        toast.warning(message);
+        setIsGeneratingSummary(false);
+        return;
       }
 
       // Immediately re-fetch the doc once to get updated status
@@ -484,6 +495,7 @@ function DocumentContent() {
       }
     } catch (error) {
       console.error("Error generating summary:", error);
+      toast.error("Could not regenerate summary. Please try again.");
       setSummary({
         title: doc.filename,
         overview: "Unable to regenerate summary at this time. Please try again later.",

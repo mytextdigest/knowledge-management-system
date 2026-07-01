@@ -25,12 +25,17 @@ export async function GET(req, { params }) {
     signedUrl = await generateSignedUrl(doc.filePath);
   }
 
+  const PROCESSING_STATUSES = new Set([
+    'queued', 'extracting', 'running_ocr', 'chunked',
+    'embedding', 'embedded', 'summarizing', 'clustering',
+  ]);
+
   return NextResponse.json({
     ...doc,
     fileUrl: signedUrl,
     created_at: doc.createdAt.toISOString(),
     permissions: {
-      canRegenerate: true,
+      canRegenerate: !!doc.filePath && !PROCESSING_STATUSES.has(doc.status),
       canStar: true,
       canUnassign: true,
     },
