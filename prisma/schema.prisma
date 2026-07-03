@@ -20,16 +20,17 @@ model User {
 
   hasCompletedOnboarding Boolean @default(false) @map("has_completed_onboarding")
 
-  conversations Conversation[]
-  documents     Document[]
-  projects      Project[]
-  projectChats  ProjectConversation[]
-  settings      Setting[]
+  conversations        Conversation[]
+  documents            Document[]
+  projects             Project[]
+  projectChats         ProjectConversation[]
+  settings             Setting[]
   managedSubscriptions Subscription[]
 
   orgMembers        OrganizationMember[]
   departmentMembers DepartmentMember[]
   orgConversations  OrgConversation[]
+  chatAuditLogs     ChatAuditLog[]
 }
 
 model OtpToken {
@@ -60,13 +61,14 @@ model Organization {
 
   storageUsedBytes BigInt @default(0) @map("storage_used_bytes")
 
-  members      OrganizationMember[]
-  invites      OrganizationInvite[]
-  departments  Department[]
-  projects     Project[]
-  documents    Document[]
+  members       OrganizationMember[]
+  invites       OrganizationInvite[]
+  departments   Department[]
+  projects      Project[]
+  documents     Document[]
   conversations OrgConversation[]
-  subscription Subscription?
+  chatAuditLogs ChatAuditLog[]
+  subscription  Subscription?
 
   @@index([name])
 }
@@ -142,11 +144,13 @@ model DepartmentMember {
 }
 
 model OrgConversation {
-  id        String   @id @default(cuid())
-  orgId     String
-  userId    String
-  title     String?
-  createdAt DateTime @default(now()) @map("created_at")
+  id               String   @id @default(cuid())
+  orgId            String
+  userId           String
+  title            String?
+  activeTopic      String?
+  activeDocumentId String?
+  createdAt        DateTime @default(now()) @map("created_at")
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -161,11 +165,29 @@ model OrgMessage {
   conversationId String
   role           String
   content        String
+  sources        Json?
+  confidence     String?
   createdAt      DateTime @default(now()) @map("created_at")
 
   conversation OrgConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
+}
+
+model ChatAuditLog {
+  id          String   @id @default(cuid())
+  orgId       String
+  userId      String
+  question    String
+  citedDocIds String[] @default([])
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model Project {
