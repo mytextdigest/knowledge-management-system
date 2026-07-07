@@ -3,7 +3,8 @@ import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-import { orgSearch } from "@/lib/vectorSearch";
+import { hybridOrgSearch } from "@/lib/hybridSearch";
+import { expandQuery } from "@/lib/queryExpansion";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 
@@ -18,6 +19,12 @@ If the answer cannot be found in the context, say:
 Response format:
 - Plain text only (no markdown, no lists, no special formatting).
 `.trim();
+
+function normalizeScope(scope) {
+  return ["personal", "department", "organization"].includes(scope)
+    ? scope
+    : "organization";
+}
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -62,6 +69,8 @@ export async function POST(req, { params }) {
 
   const body = await req.json().catch(() => ({}));
   const question = body.question?.trim();
+  const scope = normalizeScope(body.scope);
+  const departmentId = body.departmentId || null;
   let conversationId = body.conversationId || null;
 
   if (!question) {
@@ -92,20 +101,30 @@ export async function POST(req, { params }) {
   });
 
   const openai = new OpenAI({ apiKey });
+  const expandedQueries = await expandQuery(openai, question);
 
   const embRes = await openai.embeddings.create({
     model: "text-embedding-3-small",
-    input: question,
+    input: expandedQueries,
   });
-  const queryEmbedding = embRes.data[0].embedding;
+  const queryEmbeddings = embRes.data.map((item) => item.embedding);
 
-  const chunks = await orgSearch(queryEmbedding, {
+  const chunks = await hybridOrgSearch({
+    queries: expandedQueries,
+    embeddings: queryEmbeddings,
     userId: user.id,
     orgId,
     limit: 8,
+    scope,
+    departmentId,
     isSuperAdmin: isSuperAdmin(role),
   });
+  console.log("Expanded Queries:", expandedQueries);
+  console.log("Retrieved Chunks:", chunks.length);
 
+  if (chunks.length > 0) {
+    console.log(chunks.slice(0, 3));
+}
   const grouped = chunks.reduce((acc, c) => {
     const key = c.document_id;
     acc[key] = acc[key] || {
@@ -163,5 +182,14 @@ export async function POST(req, { params }) {
     data: { conversationId, role: "assistant", content: answer },
   });
 
-  return NextResponse.json({ conversationId, answer, sources });
+  return NextResponse.json({
+    conversationId,
+    answer,
+    sources,
+    retrieval: {
+      mode: "hybrid",
+      scope,
+      expandedQueries,
+    },
+  });
 }
