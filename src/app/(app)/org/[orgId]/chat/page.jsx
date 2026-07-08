@@ -3,11 +3,89 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Bot, Check, FileText, History, Loader2, MessageSquarePlus, Pencil, Send, Trash2, User, X,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
+
+const CONFIDENCE_STYLES = {
+  high: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+  medium: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+  low: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+};
+
+const markdownComponents = {
+  h1: ({ children }) => <h3 className="mt-2 text-sm font-semibold first:mt-0 text-gray-900 dark:text-gray-100">{children}</h3>,
+  h2: ({ children }) => <h3 className="mt-2 text-sm font-semibold first:mt-0 text-gray-900 dark:text-gray-100">{children}</h3>,
+  h3: ({ children }) => <h4 className="mt-2 text-sm font-semibold first:mt-0 text-gray-900 dark:text-gray-100">{children}</h4>,
+  p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-1 ml-4 list-disc space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-1 ml-4 list-decimal space-y-0.5">{children}</ol>,
+  li: ({ children }) => <li>{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="underline">
+      {children}
+    </a>
+  ),
+  code: ({ children }) => (
+    <code className="rounded bg-black/10 px-1 py-0.5 text-xs dark:bg-white/10">{children}</code>
+  ),
+};
+
+async function streamChatResponse({ orgId, question, conversationId, onMeta, onToken, onTitle, onDone, onError }) {
+  const res = await fetch(`/api/org/${orgId}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, conversationId }),
+  });
+
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => ({}));
+    onError(data.error || 'Failed to get a response.');
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let sepIndex;
+    while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
+      const rawEvent = buffer.slice(0, sepIndex);
+      buffer = buffer.slice(sepIndex + 2);
+
+      let eventType = 'message';
+      let dataLine = '';
+      for (const line of rawEvent.split('\n')) {
+        if (line.startsWith('event:')) eventType = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+      }
+      if (!dataLine) continue;
+
+      let data;
+      try {
+        data = JSON.parse(dataLine);
+      } catch {
+        continue;
+      }
+
+      if (eventType === 'meta') onMeta(data);
+      else if (eventType === 'token') onToken(data.text);
+      else if (eventType === 'title') onTitle(data.title);
+      else if (eventType === 'done') onDone();
+      else if (eventType === 'error') onError(data.message);
+    }
+  }
+}
 
 function ConversationRow({ conversation, active, onSelect, onRename, onDelete }) {
   const [editing, setEditing] = useState(false);
@@ -126,7 +204,7 @@ export default function OrgChatPage() {
       const data = await res.json();
       if (!res.ok) return;
       setMessages(
-        (data.messages || []).map((m) => ({ id: m.id, role: m.role, content: m.content }))
+        (data.messages || []).map((m) => ({ id: m.id, role: m.role, content: m.content, confidence: m.confidence }))
       );
       setConversationId(id);
     } finally {
@@ -179,34 +257,56 @@ export default function OrgChatPage() {
 
     setInput('');
     setError('');
-    setMessages((prev) => [...prev, { id: `local-${Date.now()}`, role: 'user', content: question }]);
+
+    const wasNewConversation = !conversationId;
+    let activeConvId = conversationId;
+    const assistantMsgId = `assistant-${Date.now()}`;
+
+    setMessages((prev) => [
+      ...prev,
+      { id: `local-${Date.now()}`, role: 'user', content: question },
+      { id: assistantMsgId, role: 'assistant', content: '', sources: [], confidence: null, streaming: true },
+    ]);
     setSending(true);
 
     try {
-      const res = await fetch(`/api/org/${orgId}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, conversationId }),
+      await streamChatResponse({
+        orgId,
+        question,
+        conversationId,
+        onMeta: ({ conversationId: newConvId, sources, confidence }) => {
+          activeConvId = newConvId;
+          setConversationId(newConvId);
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMsgId ? { ...m, sources, confidence } : m))
+          );
+          if (wasNewConversation) loadConversations();
+        },
+        onToken: (text) => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMsgId ? { ...m, content: m.content + text } : m))
+          );
+        },
+        onTitle: (title) => {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === activeConvId ? { ...c, title, preview: title } : c))
+          );
+        },
+        onDone: () => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMsgId ? { ...m, streaming: false } : m))
+          );
+        },
+        onError: (message) => {
+          setError(message === 'ORG_OPENAI_KEY_MISSING'
+            ? 'This organization has no OpenAI API key configured. Ask a super admin to set one in Settings.'
+            : (message || 'Failed to get a response.'));
+          setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
+        },
       });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error === 'ORG_OPENAI_KEY_MISSING'
-          ? 'This organization has no OpenAI API key configured. Ask a super admin to set one in Settings.'
-          : (data.error || 'Failed to get a response.'));
-        return;
-      }
-
-      setConversationId(data.conversationId);
-      setMessages((prev) => [
-        ...prev,
-        { id: `assistant-${Date.now()}`, role: 'assistant', content: data.answer, sources: data.sources },
-      ]);
-
-      const isNew = !conversationId;
-      if (isNew) loadConversations();
     } catch {
       setError('Failed to contact the organization chat API.');
+      setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
     } finally {
       setSending(false);
     }
@@ -301,17 +401,39 @@ export default function OrgChatPage() {
                       )}
                     </div>
 
-                    <div className={cn('max-w-[85%] min-w-0 space-y-2 sm:max-w-[75%]', m.role === 'user' ? 'items-end' : 'items-start')}>
+                    <div className={cn('flex max-w-[85%] min-w-0 flex-col space-y-2 sm:max-w-[75%]', m.role === 'user' ? 'items-end' : 'items-start')}>
                       <div
                         className={cn(
-                          'rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap',
+                          'rounded-2xl px-4 py-3 text-sm',
                           m.role === 'user'
-                            ? 'bg-blue-500 text-white'
+                            ? 'whitespace-pre-wrap bg-blue-500 text-white'
                             : 'border border-gray-200 bg-gray-100 text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100'
                         )}
                       >
-                        {m.content}
+                        {m.role === 'user' ? (
+                          m.content
+                        ) : m.content ? (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                            {m.content}
+                          </ReactMarkdown>
+                        ) : m.streaming ? (
+                          <span className="flex items-center gap-2 text-gray-400">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Thinking...
+                          </span>
+                        ) : null}
                       </div>
+
+                      {m.role === 'assistant' && m.confidence && (
+                        <span
+                          className={cn(
+                            'inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[11px] font-medium capitalize',
+                            CONFIDENCE_STYLES[m.confidence] || CONFIDENCE_STYLES.low
+                          )}
+                        >
+                          {m.confidence} confidence
+                        </span>
+                      )}
 
                       {m.sources?.length > 0 && (
                         <div className="flex flex-wrap gap-2">
@@ -347,13 +469,6 @@ export default function OrgChatPage() {
                   </motion.div>
                 ))}
               </AnimatePresence>
-            )}
-
-            {sending && (
-              <div className="flex items-center gap-2 text-sm text-gray-400">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Thinking...
-              </div>
             )}
 
             <div ref={messagesEndRef} />
