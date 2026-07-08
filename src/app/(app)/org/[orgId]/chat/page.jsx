@@ -36,11 +36,11 @@ const markdownComponents = {
   ),
 };
 
-async function streamChatResponse({ orgId, question, conversationId, onMeta, onToken, onTitle, onDone, onError }) {
+async function streamChatResponse({ orgId, question, conversationId, scope, onMeta, onToken, onTitle, onDone, onError }) {
   const res = await fetch(`/api/org/${orgId}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, conversationId }),
+    body: JSON.stringify({ question, conversationId, scope }),
   });
 
   if (!res.ok || !res.body) {
@@ -181,6 +181,7 @@ export default function OrgChatPage() {
   const [conversationId, setConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
+  const [scope, setScope] = useState('organization');
   const [sending, setSending] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [error, setError] = useState('');
@@ -282,6 +283,7 @@ export default function OrgChatPage() {
         orgId,
         question,
         conversationId,
+        scope,
         onMeta: ({ conversationId: newConvId, sources, confidence }) => {
           activeConvId = newConvId;
           setConversationId(newConvId);
@@ -483,6 +485,28 @@ export default function OrgChatPage() {
           )}
 
           <form onSubmit={sendMessage} className="border-t border-gray-200 dark:border-gray-700 px-4 py-4 sm:px-6">
+            <div className="mb-2 flex items-center gap-2 text-xs">
+              <span className="text-gray-500 dark:text-gray-400">Search scope:</span>
+              {[
+                { value: 'organization', label: 'Organization' },
+                { value: 'department', label: 'Department' },
+                { value: 'personal', label: 'Personal' },
+              ].map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => setScope(item.value)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 transition',
+                    scope === item.value
+                      ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                      : 'border-gray-300 text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
             <div className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
               <input
                 value={input}

@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import OpenAI from "openai";
-import { resolveOrgRole } from "@/lib/orgGuard";
-import { orgSearch } from "@/lib/vectorSearch";
+import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
+import { hybridOrgSearch } from "@/lib/hybridSearch";
+import { expandQuery } from "@/lib/queryExpansion";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
+
+function normalizeScope(scope) {
+  return ["personal", "department", "organization"].includes(scope)
+    ? scope
+    : "organization";
+}
 
 export async function POST(req, { params }) {
   const session = await getServerSession();
@@ -18,6 +25,8 @@ export async function POST(req, { params }) {
   const body = await req.json().catch(() => ({}));
   const query = body.query?.trim();
   const limit = Math.min(Math.max(parseInt(body.limit, 10) || 8, 1), 20);
+  const scope = normalizeScope(body.scope);
+  const departmentId = body.departmentId || null;
 
   if (!query) {
     return NextResponse.json({ error: "Query is required" }, { status: 400 });
@@ -29,15 +38,31 @@ export async function POST(req, { params }) {
   }
 
   const openai = new OpenAI({ apiKey });
+  const expandedQueries = await expandQuery(openai, query);
+
   const embRes = await openai.embeddings.create({
     model: "text-embedding-3-small",
-    input: query,
+    input: expandedQueries,
   });
-  const queryEmbedding = embRes.data[0].embedding;
+  const queryEmbeddings = embRes.data.map((item) => item.embedding);
 
-  const rows = await orgSearch(queryEmbedding, { userId: user.id, orgId, limit });
+  const rows = await hybridOrgSearch({
+    queries: expandedQueries,
+    embeddings: queryEmbeddings,
+    userId: user.id,
+    orgId,
+    limit,
+    scope,
+    departmentId,
+    isSuperAdmin: isSuperAdmin(role),
+  });
 
   return NextResponse.json({
+    retrieval: {
+      mode: "hybrid",
+      scope,
+      expandedQueries,
+    },
     results: rows.map((r) => ({
       chunkId: r.id,
       documentId: r.document_id,
@@ -50,6 +75,8 @@ export async function POST(req, { params }) {
       department: r.department_name,
       scope: r.scope,
       distance: r.distance,
+      keywordScore: r.keyword_score,
+      hybridScore: r.hybridScore,
     })),
   });
 }
