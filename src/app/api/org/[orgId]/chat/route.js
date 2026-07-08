@@ -3,7 +3,8 @@ import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-import { orgSearch } from "@/lib/vectorSearch";
+import { hybridOrgSearch } from "@/lib/hybridSearch";
+import { expandQuery } from "@/lib/queryExpansion";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 
@@ -20,6 +21,12 @@ Response format:
 - For broader or exploratory questions about a topic, project, or department, structure the answer with markdown headings for whichever of these sections are relevant (skip ones that don't apply): ## Overview, ## Objectives, ## Documents, ## Teams, ## Timeline, ## Related Knowledge.
 - Use markdown (headings, bullet lists, bold) where it improves readability.
 `.trim();
+
+function normalizeScope(scope) {
+  return ["personal", "department", "organization"].includes(scope)
+    ? scope
+    : "organization";
+}
 
 function computeConfidence(chunks) {
   if (!chunks.length) return "low";
@@ -95,6 +102,8 @@ export async function POST(req, { params }) {
 
   const body = await req.json().catch(() => ({}));
   const question = body.question?.trim();
+  const scope = normalizeScope(body.scope);
+  const departmentId = body.departmentId || null;
   let conversationId = body.conversationId || null;
 
   if (!question) {
@@ -149,16 +158,22 @@ export async function POST(req, { params }) {
     ? `${sessionContextNote}Current question: ${question}`
     : question;
 
+  const expandedQueries = await expandQuery(openai, retrievalQuery);
+
   const embRes = await openai.embeddings.create({
     model: "text-embedding-3-small",
-    input: retrievalQuery,
+    input: expandedQueries,
   });
-  const queryEmbedding = embRes.data[0].embedding;
+  const queryEmbeddings = embRes.data.map((item) => item.embedding);
 
-  const chunks = await orgSearch(queryEmbedding, {
+  const chunks = await hybridOrgSearch({
+    queries: expandedQueries,
+    embeddings: queryEmbeddings,
     userId: user.id,
     orgId,
     limit: 8,
+    scope,
+    departmentId,
     isSuperAdmin: isSuperAdmin(role),
   });
 

@@ -34,8 +34,14 @@ export async function GET(req, { params }) {
     );
   }
 
+  const { searchParams } = new URL(req.url);
+  const mineOnly = searchParams.get("mine") === "1" || searchParams.get("mine") === "true";
+
   const departments = await prisma.department.findMany({
-    where: { orgId },
+    where: {
+      orgId,
+      ...(mineOnly ? { members: { some: { userId: user.id } } } : {}),
+    },
     include: {
       _count: {
         select: {
