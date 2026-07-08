@@ -8,7 +8,13 @@ function scopeSql({ scope = "organization", departmentId = null }) {
       return Prisma.sql`AND d."departmentId" = ${departmentId}`;
     }
 
-    return Prisma.sql`AND d."departmentId" IS NOT NULL`;
+    // No specific department chosen (e.g. the requester belongs to none) —
+    // restrict to departments they're actually a member of via the `dm`
+    // join already present in every caller's WHERE clause, not every
+    // department in the org. isSuperAdmin does NOT bypass this: "Department"
+    // scope is a narrowing choice, and narrowing to a department you're not
+    // in must never silently widen to "all departments."
+    return Prisma.sql`AND d."departmentId" IS NOT NULL AND dm."userId" IS NOT NULL`;
   }
 
   if (scope === "personal") {
