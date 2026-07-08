@@ -31,7 +31,17 @@ function normalizeScope(scope) {
 function computeConfidence(chunks) {
   if (!chunks.length) return "low";
   const top = chunks.slice(0, 5);
-  const avgDistance = top.reduce((sum, c) => sum + Number(c.distance ?? 1), 0) / top.length;
+  const avgDistance = top.reduce((sum, c) => {
+    const vectorDistance = Number(c.distance ?? 1);
+    // Chunks surfaced only by keyword search carry a placeholder distance
+    // of 1 (no cosine distance exists for a keyword-only hit), which would
+    // otherwise score a genuine keyword match as if it were unrelated. A
+    // real keyword hit (keywordScore > 0) is treated as at least as strong
+    // as a solid vector match instead.
+    const hasKeywordMatch = Number(c.keywordScore ?? c.keyword_score ?? 0) > 0;
+    const effectiveDistance = hasKeywordMatch ? Math.min(vectorDistance, 0.15) : vectorDistance;
+    return sum + effectiveDistance;
+  }, 0) / top.length;
   if (avgDistance <= 0.18 && chunks.length >= 3) return "high";
   if (avgDistance <= 0.3) return "medium";
   return "low";
