@@ -2,7 +2,7 @@
 
 import { use, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FolderKanban, Plus, Pencil, Trash2 } from "lucide-react";
+import { FolderKanban, Plus, Pencil, Trash2, Users, X } from "lucide-react";
 import RepositoryDocumentCard from "@/components/repository/RepositoryDocumentCard";
 import RepositoryFilters from "@/components/repository/RepositoryFilters";
 import UploadToRepositoryModal from "@/components/repository/UploadToRepositoryModal";
@@ -56,6 +56,16 @@ export default function DepartmentPage({ params }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [isEditingProject, setIsEditingProject] = useState(false);
+
+  // Members tab state
+  const [members, setMembers] = useState([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState("");
+  const [addEmail, setAddEmail] = useState("");
+  const [addRole, setAddRole] = useState("member");
+  const [addingMember, setAddingMember] = useState(false);
+  const [addMemberError, setAddMemberError] = useState("");
+  const canManageMembers = orgRole === "super_admin" || orgRole === "dept_admin";
 
   const queryString = useMemo(() => {
     const search = new URLSearchParams();
@@ -124,6 +134,68 @@ export default function DepartmentPage({ params }) {
     }
   }
 
+  async function loadMembers() {
+    if (!orgId || !deptId) return;
+    setMembersLoading(true);
+    setMembersError("");
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${deptId}/members`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load members.");
+      }
+      setMembers(await res.json());
+    } catch (err) {
+      setMembersError(err.message || "Failed to load members.");
+      setMembers([]);
+    } finally {
+      setMembersLoading(false);
+    }
+  }
+
+  const handleAddMember = async (e) => {
+    e.preventDefault();
+    const email = addEmail.trim();
+    if (!email || addingMember) return;
+
+    setAddingMember(true);
+    setAddMemberError("");
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${deptId}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role: addRole }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to add member.");
+      }
+      setAddEmail("");
+      setAddRole("member");
+      await loadMembers();
+    } catch (err) {
+      setAddMemberError(err.message || "Failed to add member.");
+    } finally {
+      setAddingMember(false);
+    }
+  };
+
+  const handleRemoveMember = async (memberUserId) => {
+    if (!confirm("Remove this member from the department?")) return;
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${deptId}/members/${memberUserId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to remove member.");
+      }
+      setMembers((prev) => prev.filter((m) => m.userId !== memberUserId));
+    } catch (err) {
+      alert(err.message || "Failed to remove member.");
+    }
+  };
+
   useEffect(() => {
     setPage(1);
   }, [filters.category, filters.lifecycle, filters.fileType, filters.dateFrom, filters.dateTo]);
@@ -134,6 +206,10 @@ export default function DepartmentPage({ params }) {
 
   useEffect(() => {
     if (tab === "projects") loadProjects();
+  }, [orgId, deptId, tab]);
+
+  useEffect(() => {
+    if (tab === "members") loadMembers();
   }, [orgId, deptId, tab]);
 
   const openProject = (id) => router.push(`/project?id=${id}`);
@@ -224,7 +300,7 @@ export default function DepartmentPage({ params }) {
                 Upload Document
               </button>
             ) : null
-          ) : (
+          ) : tab === "projects" ? (
             <button
               type="button"
               onClick={() => setShowCreateProjectModal(true)}
@@ -233,7 +309,7 @@ export default function DepartmentPage({ params }) {
               <Plus className="h-4 w-4" />
               New Project
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -259,6 +335,17 @@ export default function DepartmentPage({ params }) {
           }`}
         >
           Projects
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("members")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === "members"
+              ? "border-black dark:border-white text-gray-900 dark:text-gray-100"
+              : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          }`}
+        >
+          Members
         </button>
       </div>
 
@@ -324,7 +411,7 @@ export default function DepartmentPage({ params }) {
             onUploaded={loadDocuments}
           />
         </>
-      ) : (
+      ) : tab === "projects" ? (
         <>
           {projectsLoading ? (
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-500 dark:text-gray-400">
@@ -416,6 +503,93 @@ export default function DepartmentPage({ params }) {
             project={editTarget}
             isLoading={isEditingProject}
           />
+        </>
+      ) : (
+        <>
+          {canManageMembers && (
+            <form
+              onSubmit={handleAddMember}
+              className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4"
+            >
+              <input
+                type="email"
+                required
+                value={addEmail}
+                onChange={(e) => setAddEmail(e.target.value)}
+                placeholder="Member's email"
+                className="min-w-[220px] flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400"
+              />
+              <select
+                value={addRole}
+                onChange={(e) => setAddRole(e.target.value)}
+                className="rounded-md border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 text-sm text-gray-900 dark:text-gray-100"
+              >
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button
+                type="submit"
+                disabled={addingMember || !addEmail.trim()}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+                Add Member
+              </button>
+              {addMemberError ? (
+                <p className="w-full text-sm text-red-600 dark:text-red-400">{addMemberError}</p>
+              ) : null}
+            </form>
+          )}
+
+          {membersError ? (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
+              {membersError}
+            </div>
+          ) : membersLoading ? (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-500 dark:text-gray-400">
+              Loading members...
+            </div>
+          ) : members.length === 0 ? (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
+                <Users className="w-8 h-8 text-gray-500 dark:text-gray-400" />
+              </div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">No members yet</h2>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                {canManageMembers
+                  ? "Add an existing org member to this department so they can see its documents and ask about them in Org Chat."
+                  : "This department has no members yet."}
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              {members.map((member) => (
+                <div key={member.id} className="flex items-center justify-between gap-4 p-4">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {member.name || member.email}
+                    </p>
+                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">{member.email}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="rounded-full bg-gray-100 dark:bg-gray-700 px-2.5 py-0.5 text-xs font-medium capitalize text-gray-700 dark:text-gray-300">
+                      {member.role}
+                    </span>
+                    {canManageMembers && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMember(member.userId)}
+                        title="Remove member"
+                        className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </main>
