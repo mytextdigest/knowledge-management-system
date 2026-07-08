@@ -185,6 +185,7 @@ export default function OrgChatPage() {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [error, setError] = useState('');
   const [convListOpen, setConvListOpen] = useState(false);
+  const [selectedSource, setSelectedSource] = useState(null);
   const messagesEndRef = useRef(null);
 
   const loadConversations = async () => {
@@ -204,7 +205,13 @@ export default function OrgChatPage() {
       const data = await res.json();
       if (!res.ok) return;
       setMessages(
-        (data.messages || []).map((m) => ({ id: m.id, role: m.role, content: m.content, confidence: m.confidence }))
+        (data.messages || []).map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          sources: m.sources || [],
+          confidence: m.confidence,
+        }))
       );
       setConversationId(id);
     } finally {
@@ -225,6 +232,7 @@ export default function OrgChatPage() {
     setConversationId(null);
     setMessages([]);
     setError('');
+    setSelectedSource(null);
   };
 
   const renameConversation = async (id, title) => {
@@ -444,23 +452,17 @@ export default function OrgChatPage() {
                             const className =
                               'inline-flex max-w-[220px] items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-600 hover:border-blue-300 hover:text-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-blue-700 dark:hover:text-blue-400';
 
-                            return s.url ? (
-                              <a
-                                key={i}
-                                href={s.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                            return (
+                              <button
+                                key={`${s.documentId || s.filename || 'source'}-${i}`}
+                                type="button"
+                                onClick={() => setSelectedSource(s)}
                                 title={label}
                                 className={className}
                               >
                                 <FileText className="h-3 w-3 flex-shrink-0" />
-                                <span className="truncate">{label}</span>
-                              </a>
-                            ) : (
-                              <span key={i} title={label} className={className}>
-                                <FileText className="h-3 w-3 flex-shrink-0" />
-                                <span className="truncate">{label}</span>
-                              </span>
+                                <span className="truncate">{label || 'Source document'}</span>
+                              </button>
                             );
                           })}
                         </div>
@@ -500,6 +502,51 @@ export default function OrgChatPage() {
           </form>
         </main>
       </div>
+
+      {selectedSource && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl dark:bg-gray-900">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Citation Preview
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {selectedSource.filename || 'Source document'}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedSource(null)}
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mb-4 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100">
+              {selectedSource.preview || 'Preview text is not available for this citation.'}
+            </div>
+
+            <div className="space-y-1 text-sm text-gray-600 dark:text-gray-300">
+              {selectedSource.department && <p>Department: {selectedSource.department}</p>}
+              {selectedSource.project && <p>Project: {selectedSource.project}</p>}
+            </div>
+
+            {selectedSource.url && (
+              <a
+                href={selectedSource.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Open Source Document
+              </a>
+            )}
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }
