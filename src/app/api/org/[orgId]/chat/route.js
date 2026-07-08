@@ -195,6 +195,7 @@ export async function POST(req, { params }) {
       filename: g.filename,
       department: g.department || null,
       project: g.project || null,
+      preview: g.texts.join(" ").slice(0, 900),
       url: g.filePath ? await generateSignedUrl(g.filePath).catch(() => null) : null,
     }))
   );
@@ -250,7 +251,16 @@ export async function POST(req, { params }) {
         }
 
         await prisma.orgMessage.create({
-          data: { conversationId, role: "assistant", content: answer, confidence },
+          data: { conversationId, role: "assistant", content: answer, sources, confidence },
+        });
+
+        await prisma.chatAuditLog.create({
+          data: {
+            orgId,
+            userId: user.id,
+            question,
+            citedDocIds: [...new Set(sources.map((s) => s.documentId).filter(Boolean))],
+          },
         });
 
         await prisma.orgConversation.update({

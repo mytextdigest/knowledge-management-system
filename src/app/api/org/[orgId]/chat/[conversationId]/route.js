@@ -30,7 +30,8 @@ export async function GET(req, { params }) {
       id: m.id,
       role: m.role,
       content: m.content,
-      confidence: m.confidence,
+      sources: m.sources || [],
+      confidence: m.confidence || null,
       createdAt: m.createdAt,
     })),
   });
