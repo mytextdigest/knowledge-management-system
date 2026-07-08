@@ -36,11 +36,11 @@ const markdownComponents = {
   ),
 };
 
-async function streamChatResponse({ orgId, question, conversationId, scope, onMeta, onToken, onTitle, onDone, onError }) {
+async function streamChatResponse({ orgId, question, conversationId, scope, departmentId, onMeta, onToken, onTitle, onDone, onError }) {
   const res = await fetch(`/api/org/${orgId}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, conversationId, scope }),
+    body: JSON.stringify({ question, conversationId, scope, departmentId }),
   });
 
   if (!res.ok || !res.body) {
@@ -182,6 +182,8 @@ export default function OrgChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [scope, setScope] = useState('organization');
+  const [myDepartments, setMyDepartments] = useState([]);
+  const [departmentId, setDepartmentId] = useState(null);
   const [sending, setSending] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [error, setError] = useState('');
@@ -223,6 +225,21 @@ export default function OrgChatPage() {
   useEffect(() => {
     if (!orgId) return;
     loadConversations().finally(() => setLoadingHistory(false));
+  }, [orgId]);
+
+  useEffect(() => {
+    if (!orgId) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/org/${orgId}/department?mine=1`);
+        const data = await res.json();
+        const depts = Array.isArray(data) ? data : [];
+        setMyDepartments(depts);
+        setDepartmentId((prev) => prev ?? depts[0]?.id ?? null);
+      } catch {
+        setMyDepartments([]);
+      }
+    })();
   }, [orgId]);
 
   useEffect(() => {
@@ -284,6 +301,7 @@ export default function OrgChatPage() {
         question,
         conversationId,
         scope,
+        departmentId: scope === 'department' ? departmentId : null,
         onMeta: ({ conversationId: newConvId, sources, confidence }) => {
           activeConvId = newConvId;
           setConversationId(newConvId);
@@ -506,6 +524,20 @@ export default function OrgChatPage() {
                   {item.label}
                 </button>
               ))}
+              {scope === 'department' && myDepartments.length > 1 && (
+                <select
+                  value={departmentId || ''}
+                  onChange={(e) => setDepartmentId(e.target.value || null)}
+                  className="rounded-full border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+                >
+                  {myDepartments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              )}
+              {scope === 'department' && myDepartments.length === 0 && (
+                <span className="text-gray-400 dark:text-gray-500">You're not a member of any department.</span>
+              )}
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
               <input

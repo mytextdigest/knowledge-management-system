@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { computeBM25, tokenize } from "@/lib/keywordSearch";
 
 function scopeSql({ scope = "organization", departmentId = null }) {
   if (scope === "department") {
@@ -97,20 +98,31 @@ export async function orgKeywordSearch(
   }
 ) {
   const safeQuery = String(query || "").trim();
-  const scopeFilter = scopeSql({ scope, departmentId });
-
   if (!safeQuery) return [];
 
-  return prisma.$queryRaw`
+  const terms = tokenize(safeQuery).slice(0, 8);
+  if (terms.length === 0) return [];
+
+  const scopeFilter = scopeSql({ scope, departmentId });
+  const termFilters = terms.map(
+    (term) => Prisma.sql`
+      (
+        c.text ILIKE ${`%${term}%`}
+        OR c.summary ILIKE ${`%${term}%`}
+        OR d.filename ILIKE ${`%${term}%`}
+      )
+    `
+  );
+
+  // Bounded candidate pool (RBAC/scope-filtered) for computeBM25 to rank in
+  // memory, rather than scoring the entire org corpus per query.
+  const candidatePoolSize = Math.max(limit * 15, 150);
+
+  const candidates = await prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
            d.filename, d.file_path AS "filePath", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
            dept.name AS department_name,
-           proj.name AS project_name,
-           1::float AS distance,
-           ts_rank_cd(
-             to_tsvector('english', coalesce(c.text, '') || ' ' || coalesce(c.summary, '') || ' ' || coalesce(d.filename, '')),
-             plainto_tsquery('english', ${safeQuery})
-           )::float AS keyword_score
+           proj.name AS project_name
     FROM "Chunk" c
     JOIN "Document" d ON c.document_id = d.id
     LEFT JOIN "Department" dept ON dept.id = d."departmentId"
@@ -119,8 +131,7 @@ export async function orgKeywordSearch(
       ON d."departmentId" = dm."departmentId" AND dm."userId" = ${userId}
     WHERE d."orgId" = ${orgId}
       ${scopeFilter}
-      AND to_tsvector('english', coalesce(c.text, '') || ' ' || coalesce(c.summary, '') || ' ' || coalesce(d.filename, ''))
-          @@ plainto_tsquery('english', ${safeQuery})
+      AND (${Prisma.join(termFilters, " OR ")})
       AND (
         (d.scope = 'repository'
          AND d.lifecycle = 'published'
@@ -140,9 +151,15 @@ export async function orgKeywordSearch(
             )
         )
       )
-    ORDER BY keyword_score DESC
-    LIMIT ${Prisma.raw(String(limit))}
+    LIMIT ${Prisma.raw(String(candidatePoolSize))}
   `;
+
+  if (candidates.length === 0) return [];
+
+  return computeBM25(candidates, safeQuery)
+    .filter((c) => c.score > 0)
+    .slice(0, limit)
+    .map((c) => ({ ...c, distance: 1, keyword_score: c.score }));
 }
 
 export async function orgFallbackTextSearch(

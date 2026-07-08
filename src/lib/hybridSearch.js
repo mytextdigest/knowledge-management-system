@@ -19,6 +19,13 @@ function mergeResults(rows, limit = 8) {
     const next = {
       ...(existing || {}),
       ...row,
+      // Keep the best (lowest) distance seen for this chunk. Keyword/fallback
+      // rows carry a placeholder distance of 1 — without this, spreading a
+      // later keyword row over an earlier vector row would clobber the real
+      // cosine distance and skew confidence scoring downstream.
+      distance: existing?.distance !== undefined
+        ? Math.min(Number(existing.distance), Number(row.distance))
+        : row.distance,
       vectorScore: Math.max(existing?.vectorScore || 0, vectorScore),
       keywordScore: Math.max(existing?.keywordScore || 0, keywordScore),
     };
