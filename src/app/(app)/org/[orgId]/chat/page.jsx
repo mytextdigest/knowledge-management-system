@@ -227,20 +227,22 @@ export default function OrgChatPage() {
     loadConversations().finally(() => setLoadingHistory(false));
   }, [orgId]);
 
-  useEffect(() => {
-    if (!orgId) return;
-    (async () => {
-      try {
-        const res = await fetch(`/api/org/${orgId}/department?mine=1`);
-        const data = await res.json();
-        const depts = Array.isArray(data) ? data : [];
-        setMyDepartments(depts);
-        setDepartmentId((prev) => prev ?? depts[0]?.id ?? null);
-      } catch {
-        setMyDepartments([]);
-      }
-    })();
-  }, [orgId]);
+  // Disabled along with the scope selector UI below — no need to fetch
+  // "my departments" while the control that would use it is hidden.
+  // useEffect(() => {
+  //   if (!orgId) return;
+  //   (async () => {
+  //     try {
+  //       const res = await fetch(`/api/org/${orgId}/department?mine=1`);
+  //       const data = await res.json();
+  //       const depts = Array.isArray(data) ? data : [];
+  //       setMyDepartments(depts);
+  //       setDepartmentId((prev) => prev ?? depts[0]?.id ?? null);
+  //     } catch {
+  //       setMyDepartments([]);
+  //     }
+  //   })();
+  // }, [orgId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -503,42 +505,51 @@ export default function OrgChatPage() {
           )}
 
           <form onSubmit={sendMessage} className="border-t border-gray-200 dark:border-gray-700 px-4 py-4 sm:px-6">
-            <div className="mb-2 flex items-center gap-2 text-xs">
-              <span className="text-gray-500 dark:text-gray-400">Search scope:</span>
-              {[
-                { value: 'organization', label: 'Organization' },
-                { value: 'department', label: 'Department' },
-                { value: 'personal', label: 'Personal' },
-              ].map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  onClick={() => setScope(item.value)}
-                  className={cn(
-                    'rounded-full border px-3 py-1 transition',
-                    scope === item.value
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                      : 'border-gray-300 text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
-                  )}
-                >
-                  {item.label}
-                </button>
-              ))}
-              {scope === 'department' && myDepartments.length > 1 && (
-                <select
-                  value={departmentId || ''}
-                  onChange={(e) => setDepartmentId(e.target.value || null)}
-                  className="rounded-full border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
-                >
-                  {myDepartments.map((d) => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))}
-                </select>
-              )}
-              {scope === 'department' && myDepartments.length === 0 && (
-                <span className="text-gray-400 dark:text-gray-500">You're not a member of any department.</span>
-              )}
-            </div>
+            {/* Scope selector temporarily disabled — RBAC already governs
+                document access on every scope, and "Department" scope
+                depends on DepartmentMember rows most org members don't have
+                yet. Scope is hardcoded to 'organization' below until the
+                team decides whether to keep Personal/Department. See
+                REQUIREMENTS_CONVERSATIONAL_ASSISTANT.md FR-G.
+            {
+              <div className="mb-2 flex items-center gap-2 text-xs">
+                <span className="text-gray-500 dark:text-gray-400">Search scope:</span>
+                {[
+                  { value: 'organization', label: 'Organization' },
+                  { value: 'department', label: 'Department' },
+                  { value: 'personal', label: 'Personal' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => setScope(item.value)}
+                    className={cn(
+                      'rounded-full border px-3 py-1 transition',
+                      scope === item.value
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                        : 'border-gray-300 text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                {scope === 'department' && myDepartments.length > 1 && (
+                  <select
+                    value={departmentId || ''}
+                    onChange={(e) => setDepartmentId(e.target.value || null)}
+                    className="rounded-full border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+                  >
+                    {myDepartments.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                )}
+                {scope === 'department' && myDepartments.length === 0 && (
+                  <span className="text-gray-400 dark:text-gray-500">You're not a member of any department.</span>
+                )}
+              </div>
+            }
+            */}
             <div className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
               <input
                 value={input}
