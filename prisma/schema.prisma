@@ -180,6 +180,7 @@ model ChatAuditLog {
   userId      String
   question    String
   citedDocIds String[] @default([])
+  outcome     String   @default("answered") // "answered" | "denied"
   createdAt   DateTime @default(now()) @map("created_at")
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -188,6 +189,7 @@ model ChatAuditLog {
   @@index([orgId])
   @@index([userId])
   @@index([createdAt])
+  @@index([outcome])
 }
 
 model Project {

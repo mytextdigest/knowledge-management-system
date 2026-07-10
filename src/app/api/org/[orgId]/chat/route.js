@@ -106,15 +106,32 @@ export async function POST(req, { params }) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { orgId } = await params;
-  const { user, role } = await resolveOrgRole(session.user.email, orgId);
-  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
-  if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
   const body = await req.json().catch(() => ({}));
   const question = body.question?.trim();
   const scope = normalizeScope(body.scope);
   const departmentId = body.departmentId || null;
   let conversationId = body.conversationId || null;
+
+  const { user, role } = await resolveOrgRole(session.user.email, orgId);
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  if (!role) {
+    // Authenticated user, but not a member of this org — log the denied
+    // attempt so the audit trail can surface access-denied probing, not
+    // just successfully-answered queries. Best-effort: a logging failure
+    // (e.g. bad orgId) must not prevent the 403 from being returned.
+    await prisma.chatAuditLog
+      .create({
+        data: {
+          orgId,
+          userId: user.id,
+          question: question || "",
+          citedDocIds: [],
+          outcome: "denied",
+        },
+      })
+      .catch(() => {});
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   if (!question) {
     return NextResponse.json({ error: "Question is required" }, { status: 400 });
@@ -285,6 +302,7 @@ export async function POST(req, { params }) {
             userId: user.id,
             question,
             citedDocIds: [...new Set(sources.map((s) => s.documentId).filter(Boolean))],
+            outcome: "answered",
           },
         });
 
