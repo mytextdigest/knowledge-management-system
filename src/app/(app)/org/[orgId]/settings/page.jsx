@@ -6,6 +6,7 @@ import {
   Building2, Users, Key, Eye, EyeOff, Loader2,
   CheckCircle2, ArrowLeft, Mail, Shield, Layers,
   Plus, ChevronDown, ChevronUp, UserPlus, Trash2, ExternalLink,
+  ScrollText,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
@@ -40,6 +41,15 @@ export default function OrgSettingsPage() {
   const [showKey, setShowKey] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
   const [keyStatus, setKeyStatus] = useState(null);
+
+  // Audit log
+  const [auditEntries, setAuditEntries] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState('');
+  const [auditOutcomeFilter, setAuditOutcomeFilter] = useState('all');
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditTotalPages, setAuditTotalPages] = useState(1);
+  const [auditTotal, setAuditTotal] = useState(0);
 
   // Invite form
   const [inviteEmail, setInviteEmail] = useState('');
@@ -92,7 +102,7 @@ export default function OrgSettingsPage() {
       }
 
       const validTabs = settingsData.role === 'super_admin'
-        ? ['general', 'members', 'departments', 'apikey']
+        ? ['general', 'members', 'departments', 'apikey', 'audit']
         : ['members', 'departments'];
       setActiveTab(
         validTabs.includes(requestedTab)
@@ -103,6 +113,36 @@ export default function OrgSettingsPage() {
   }, [orgId]);
 
   const canManageDepartments = org?.role === 'super_admin' || org?.role === 'dept_admin';
+
+  const loadAuditLog = async () => {
+    setAuditLoading(true);
+    setAuditError('');
+    try {
+      const search = new URLSearchParams();
+      search.set('page', String(auditPage));
+      if (auditOutcomeFilter !== 'all') search.set('outcome', auditOutcomeFilter);
+      const res = await fetch(`/api/org/${orgId}/audit-log?${search.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to load audit log.');
+      setAuditEntries(Array.isArray(data.entries) ? data.entries : []);
+      setAuditTotalPages(data.totalPages || 1);
+      setAuditTotal(data.total ?? 0);
+    } catch (err) {
+      setAuditError(err.message || 'Failed to load audit log.');
+      setAuditEntries([]);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'audit') loadAuditLog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, auditPage, auditOutcomeFilter, orgId]);
+
+  useEffect(() => {
+    setAuditPage(1);
+  }, [auditOutcomeFilter]);
 
   const createDepartment = async () => {
     if (!deptName.trim()) return;
@@ -320,6 +360,7 @@ export default function OrgSettingsPage() {
     { id: 'members', label: 'Members', icon: Users },
     { id: 'departments', label: 'Departments', icon: Layers },
     ...(org?.role === 'super_admin' ? [{ id: 'apikey', label: 'API Key', icon: Key }] : []),
+    ...(org?.role === 'super_admin' ? [{ id: 'audit', label: 'Audit Log', icon: ScrollText }] : []),
   ];
 
   return (
@@ -764,6 +805,106 @@ export default function OrgSettingsPage() {
                 {keyStatus.msg}
               </p>
             )}
+          </motion.div>
+        )}
+
+        {/* Audit Log tab */}
+        {activeTab === 'audit' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Every Org Chat query, who asked it, and whether it was answered or denied for lacking org access.
+            </p>
+
+            <div className="flex items-center gap-2 text-xs">
+              {[
+                { value: 'all', label: 'All' },
+                { value: 'answered', label: 'Answered' },
+                { value: 'denied', label: 'Denied' },
+              ].map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => setAuditOutcomeFilter(item.value)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 transition',
+                    auditOutcomeFilter === item.value
+                      ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                      : 'border-gray-300 text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+
+            {auditError ? (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
+                {auditError}
+              </div>
+            ) : auditLoading ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-500 dark:text-gray-400">
+                Loading audit log...
+              </div>
+            ) : auditEntries.length === 0 ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">No entries found</h2>
+                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                  No chat queries match this filter yet.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                {auditEntries.map((entry) => (
+                  <div key={entry.id} className="p-4 space-y-1.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{entry.question}</p>
+                      <span
+                        className={cn(
+                          'flex-shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium capitalize',
+                          entry.outcome === 'denied'
+                            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                            : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                        )}
+                      >
+                        {entry.outcome}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {entry.user.name || entry.user.email} &middot; {new Date(entry.createdAt).toLocaleString()}
+                    </p>
+                    {entry.citedDocs.length > 0 && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Cited: {entry.citedDocs.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!auditLoading && auditEntries.length > 0 && auditTotalPages > 1 ? (
+              <div className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-sm text-gray-600 dark:text-gray-300">
+                <span>Page {auditPage} of {auditTotalPages} ({auditTotal} entries)</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
+                    disabled={auditPage <= 1}
+                    className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuditPage((p) => Math.min(auditTotalPages, p + 1))}
+                    disabled={auditPage >= auditTotalPages}
+                    className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </motion.div>
         )}
       </div>
