@@ -31,6 +31,8 @@ model User {
   departmentMembers DepartmentMember[]
   orgConversations  OrgConversation[]
   chatAuditLogs     ChatAuditLog[]
+  auditLogsAsActor  AuditLog[]            @relation("AuditLogActor")
+  auditLogsAsTarget AuditLog[]            @relation("AuditLogTarget")
 }
 
 model OtpToken {
@@ -68,6 +70,7 @@ model Organization {
   documents     Document[]
   conversations OrgConversation[]
   chatAuditLogs ChatAuditLog[]
+  auditLogs     AuditLog[]
   subscription  Subscription?
 
   @@index([name])
@@ -190,6 +193,24 @@ model ChatAuditLog {
   @@index([userId])
   @@index([createdAt])
   @@index([outcome])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  orgId        String
+  actorUserId  String?
+  targetUserId String?
+  action       String
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  actor        User?        @relation("AuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  target       User?        @relation("AuditLogTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([actorUserId])
+  @@index([createdAt])
 }
 
 model Project {

@@ -2,7 +2,7 @@
 
 import { use, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FolderKanban, Plus, Pencil, Trash2, Users, X } from "lucide-react";
+import { FolderKanban, Plus, Pencil, Trash2, Users, X, Shield } from "lucide-react";
 import RepositoryDocumentCard from "@/components/repository/RepositoryDocumentCard";
 import RepositoryFilters from "@/components/repository/RepositoryFilters";
 import UploadToRepositoryModal from "@/components/repository/UploadToRepositoryModal";
@@ -59,6 +59,7 @@ export default function DepartmentPage({ params }) {
 
   // Members tab state
   const [members, setMembers] = useState([]);
+  const [orgLevelAccess, setOrgLevelAccess] = useState([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState("");
   const [addEmail, setAddEmail] = useState("");
@@ -79,6 +80,15 @@ export default function DepartmentPage({ params }) {
 
   useEffect(() => {
     if (!orgId || !deptId) return;
+
+    // Reset tab-scoped modal/state so it doesn't leak across department
+    // navigations — the component instance is reused by Next.js for the
+    // same [deptId] dynamic route.
+    setUploadOpen(false);
+    setShowCreateProjectModal(false);
+    setDeleteTarget(null);
+    setEditTarget(null);
+
     fetch(`/api/org/${orgId}/department`)
       .then((r) => r.json())
       .then((data) => {
@@ -144,10 +154,13 @@ export default function DepartmentPage({ params }) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to load members.");
       }
-      setMembers(await res.json());
+      const data = await res.json();
+      setMembers(data.members || []);
+      setOrgLevelAccess(data.orgLevelAccess || []);
     } catch (err) {
       setMembersError(err.message || "Failed to load members.");
       setMembers([]);
+      setOrgLevelAccess([]);
     } finally {
       setMembersLoading(false);
     }
@@ -590,6 +603,30 @@ export default function DepartmentPage({ params }) {
               ))}
             </div>
           )}
+
+          {!membersLoading && orgLevelAccess.length > 0 ? (
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Org-level access (Super Admin)
+              </p>
+              <div className="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                {orgLevelAccess.map((member) => (
+                  <div key={member.userId} className="flex items-center justify-between gap-4 p-4">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {member.name || member.email}
+                      </p>
+                      <p className="truncate text-xs text-gray-500 dark:text-gray-400">{member.email}</p>
+                    </div>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2.5 py-0.5 text-xs font-medium text-purple-700 dark:text-purple-300">
+                      <Shield className="h-3 w-3" />
+                      Super Admin (not an explicit member)
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </main>
