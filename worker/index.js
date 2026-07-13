@@ -35,10 +35,21 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-function chunkText(text, size = 2000) {
+const CHUNK_OVERLAP_RATIO = 0.15;
+
+// text-embedding-3-small's real limit is 8191 tokens (~30k+ chars) — this is
+// just a defensive cap, not a tuning knob. Actual chunk sizes (see
+// processChunkJob) are far below it, so it should never actually truncate.
+const MAX_EMBEDDING_INPUT_CHARS = 30000;
+
+function chunkText(text, size = 2000, overlap = 0) {
   const chunks = [];
-  for (let i = 0; i < text.length; i += size)
+  const step = Math.max(1, size - overlap);
+
+  for (let i = 0; i < text.length; i += step) {
     chunks.push(text.slice(i, i + size));
+    if (i + size >= text.length) break;
+  }
 
   return chunks;
 }
@@ -80,7 +91,8 @@ async function processChunkJob(job) {
   const endTotal = startTimer("CHUNK JOB TOTAL", { docId });
 
 
-  const chunkSize = visibility === "public" ? 12000 : 10000;
+  const chunkSize = visibility === "public" ? 2500 : 2000;
+  const chunkOverlap = Math.round(chunkSize * CHUNK_OVERLAP_RATIO);
   const BATCH_SIZE = 20; // SAFE for Prisma + Postgres
 
   // -----------------------------
@@ -199,7 +211,7 @@ async function processChunkJob(job) {
           metadata: c.metadata,
         }))
         .filter(c => c.text.length > 0)
-    : chunkText(text, chunkSize)
+    : chunkText(text, chunkSize, chunkOverlap)
         .map(c => forceValidUTF8(sanitizeText(c)))
         .filter(c => c.length > 0)
         .map(c => ({ text: c, metadata: null }));
@@ -327,7 +339,7 @@ async function processEmbeddingJob(job) {
 
     const emb = await openai.embeddings.create({
       model: "text-embedding-3-small",
-      input: chunk.text.slice(0, 8000),
+      input: chunk.text.slice(0, MAX_EMBEDDING_INPUT_CHARS),
     });
 
     const embVec = emb.data[0].embedding;
