@@ -183,7 +183,7 @@ function ProjectPageInner() {
     }
   };
 
-  async function handleFileUpload(file, userId, projectId, visibility) {
+  async function handleFileUpload(file, userId, projectId, visibility, category) {
     const presignRes = await fetch("/api/s3/upload", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -221,6 +221,7 @@ function ProjectPageInner() {
     ingestForm.append("s3Key", key);
     ingestForm.append("projectId", projectId);
     ingestForm.append("visibility", visibility);
+    if (category) ingestForm.append("category", category);
 
     const ingestRes = await fetch("/api/documents/ingest", {
       method: "POST",
@@ -516,7 +517,9 @@ function ProjectPageInner() {
 
         <ModalContent className="flex flex-col max-h-[calc(100vh-8rem)] overflow-hidden">
           <FileUpload
-            onUpload={(file, visibility) => handleFileUpload(file, userId, projectId, visibility)}
+            onUpload={(file, visibility, category) =>
+              handleFileUpload(file, userId, projectId, visibility, category)
+            }
             onClose={() => setUploadModalOpen(false)}
           />
         </ModalContent>
