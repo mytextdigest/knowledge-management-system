@@ -65,6 +65,7 @@ export default function RepositoryFilters({
         <option value="">All Types</option>
         <option value="pdf">PDF</option>
         <option value="spreadsheet">Spreadsheet</option>
+        <option value="doc">Word</option>
         <option value="text">Text</option>
       </select>
 

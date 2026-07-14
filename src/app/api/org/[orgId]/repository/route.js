@@ -8,7 +8,8 @@ const PAGE_SIZE = 20;
 const FILE_TYPE_EXTS = {
   pdf: [".pdf"],
   spreadsheet: [".xlsx", ".xls", ".csv"],
-  text: [".txt", ".docx", ".doc", ".md"],
+  doc: [".docx", ".doc"],
+  text: [".txt", ".md"],
 };
 
 export async function GET(req, { params }) {
