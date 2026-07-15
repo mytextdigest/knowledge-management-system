@@ -5,15 +5,26 @@ import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { cn, formatFileSize } from '@/lib/utils';
 
-const FileUpload = ({ 
-  onUpload, 
+const CATEGORIES = [
+  "Policies",
+  "SOPs",
+  "Reports",
+  "Meeting Knowledge",
+  "Product Knowledge",
+  "Historical Documents",
+  "Other",
+];
+
+const FileUpload = ({
+  onUpload,
   onClose,
   acceptedTypes = ['.txt', '.pdf', '.docx', '.csv', '.xlsx', '.xls'],
   maxFileSize = 10 * 1024 * 1024, // 10MB
-  className 
+  className
 }) => {
   const [dragActive, setDragActive] = useState(false);
   const [files, setFiles] = useState([]);
+  const [category, setCategory] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({});
   const [finalizing, setFinalizing] = useState({});
@@ -131,22 +142,33 @@ const FileUpload = ({
       );
       return;
     }
-  
+
+    if (!category) {
+      setFiles(prev =>
+        prev.map(f =>
+          f.status === 'pending'
+            ? { ...f, errors: ['Document type is required'] }
+            : f
+        )
+      );
+      return;
+    }
+
     setUploading(true);
-  
+
     for (const fileItem of validFiles) {
       try {
         // Start progress
         setUploadProgress(prev => ({ ...prev, [fileItem.id]: 0 }));
-  
+
         // Simulated progress up to 90%
         for (let progress = 0; progress <= 90; progress += 10) {
           setUploadProgress(prev => ({ ...prev, [fileItem.id]: progress }));
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-  
+
         // Actual upload (network / backend)
-        await onUpload(fileItem.file, fileItem.visibility);
+        await onUpload(fileItem.file, fileItem.visibility, category);
   
         // Mark as fully complete only AFTER upload finishes
         setUploadProgress(prev => ({ ...prev, [fileItem.id]: 100 }));
@@ -261,6 +283,28 @@ const FileUpload = ({
               <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100">
                 Selected Files ({files.length})
               </h4>
+
+              {/* Document type */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Document type <span className="text-error-600">*</span>
+                </label>
+                <select
+                  required
+                  className="w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                >
+                  <option value="" disabled>
+                    Select a document type
+                  </option>
+                  {CATEGORIES.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               {/* Batch Visibility Controls */}
               <div className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
