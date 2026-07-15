@@ -6,7 +6,7 @@ import {
   Building2, Users, Key, Eye, EyeOff, Loader2,
   CheckCircle2, ArrowLeft, Mail, Shield, Layers,
   Plus, ChevronDown, ChevronUp, UserPlus, Trash2, ExternalLink,
-  ScrollText,
+  ScrollText, Pencil, Check, X as XIcon,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
@@ -51,6 +51,11 @@ export default function OrgSettingsPage() {
   const [auditTotalPages, setAuditTotalPages] = useState(1);
   const [auditTotal, setAuditTotal] = useState(0);
 
+  // Security events (role grants, department delete/rename, ...)
+  const [securityEvents, setSecurityEvents] = useState([]);
+  const [securityEventsLoading, setSecurityEventsLoading] = useState(false);
+  const [securityEventsError, setSecurityEventsError] = useState('');
+
   // Invite form
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('employee');
@@ -73,12 +78,20 @@ export default function OrgSettingsPage() {
   const [deptError, setDeptError] = useState('');
   const [expandedDeptId, setExpandedDeptId] = useState(null);
   const [deptMembers, setDeptMembers] = useState([]);
+  const [deptOrgLevelAccess, setDeptOrgLevelAccess] = useState([]);
   const [loadingDeptMembers, setLoadingDeptMembers] = useState(false);
   const [addMemberEmail, setAddMemberEmail] = useState('');
   const [addMemberRole, setAddMemberRole] = useState('member');
   const [addingMember, setAddingMember] = useState(false);
   const [memberActionError, setMemberActionError] = useState('');
   const deptMembersRequestRef = useRef(null);
+
+  // Rename/delete department (super_admin only)
+  const [renameDeptId, setRenameDeptId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [deletingDeptId, setDeletingDeptId] = useState(null);
+  const [deptActionError, setDeptActionError] = useState('');
 
   useEffect(() => {
     setDepartmentsError('');
@@ -113,6 +126,7 @@ export default function OrgSettingsPage() {
   }, [orgId]);
 
   const canManageDepartments = org?.role === 'super_admin' || org?.role === 'dept_admin';
+  const canDeleteDepartments = org?.role === 'super_admin';
 
   const loadAuditLog = async () => {
     setAuditLoading(true);
@@ -135,8 +149,24 @@ export default function OrgSettingsPage() {
     }
   };
 
+  const loadSecurityEvents = async () => {
+    setSecurityEventsLoading(true);
+    setSecurityEventsError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/audit-log/security`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to load security events.');
+      setSecurityEvents(Array.isArray(data.entries) ? data.entries : []);
+    } catch (err) {
+      setSecurityEventsError(err.message || 'Failed to load security events.');
+      setSecurityEvents([]);
+    } finally {
+      setSecurityEventsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (activeTab === 'audit') loadAuditLog();
+    if (activeTab === 'audit') { loadAuditLog(); loadSecurityEvents(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, auditPage, auditOutcomeFilter, orgId]);
 
@@ -162,6 +192,57 @@ export default function OrgSettingsPage() {
     finally { setCreatingDept(false); }
   };
 
+  const startRenameDepartment = (dept) => {
+    setRenameDeptId(dept.id);
+    setRenameValue(dept.name);
+    setDeptActionError('');
+  };
+
+  const cancelRenameDepartment = () => {
+    setRenameDeptId(null);
+    setRenameValue('');
+  };
+
+  const saveRenameDepartment = async (dept) => {
+    const name = renameValue.trim();
+    if (!name || name === dept.name) { cancelRenameDepartment(); return; }
+    setRenaming(true);
+    setDeptActionError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${dept.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setDeptActionError(data.error || 'Failed to rename department.'); return; }
+      setDepartments((prev) =>
+        prev.map((d) => (d.id === dept.id ? { ...d, name: data.name } : d)).sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setRenameDeptId(null);
+    } catch { setDeptActionError('Failed to rename department.'); }
+    finally { setRenaming(false); }
+  };
+
+  const deleteDepartment = async (dept) => {
+    if (!confirm(`Delete department "${dept.name}"? This cannot be undone.`)) return;
+    setDeletingDeptId(dept.id);
+    setDeptActionError('');
+    try {
+      let res = await fetch(`/api/org/${orgId}/department/${dept.id}`, { method: 'DELETE' });
+      let data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.requiresConfirmation) {
+        if (!confirm(data.message)) return;
+        res = await fetch(`/api/org/${orgId}/department/${dept.id}?confirm=true`, { method: 'DELETE' });
+        data = await res.json().catch(() => ({}));
+      }
+      if (!res.ok) { setDeptActionError(data.error || 'Failed to delete department.'); return; }
+      setDepartments((prev) => prev.filter((d) => d.id !== dept.id));
+      if (expandedDeptId === dept.id) { setExpandedDeptId(null); setDeptMembers([]); }
+    } catch { setDeptActionError('Failed to delete department.'); }
+    finally { setDeletingDeptId(null); }
+  };
+
   const toggleDepartment = async (deptId) => {
     // Reset the add-member form so values typed for one department don't
     // bleed into the next department's panel.
@@ -173,21 +254,24 @@ export default function OrgSettingsPage() {
       deptMembersRequestRef.current = null;
       setExpandedDeptId(null);
       setDeptMembers([]);
+      setDeptOrgLevelAccess([]);
       return;
     }
 
     deptMembersRequestRef.current = deptId;
     setExpandedDeptId(deptId);
     setDeptMembers([]);
+    setDeptOrgLevelAccess([]);
     setLoadingDeptMembers(true);
     try {
       const res = await fetch(`/api/org/${orgId}/department/${deptId}/members`);
       const data = await res.json();
       // Ignore stale responses from a department the user has since switched away from.
       if (deptMembersRequestRef.current !== deptId) return;
-      setDeptMembers(Array.isArray(data) ? data : []);
+      setDeptMembers(Array.isArray(data.members) ? data.members : []);
+      setDeptOrgLevelAccess(Array.isArray(data.orgLevelAccess) ? data.orgLevelAccess : []);
     } catch {
-      if (deptMembersRequestRef.current === deptId) setDeptMembers([]);
+      if (deptMembersRequestRef.current === deptId) { setDeptMembers([]); setDeptOrgLevelAccess([]); }
     } finally {
       if (deptMembersRequestRef.current === deptId) setLoadingDeptMembers(false);
     }
@@ -643,37 +727,95 @@ export default function OrgSettingsPage() {
               </div>
             ) : (
               <div className="space-y-3">
+                {deptActionError && <p className="text-sm text-red-600">{deptActionError}</p>}
                 {departments.map((dept) => (
                   <div key={dept.id} className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                    <button
-                      onClick={() => toggleDepartment(dept.id)}
-                      className="w-full flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Layers className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                        <span className="font-medium text-gray-900 dark:text-gray-100">{dept.name}</span>
-                        <span className="text-xs text-gray-500">
-                          {dept._count?.members || 0} member{dept._count?.members === 1 ? '' : 's'} ·{' '}
-                          {dept._count?.documents || 0} doc{dept._count?.documents === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => { e.stopPropagation(); router.push(`/org/${orgId}/department/${dept.id}`); }}
-                          className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                    <div className="w-full flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      {renameDeptId === dept.id ? (
+                        <div className="flex flex-1 items-center gap-2 min-w-0">
+                          <Layers className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                          <input
+                            autoFocus
+                            type="text"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') saveRenameDepartment(dept);
+                              if (e.key === 'Escape') cancelRenameDepartment();
+                            }}
+                            className="flex-1 min-w-0 p-1.5 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <button
+                            onClick={() => saveRenameDepartment(dept)}
+                            disabled={renaming || !renameValue.trim()}
+                            title="Save"
+                            className="text-green-600 hover:text-green-700 disabled:opacity-50"
+                          >
+                            {renaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                          </button>
+                          <button onClick={cancelRenameDepartment} title="Cancel" className="text-gray-400 hover:text-gray-600">
+                            <XIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => toggleDepartment(dept.id)}
+                          className="flex flex-1 items-center gap-3 text-left min-w-0"
                         >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          Open
-                        </span>
-                        {expandedDeptId === dept.id ? (
-                          <ChevronUp className="h-4 w-4 text-gray-500" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4 text-gray-500" />
+                          <Layers className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                          <span className="font-medium text-gray-900 dark:text-gray-100 truncate">{dept.name}</span>
+                          <span className="text-xs text-gray-500 flex-shrink-0">
+                            {dept._count?.members || 0} member{dept._count?.members === 1 ? '' : 's'} ·{' '}
+                            {dept._count?.documents || 0} doc{dept._count?.documents === 1 ? '' : 's'}
+                          </span>
+                        </button>
+                      )}
+                      <div className="flex items-center gap-2 flex-shrink-0 pl-2">
+                        {renameDeptId !== dept.id && (
+                          <>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => router.push(`/org/${orgId}/department/${dept.id}`)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Open
+                            </span>
+                            {canDeleteDepartments && (
+                              <>
+                                <button
+                                  onClick={() => startRenameDepartment(dept)}
+                                  title="Rename department"
+                                  className="text-gray-400 hover:text-blue-600"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() => deleteDepartment(dept)}
+                                  disabled={deletingDeptId === dept.id}
+                                  title="Delete department"
+                                  className="text-gray-400 hover:text-red-600 disabled:opacity-50"
+                                >
+                                  {deletingDeptId === dept.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
+                                </button>
+                              </>
+                            )}
+                            <button onClick={() => toggleDepartment(dept.id)} title="Toggle members">
+                              {expandedDeptId === dept.id ? (
+                                <ChevronUp className="h-4 w-4 text-gray-500" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4 text-gray-500" />
+                              )}
+                            </button>
+                          </>
                         )}
                       </div>
-                    </button>
+                    </div>
 
                     {expandedDeptId === dept.id && (
                       <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800/50 space-y-4">
@@ -717,6 +859,31 @@ export default function OrgSettingsPage() {
                               </li>
                             ))}
                           </ul>
+                        )}
+
+                        {deptOrgLevelAccess.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                              Org-level access (Super Admin)
+                            </p>
+                            <ul className="space-y-2">
+                              {deptOrgLevelAccess.map((m) => (
+                                <li
+                                  key={m.userId}
+                                  className="flex items-center justify-between rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 px-3 py-2"
+                                >
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{m.name || m.email}</p>
+                                    <p className="text-xs text-gray-500">{m.email}</p>
+                                  </div>
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                                    <Shield className="h-3 w-3" />
+                                    Super Admin (not an explicit member)
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
                         )}
 
                         {canManageDepartments && (
@@ -905,9 +1072,64 @@ export default function OrgSettingsPage() {
                 </div>
               </div>
             ) : null}
+
+            <div className="pt-6 mt-6 border-t border-gray-200 dark:border-gray-700 space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Security Events</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Role grants and department admin actions (create/rename/delete).
+                </p>
+              </div>
+
+              {securityEventsError ? (
+                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
+                  {securityEventsError}
+                </div>
+              ) : securityEventsLoading ? (
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-500 dark:text-gray-400">
+                  Loading security events...
+                </div>
+              ) : securityEvents.length === 0 ? (
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-center text-sm text-gray-500">
+                  No security events recorded yet.
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                  {securityEvents.map((entry) => (
+                    <div key={entry.id} className="p-4 space-y-1">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {describeSecurityEvent(entry)}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {entry.actor?.name || entry.actor?.email || 'System'} &middot;{' '}
+                        {new Date(entry.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
       </div>
     </Layout>
   );
+}
+
+function describeSecurityEvent(entry) {
+  const actorLabel = entry.actor?.name || entry.actor?.email || 'A user';
+  const targetLabel = entry.target?.name || entry.target?.email;
+  const meta = entry.metadata || {};
+  switch (entry.action) {
+    case 'org_created_super_admin_granted':
+      return `${actorLabel} created org "${meta.orgName}" and was granted Super Admin.`;
+    case 'department_renamed':
+      return `${actorLabel} renamed department "${meta.from}" to "${meta.to}".`;
+    case 'department_deleted':
+      return `${actorLabel} deleted department "${meta.name}" (${meta.counts?.members ?? 0} members, ${meta.counts?.projects ?? 0} projects, ${meta.counts?.documents ?? 0} documents affected).`;
+    case 'role_revoked':
+      return `${actorLabel} revoked ${targetLabel || 'a member'}'s role from ${meta.from} to ${meta.to}${meta.reason ? ` (${meta.reason})` : ''}.`;
+    default:
+      return `${actorLabel}: ${entry.action}`;
+  }
 }

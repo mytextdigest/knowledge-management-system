@@ -33,15 +33,34 @@ export async function GET(req, { params }) {
     orderBy: { createdAt: "asc" },
   });
 
-  return NextResponse.json(
-    members.map((m) => ({
+  // Super admins can manage/see every department, but that access comes from
+  // their org-level role, not a DepartmentMember row. Surface them separately
+  // so the UI can distinguish "org-level access" from explicit membership
+  // instead of silently omitting them (T-10).
+  const memberUserIds = new Set(members.map((m) => m.userId));
+  const orgSuperAdmins = await prisma.organizationMember.findMany({
+    where: { orgId, role: "super_admin" },
+    include: { user: { select: { id: true, name: true, email: true } } },
+  });
+  const orgLevelAccess = orgSuperAdmins
+    .filter((m) => !memberUserIds.has(m.userId))
+    .map((m) => ({
+      userId: m.userId,
+      name: m.user.name,
+      email: m.user.email,
+      role: "super_admin",
+    }));
+
+  return NextResponse.json({
+    members: members.map((m) => ({
       id: m.id,
       userId: m.userId,
       name: m.user.name,
       email: m.user.email,
       role: m.role,
-    }))
-  );
+    })),
+    orgLevelAccess,
+  });
 }
 
 export async function POST(req, { params }) {

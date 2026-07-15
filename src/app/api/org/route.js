@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { logAudit } from "@/lib/auditLog";
 
 export async function GET() {
   const session = await getServerSession();
@@ -51,6 +52,14 @@ export async function POST(req) {
   });
   await prisma.organizationMember.create({
     data: { orgId: org.id, userId: user.id, role: "super_admin", lastDepartmentId: defaultDept.id },
+  });
+
+  await logAudit({
+    orgId: org.id,
+    actorUserId: user.id,
+    targetUserId: user.id,
+    action: "org_created_super_admin_granted",
+    metadata: { orgName: org.name },
   });
 
   return NextResponse.json({ id: org.id, name: org.name, role: "super_admin" }, { status: 201 });
