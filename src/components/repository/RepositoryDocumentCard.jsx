@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ExternalLink, Eye, Download, Info, Loader2 } from "lucide-react";
 import { Modal, ModalHeader, ModalTitle, ModalContent } from "@/components/ui/Modal";
@@ -10,6 +10,28 @@ const lifecycleStyles = {
   draft: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-800",
   archived: "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700",
   retired: "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/40 dark:text-red-300 dark:border-red-800",
+};
+
+// Mirrors ALLOWED_TRANSITIONS in src/app/api/documents/[id]/lifecycle/route.js —
+// used only to decide which transitions to offer; the API re-validates on PATCH.
+const ALLOWED_TRANSITIONS = {
+  draft: {
+    published: ["super_admin", "dept_admin"],
+  },
+  published: {
+    archived: ["super_admin", "dept_admin"],
+    retired: ["super_admin"],
+    draft: ["super_admin"],
+  },
+  archived: {
+    retired: ["super_admin"],
+    published: ["super_admin"],
+    draft: ["super_admin"],
+  },
+  retired: {
+    published: ["super_admin"],
+    draft: ["super_admin"],
+  },
 };
 
 function getFileIcon(fileType = "", filename = "") {
@@ -30,15 +52,50 @@ function getFileIcon(fileType = "", filename = "") {
   return "DOC";
 }
 
-export default function RepositoryDocumentCard({ document }) {
+export default function RepositoryDocumentCard({ document, orgRole, onLifecycleChange }) {
   const router = useRouter();
-  const lifecycle = document?.lifecycle || "published";
-  const badgeClass = lifecycleStyles[lifecycle] || lifecycleStyles.published;
   const isPdf = (document?.filename || "").toLowerCase().endsWith(".pdf");
 
   const [pendingAction, setPendingAction] = useState(null); // "open" | "download" | "preview"
   const [actionError, setActionError] = useState(null);
   const [preview, setPreview] = useState(null); // { fileUrl }
+  const [lifecycle, setLifecycle] = useState(document?.lifecycle || "published");
+  const [changingLifecycle, setChangingLifecycle] = useState(false);
+
+  useEffect(() => {
+    setLifecycle(document?.lifecycle || "published");
+  }, [document?.lifecycle]);
+
+  const badgeClass = lifecycleStyles[lifecycle] || lifecycleStyles.published;
+
+  const availableTransitions = orgRole
+    ? Object.entries(ALLOWED_TRANSITIONS[lifecycle] || {})
+        .filter(([, roles]) => roles.includes(orgRole))
+        .map(([state]) => state)
+    : [];
+
+  async function handleLifecycleChange(newState) {
+    if (!newState || newState === lifecycle) return;
+
+    setActionError(null);
+    setChangingLifecycle(true);
+    try {
+      const res = await fetch(`/api/documents/${document.id}/lifecycle`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lifecycle: newState }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Failed to update document status.");
+
+      setLifecycle(data.lifecycle);
+      onLifecycleChange?.(document.id, data.lifecycle);
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setChangingLifecycle(false);
+    }
+  }
 
   const uploadedAt = document?.createdAt
     ? new Date(document.createdAt).toLocaleDateString()
@@ -137,6 +194,24 @@ export default function RepositoryDocumentCard({ document }) {
           <span className="rounded-full border border-purple-200 bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 dark:border-purple-800 dark:bg-purple-900/40 dark:text-purple-300">
             {document.category}
           </span>
+        ) : null}
+
+        {availableTransitions.length > 0 ? (
+          <select
+            value=""
+            disabled={changingLifecycle}
+            onChange={(e) => handleLifecycleChange(e.target.value)}
+            className="rounded-full border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
+          >
+            <option value="" disabled>
+              {changingLifecycle ? "Updating…" : "Change status…"}
+            </option>
+            {availableTransitions.map((state) => (
+              <option key={state} value={state} className="capitalize">
+                Move to {state}
+              </option>
+            ))}
+          </select>
         ) : null}
       </div>
 

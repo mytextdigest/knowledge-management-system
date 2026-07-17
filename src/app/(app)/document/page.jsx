@@ -31,6 +31,7 @@ function DocumentContent() {
 
 
   const [doc, setDoc] = useState(null);
+  const [docError, setDocError] = useState(null);
   const [chat, setChat] = useState([]);
   const [question, setQuestion] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -216,35 +217,42 @@ function DocumentContent() {
     return `${process.env.NEXT_PUBLIC_S3_PUBLIC_URL}/${filePath}`;
   };
 
-
+  // Fetches a document and normalizes non-document responses (401/403/404 error
+  // shapes, or null) to `null` so callers never store an error object in `doc`
+  // state and crash on unguarded `doc.filename.split(...)` calls downstream.
+  const fetchDocument = useCallback(async (docId) => {
+    const response = await fetch(`/api/documents/${docId}`, {
+      method: "GET",
+      credentials: "include",
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.id) return null;
+    return data;
+  }, []);
 
   // Load document
   useEffect(() => {
     if (!id) return;
-  
+
     const loadDoc = async () => {
       try {
-        const data = await fetch(`/api/documents/${id}`, {
-          method: "GET",
-          credentials: "include",
-        }).then(r => r.json());
-  
-        console.log("📄 Loaded document:", data);
-  
-        // // Attach S3 URL so UI can load file
-        // if (data?.filePath) {
-        //   data.fileUrl = getS3Url(data.filePath);
-        // }
-  
+        const data = await fetchDocument(id);
+
+        if (!data) {
+          setDocError("This document could not be found, or you don't have access to it.");
+          return;
+        }
+
         setDoc(data);
-  
+
       } catch (error) {
         console.error("Error loading document:", error);
+        setDocError("Something went wrong while loading this document. Please try again.");
       }
     };
-  
+
     loadDoc();
-  }, [id]);
+  }, [id, fetchDocument]);
 
   // Extract DOCX -> HTML
   useEffect(() => {
@@ -296,13 +304,14 @@ function DocumentContent() {
   
     const pollSummary = async () => {
       try {
-        const data = await fetch(`/api/documents/${id}`, {
-          method: "GET",
-          credentials: "include"
-        }).then(r => r.json());
-  
+        const data = await fetchDocument(id);
+        if (!data) {
+          clearInterval(interval);
+          return;
+        }
+
         setDoc(data);
-  
+
         if (data?.summary) {
           let parsed;
           try {
@@ -333,7 +342,7 @@ function DocumentContent() {
     }
   
     return () => clearInterval(interval);
-  }, [id, doc]);
+  }, [id, doc, fetchDocument]);
 
 
   useEffect(() => {
@@ -410,12 +419,13 @@ function DocumentContent() {
       }
 
       // Immediately re-fetch the doc once to get updated status
-      const fresh = await fetch(`/api/documents/${doc.id}`, {
-        method: "GET",
-        credentials: "include"
-      }).then(r => r.json());
+      const fresh = await fetchDocument(doc.id);
+      if (!fresh) {
+        toast.error("Could not refresh the document after regenerating.");
+        setIsGeneratingSummary(false);
+        return;
+      }
 
-      // if (fresh?.filePath) fresh.fileUrl = getS3Url(fresh.filePath);
       setDoc(fresh);
 
       // If summary already present (rare), update UI immediately
@@ -450,12 +460,9 @@ function DocumentContent() {
       while ((Date.now() - start) / 1000 < maxPollSeconds) {
         await new Promise((r) => setTimeout(r, pollIntervalMs));
 
-        const polled = await fetch(`/api/documents/${doc.id}`, {
-          method: "GET",
-          credentials: "include"
-        }).then(r => r.json());
+        const polled = await fetchDocument(doc.id);
+        if (!polled) continue;
 
-        // if (polled?.filePath) polled.fileUrl = getS3Url(polled.filePath);
         setDoc(polled);
 
         if (polled?.summary) {
@@ -520,17 +527,11 @@ function DocumentContent() {
       doc.status === "ready" &&
       !isGeneratingSummary
     ) {
-      fetch(`/api/documents/${id}`, {
-        method: "GET",
-        credentials: "include"
-      })
-        .then(r => r.json())
-        .then(data => {
-          // if (data?.filePath) data.fileUrl = getS3Url(data.filePath);
-          setDoc(data);
-        });
+      fetchDocument(id).then((data) => {
+        if (data) setDoc(data);
+      });
     }
-  }, [activeTab, doc, summary, isGeneratingSummary, id]);
+  }, [activeTab, doc, summary, isGeneratingSummary, id, fetchDocument]);
 
 
   //  --- Asking document queries ----
@@ -739,6 +740,20 @@ function DocumentContent() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
+
+  if (docError) {
+    return (
+      <Layout>
+        <div className="h-[calc(100vh-8rem)] flex items-center justify-center">
+          <div className="text-center">
+            <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+            <p className="text-gray-600 dark:text-gray-400 mb-4">{docError}</p>
+            <BackButton href="/welcome-back" label="Back" />
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   if (!doc) {
     return (

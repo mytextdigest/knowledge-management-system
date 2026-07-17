@@ -386,7 +386,16 @@ export default function DepartmentPage({ params }) {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {documents.map((document) => (
-                <RepositoryDocumentCard key={document.id} document={document} />
+                <RepositoryDocumentCard
+                  key={document.id}
+                  document={document}
+                  orgRole={orgRole}
+                  onLifecycleChange={(docId, newLifecycle) =>
+                    setDocuments((prev) =>
+                      prev.map((d) => (d.id === docId ? { ...d, lifecycle: newLifecycle } : d))
+                    )
+                  }
+                />
               ))}
             </div>
           )}

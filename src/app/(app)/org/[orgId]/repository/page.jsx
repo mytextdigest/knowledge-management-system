@@ -202,6 +202,12 @@ export default function RepositoryPage({ params }) {
             <RepositoryDocumentCard
               key={document.id}
               document={document}
+              orgRole={orgRole}
+              onLifecycleChange={(docId, newLifecycle) =>
+                setDocuments((prev) =>
+                  prev.map((d) => (d.id === docId ? { ...d, lifecycle: newLifecycle } : d))
+                )
+              }
             />
           ))}
         </div>

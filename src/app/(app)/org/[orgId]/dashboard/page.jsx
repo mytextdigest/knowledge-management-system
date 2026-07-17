@@ -56,10 +56,10 @@ export default function OrgDashboardPage() {
   }
 
   const stats = [
-    { label: 'Documents', value: docCount, icon: FileText },
-    { label: 'Members', value: memberCount, icon: Users },
-    { label: 'Departments', value: departments.length, icon: Layers },
-    { label: 'Projects', value: projectCount, icon: FolderKanban },
+    { label: 'Documents', value: docCount, icon: FileText, href: `/org/${orgId}/repository` },
+    { label: 'Members', value: memberCount, icon: Users, href: `/org/${orgId}/settings?tab=members` },
+    { label: 'Departments', value: departments.length, icon: Layers, href: `/org/${orgId}/settings?tab=departments` },
+    { label: 'Projects', value: projectCount, icon: FolderKanban, href: `/org/${orgId}/projects` },
   ];
 
   return (
@@ -98,14 +98,19 @@ export default function OrgDashboardPage() {
         )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {stats.map(({ label, value, icon: Icon }) => (
-            <div key={label} className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+          {stats.map(({ label, value, icon: Icon, href }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => router.push(href)}
+              className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
               <div className="flex items-center gap-2 text-gray-500">
                 <Icon className="h-4 w-4" />
                 <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
               </div>
               <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{value}</p>
-            </div>
+            </button>
           ))}
         </div>
 
@@ -153,9 +158,10 @@ export default function OrgDashboardPage() {
             ) : (
               <div className="space-y-2">
                 {recentDocuments.map((d) => (
-                  <div
+                  <button
                     key={d.id}
-                    className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 p-3"
+                    onClick={() => router.push(`/document?id=${d.id}`)}
+                    className="flex w-full items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{d.filename}</p>
@@ -165,7 +171,7 @@ export default function OrgDashboardPage() {
                       <Clock className="h-3 w-3" />
                       {new Date(d.createdAt).toLocaleDateString()}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
