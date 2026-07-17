@@ -186,8 +186,8 @@ export default function OrgSettingsPage() {
       });
       const data = await res.json();
       if (!res.ok) { setDeptError(data.error || 'Failed to create department.'); return; }
-      setDepartments((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
       setDeptName('');
+      router.push(`/org/${orgId}/department/${data.id}?new=1`);
     } catch { setDeptError('Failed to create department.'); }
     finally { setCreatingDept(false); }
   };

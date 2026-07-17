@@ -113,19 +113,34 @@ export async function POST(req, { params }) {
     );
   }
 
-  const department = await prisma.department.create({
-    data: {
-      orgId,
-      name,
-    },
-    include: {
-      _count: {
-        select: {
-          members: true,
-          documents: true,
+  const department = await prisma.$transaction(async (tx) => {
+    const created = await tx.department.create({
+      data: {
+        orgId,
+        name,
+      },
+      include: {
+        _count: {
+          select: {
+            members: true,
+            documents: true,
+          },
         },
       },
-    },
+    });
+
+    // super_admin gets implicit access to every department; a dept_admin
+    // creator needs an explicit membership or canManageDepartment() will
+    // 403 them on the department they just created.
+    if (role === "dept_admin") {
+      await tx.departmentMember.upsert({
+        where: { departmentId_userId: { departmentId: created.id, userId: user.id } },
+        update: { role: "admin" },
+        create: { departmentId: created.id, userId: user.id, role: "admin" },
+      });
+    }
+
+    return created;
   });
 
   return NextResponse.json(department);

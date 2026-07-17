@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FolderKanban, Plus, Pencil, Trash2, Users, X, Shield } from "lucide-react";
 import RepositoryDocumentCard from "@/components/repository/RepositoryDocumentCard";
 import RepositoryFilters from "@/components/repository/RepositoryFilters";
@@ -9,6 +9,7 @@ import UploadToRepositoryModal from "@/components/repository/UploadToRepositoryM
 import CreateProjectModal from "@/components/modals/CreateProjectModal";
 import EditProjectModal from "@/components/modals/EditProjectModal";
 import DeleteProjectModal from "@/components/modals/DeleteProjectModal";
+import AddDepartmentMembersModal from "@/components/modals/AddDepartmentMembersModal";
 import Layout from "@/components/layout/Layout";
 import { useSession } from "next-auth/react";
 
@@ -31,6 +32,7 @@ const initialFilters = {
 export default function DepartmentPage({ params }) {
   const { orgId, deptId } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: session } = useSession();
   const userId = session?.user?.id;
 
@@ -66,6 +68,7 @@ export default function DepartmentPage({ params }) {
   const [addRole, setAddRole] = useState("member");
   const [addingMember, setAddingMember] = useState(false);
   const [addMemberError, setAddMemberError] = useState("");
+  const [showAddMembersModal, setShowAddMembersModal] = useState(false);
   const canManageMembers = orgRole === "super_admin" || orgRole === "dept_admin";
 
   const queryString = useMemo(() => {
@@ -88,6 +91,7 @@ export default function DepartmentPage({ params }) {
     setShowCreateProjectModal(false);
     setDeleteTarget(null);
     setEditTarget(null);
+    setShowAddMembersModal(false);
 
     fetch(`/api/org/${orgId}/department`)
       .then((r) => r.json())
@@ -102,10 +106,24 @@ export default function DepartmentPage({ params }) {
     // it survives logout/login.
     fetch(`/api/org/${orgId}/department/${deptId}/visit`, { method: "POST" }).catch(() => {});
 
+    const isNewDepartment = searchParams.get("new") === "1";
+
     fetch(`/api/org/${orgId}/settings`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setOrgRole(data?.role || null))
+      .then((data) => {
+        setOrgRole(data?.role || null);
+        // Only auto-open once the creator's role is confirmed, since the
+        // page is only reached this way right after a successful (already
+        // authorized) creation — avoids a flash of the modal before
+        // permissions are known.
+        if (isNewDepartment && data?.role) {
+          setTab("members");
+          setShowAddMembersModal(true);
+          router.replace(`/org/${orgId}/department/${deptId}`);
+        }
+      })
       .catch(() => setOrgRole(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId, deptId]);
 
   async function loadDocuments() {
@@ -638,6 +656,16 @@ export default function DepartmentPage({ params }) {
           ) : null}
         </>
       )}
+
+      <AddDepartmentMembersModal
+        isOpen={showAddMembersModal}
+        onClose={() => setShowAddMembersModal(false)}
+        orgId={orgId}
+        deptId={deptId}
+        departmentName={department?.name}
+        excludeUserId={userId}
+        onAdded={loadMembers}
+      />
     </main>
     </Layout>
   );
