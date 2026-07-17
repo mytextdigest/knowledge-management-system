@@ -96,6 +96,8 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
         setDepartments((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
         setDeptName("");
         setShowCreateDept(false);
+        onClose?.();
+        router.push(`/org/${orgId}/department/${data.id}?new=1`);
       }
     } finally {
       setCreatingDept(false);
