@@ -8,7 +8,7 @@ import mammoth from "mammoth";
 import { PrismaClient } from "@prisma/client";
 import OpenAI from "openai";
 import nodemailer from "nodemailer";
-import { createStructuredSummary, summarizeChunks } from "./summarize.js";
+import { createStructuredSummary, summarizeChunks, extractEntities } from "./summarize.js";
 import { getOpenAIForDocument } from "./openai.js";
 import { processClusterJobWorker } from "./cluster.js";
 
@@ -424,6 +424,17 @@ async function processSummarizationJob(job) {
 
   // Final structured summary
   const structured = await createStructuredSummary(openai, chunkSummaries, filename);
+
+  // FR-P2-2: entity extraction (people/projects/departments/systems named in
+  // the document), alongside the summary calls above. Re-run on regenerate
+  // too — deleteMany + createMany keeps this idempotent either way.
+  const entities = await extractEntities(openai, chunkSummaries, filename);
+  await prisma.entity.deleteMany({ where: { documentId: docId } });
+  if (entities.length > 0) {
+    await prisma.entity.createMany({
+      data: entities.map((e) => ({ documentId: docId, name: e.name, type: e.type })),
+    });
+  }
 
   // Save document summary.
   // For first-time processing: set status to "clustering" (cluster job will set "ready").

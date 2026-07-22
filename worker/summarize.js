@@ -99,6 +99,62 @@ ${joined.slice(0, 24000)}
   });
 }
 
+const ENTITY_TYPES = ["person", "project", "department", "system"];
+
+export async function extractEntities(openai, chunkSummaries, filename) {
+  const joined = chunkSummaries.filter(Boolean).join("\n\n");
+
+  if (!joined.trim()) {
+    return [];
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "You extract named entities from organizational documents. You must output only valid JSON. Do not include markdown or commentary.",
+      },
+      {
+        role: "user",
+        content: `
+Identify named entities in the document "${filename}" from the summaries below.
+
+Return JSON with exactly:
+{
+  "entities": [{ "name": "entity name", "type": "person" | "project" | "department" | "system" }]
+}
+
+Only include entities explicitly named in the text (real people, named projects/initiatives, organizational departments/teams, and named systems/tools/platforms). Omit anything not confidently one of these four types. Deduplicate by name.
+
+Summaries:
+${joined.slice(0, 24000)}
+`,
+      },
+    ],
+    temperature: 0.1,
+    max_tokens: 700,
+  });
+
+  const raw = completion.choices?.[0]?.message?.content?.trim() || "";
+  const parsed = safeJsonParse(raw, { entities: [] });
+  const entities = Array.isArray(parsed.entities) ? parsed.entities : [];
+
+  const seen = new Set();
+  return entities.reduce((acc, e) => {
+    const name = String(e?.name || "").trim();
+    const type = String(e?.type || "").trim().toLowerCase();
+    if (!name || !ENTITY_TYPES.includes(type)) return acc;
+    const key = `${type}:${name.toLowerCase()}`;
+    if (seen.has(key)) return acc;
+    seen.add(key);
+    acc.push({ name, type });
+    return acc;
+  }, []);
+}
+
 export async function createPageInsight(openai, pageContent, pageNumber) {
   const content = (pageContent || "").trim();
 

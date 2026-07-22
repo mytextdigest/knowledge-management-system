@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { hybridOrgSearch } from "@/lib/hybridSearch";
 import { expandQuery } from "@/lib/queryExpansion";
+import { extractQuestionEntities } from "@/lib/entityExtraction";
+import { getRecentMemory, recordMemoryTopics } from "@/lib/orgMemberMemory";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 
@@ -169,6 +171,18 @@ export async function POST(req, { params }) {
 
   const openai = new OpenAI({ apiKey });
 
+  // FR-P2-2 (query-time): entities named in the question itself, used below
+  // as both extra retrieval signal and prompt context.
+  const questionEntities = await extractQuestionEntities(openai, question);
+
+  // FR-P2-5: recent topics this user has discussed in *other* conversations
+  // (OrgMemberMemory is scoped by orgId+userId, not conversationId) — the
+  // cross-conversation counterpart to activeTopic/activeDocumentId below.
+  const recentMemory = await getRecentMemory(orgId, user.id);
+  const memoryTopics = recentMemory
+    .map((m) => m.topic)
+    .filter((topic) => topic !== activeTopic);
+
   let sessionContextNote = "";
   if (activeDocumentId) {
     const activeDoc = await prisma.document.findUnique({
@@ -180,6 +194,12 @@ export async function POST(req, { params }) {
     }
   } else if (activeTopic) {
     sessionContextNote = `The user was previously discussing: "${activeTopic}". `;
+  }
+  if (questionEntities.length > 0) {
+    sessionContextNote += `Entities mentioned in this question: ${questionEntities.map((e) => `${e.name} (${e.type})`).join(", ")}. `;
+  }
+  if (memoryTopics.length > 0) {
+    sessionContextNote += `The user has previously asked about these topics in other conversations: ${memoryTopics.join(", ")}. `;
   }
   const retrievalQuery = sessionContextNote
     ? `${sessionContextNote}Current question: ${question}`
@@ -193,8 +213,16 @@ export async function POST(req, { params }) {
   });
   const queryEmbeddings = embRes.data.map((item) => item.embedding);
 
+  // Entity names + recalled memory topics widen the keyword-search leg of
+  // retrieval (RBAC stays enforced in orgKeywordSearch's SQL WHERE, same as
+  // every other query in `queries`) — they don't get their own embeddings,
+  // just ride along as extra keyword candidates.
+  const extraKeywordQueries = [...new Set([...questionEntities.map((e) => e.name), ...memoryTopics])].filter(
+    (q) => !expandedQueries.includes(q)
+  );
+
   const chunks = await hybridOrgSearch({
-    queries: expandedQueries,
+    queries: [...expandedQueries, ...extraKeywordQueries],
     embeddings: queryEmbeddings,
     userId: user.id,
     orgId,
@@ -310,6 +338,16 @@ export async function POST(req, { params }) {
           where: { id: conversationId },
           data: { activeTopic: nextActiveTopic, activeDocumentId: nextActiveDocumentId },
         });
+
+        if (questionEntities.length > 0) {
+          await prisma.entity.createMany({
+            data: questionEntities.map((e) => ({ conversationId, name: e.name, type: e.type })),
+          });
+        }
+
+        // FR-P2-5: remember the entities from this question for cross-conversation
+        // recall on a future, different conversation.
+        await recordMemoryTopics(orgId, user.id, questionEntities.map((e) => e.name));
 
         if (titlePromise) {
           const title = await titlePromise;
