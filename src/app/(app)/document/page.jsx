@@ -7,7 +7,7 @@ import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet } from 'lucide-react';
+import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
@@ -1288,6 +1288,41 @@ function DocumentContent() {
                           </li>
                         ))}
                       </ul>
+                    </div>
+                  )}
+
+                  {/* Tracked Decisions (FR-P2-6) */}
+                  {doc?.decisions?.length > 0 && (
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                      <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center space-x-2">
+                        <Gavel className="h-4 w-4 text-gray-500" />
+                        <span>Decisions</span>
+                      </h3>
+                      <div className="space-y-3">
+                        {doc.decisions.map((decision) => (
+                          <div
+                            key={decision.id}
+                            className="rounded-md border border-gray-200 dark:border-gray-700 p-3"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {decision.statement}
+                              </p>
+                              {decision.decidedAt && (
+                                <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                  {new Date(decision.decidedAt).toLocaleDateString()}
+                                </span>
+                              )}
+                            </div>
+                            {decision.rationale && (
+                              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1.5">
+                                <span className="font-medium">Why: </span>
+                                {decision.rationale}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 

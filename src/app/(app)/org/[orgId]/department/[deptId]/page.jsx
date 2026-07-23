@@ -2,7 +2,7 @@
 
 import { use, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FolderKanban, Plus, Pencil, Trash2, Users, X, Shield } from "lucide-react";
+import { FolderKanban, Plus, Pencil, Trash2, Users, X, Shield, Clock } from "lucide-react";
 import RepositoryDocumentCard from "@/components/repository/RepositoryDocumentCard";
 import RepositoryFilters from "@/components/repository/RepositoryFilters";
 import UploadToRepositoryModal from "@/components/repository/UploadToRepositoryModal";
@@ -70,6 +70,10 @@ export default function DepartmentPage({ params }) {
   const [addMemberError, setAddMemberError] = useState("");
   const [showAddMembersModal, setShowAddMembersModal] = useState(false);
   const canManageMembers = orgRole === "super_admin" || orgRole === "dept_admin";
+
+  // Timeline tab state
+  const [timeline, setTimeline] = useState([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
   const queryString = useMemo(() => {
     const search = new URLSearchParams();
@@ -243,6 +247,26 @@ export default function DepartmentPage({ params }) {
     if (tab === "members") loadMembers();
   }, [orgId, deptId, tab]);
 
+  async function loadTimeline() {
+    if (!orgId || !deptId) return;
+    setTimelineLoading(true);
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${deptId}/timeline`);
+      if (!res.ok) throw new Error("Failed to fetch timeline");
+      const data = await res.json();
+      setTimeline(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Failed to load department timeline:", err);
+      setTimeline([]);
+    } finally {
+      setTimelineLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "timeline") loadTimeline();
+  }, [orgId, deptId, tab]);
+
   const openProject = (id) => router.push(`/project?id=${id}`);
 
   const handleCreateProject = async (name, description) => {
@@ -377,6 +401,17 @@ export default function DepartmentPage({ params }) {
           }`}
         >
           Members
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("timeline")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === "timeline"
+              ? "border-black dark:border-white text-gray-900 dark:text-gray-100"
+              : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          }`}
+        >
+          Timeline
         </button>
       </div>
 
@@ -544,7 +579,7 @@ export default function DepartmentPage({ params }) {
             isLoading={isEditingProject}
           />
         </>
-      ) : (
+      ) : tab === "members" ? (
         <>
           {canManageMembers && (
             <form
@@ -654,6 +689,50 @@ export default function DepartmentPage({ params }) {
               </div>
             </div>
           ) : null}
+        </>
+      ) : (
+        // Timeline tab (FR-P2-7): simple ordered list of extracted decision
+        // dates for this department's documents.
+        <>
+          {timelineLoading ? (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-500 dark:text-gray-400">
+              Loading timeline...
+            </div>
+          ) : timeline.length === 0 ? (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
+                <Clock className="w-8 h-8 text-gray-500 dark:text-gray-400" />
+              </div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">No timeline events yet</h2>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                Dated decisions extracted from this department's documents will appear here.
+              </p>
+            </div>
+          ) : (
+            <ol className="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              {timeline.map((event) => (
+                <li key={event.id} className="flex gap-3 p-4">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap pt-0.5">
+                    {new Date(event.occurredAt).toLocaleDateString()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm text-gray-800 dark:text-gray-200">{event.description}</p>
+                    {event.rationale && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        <span className="font-medium">Why: </span>
+                        {event.rationale}
+                      </p>
+                    )}
+                    {event.documentFilename && (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                        From: {event.documentFilename}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
         </>
       )}
 

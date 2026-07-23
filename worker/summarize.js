@@ -155,6 +155,64 @@ ${joined.slice(0, 24000)}
   }, []);
 }
 
+function parseDecidedAt(value) {
+  if (!value || typeof value !== "string") return null;
+  const match = value.trim().match(/^\d{4}-\d{2}-\d{2}/);
+  if (!match) return null;
+  const date = new Date(match[0]);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export async function extractDecisions(openai, chunkSummaries, filename) {
+  const joined = chunkSummaries.filter(Boolean).join("\n\n");
+
+  if (!joined.trim()) {
+    return [];
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "You extract decisions and their stated rationale from organizational documents. You must output only valid JSON. Do not include markdown or commentary.",
+      },
+      {
+        role: "user",
+        content: `
+Identify decisions made or recorded in the document "${filename}" from the summaries below.
+
+Return JSON with exactly:
+{
+  "decisions": [{ "statement": "what was decided", "rationale": "why it was decided, or null if not stated", "decidedAt": "YYYY-MM-DD date the decision was made, or null if no date is given" }]
+}
+
+Only include actual decisions explicitly stated in the text (a choice that was made, approved, or committed to) — not general facts, plans, or open questions. Omit anything that isn't clearly a decision.
+
+Summaries:
+${joined.slice(0, 24000)}
+`,
+      },
+    ],
+    temperature: 0.1,
+    max_tokens: 700,
+  });
+
+  const raw = completion.choices?.[0]?.message?.content?.trim() || "";
+  const parsed = safeJsonParse(raw, { decisions: [] });
+  const decisions = Array.isArray(parsed.decisions) ? parsed.decisions : [];
+
+  return decisions.reduce((acc, d) => {
+    const statement = String(d?.statement || "").trim();
+    if (!statement) return acc;
+    const rationale = d?.rationale ? String(d.rationale).trim() : null;
+    acc.push({ statement, rationale: rationale || null, decidedAt: parseDecidedAt(d?.decidedAt) });
+    return acc;
+  }, []);
+}
+
 export async function createPageInsight(openai, pageContent, pageNumber) {
   const content = (pageContent || "").trim();
 

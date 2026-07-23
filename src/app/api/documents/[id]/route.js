@@ -19,6 +19,7 @@ export async function GET(req, { params }) {
     include: {
       chunks: { orderBy: { chunkIndex: "asc" } },
       project: { select: { orgId: true, departmentId: true, scope: true } },
+      decisions: { orderBy: { decidedAt: "desc" } },
     },
   });
 

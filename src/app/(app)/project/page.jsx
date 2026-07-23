@@ -7,7 +7,7 @@ import TopicsView from '@/components/topics/TopicsView';
 import FileUpload from '@/components/documents/FileUpload';
 import { Modal, ModalHeader, ModalTitle, ModalContent } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { Pencil } from 'lucide-react';
+import { Pencil, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import { motion } from 'framer-motion';
 import ChatInterface from "@/components/chat/ChatInterface";
@@ -47,6 +47,9 @@ function ProjectPageInner() {
   const [showEditProjectModal, setShowEditProjectModal] = useState(false);
   const [isEditingProject, setIsEditingProject] = useState(false);
 
+  const [timeline, setTimeline] = useState([]);
+  const [timelineOpen, setTimelineOpen] = useState(false);
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("id");
@@ -73,10 +76,25 @@ function ProjectPageInner() {
       loadProject();
       loadDocuments();
       loadTopics();
+      loadTimeline();
     }
 
     return () => stopPolling();
   }, [projectId]);
+
+  const loadTimeline = async () => {
+    if (!projectId) return;
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/timeline`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      setTimeline(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to load timeline:', err);
+    }
+  };
 
   const loadProject = async () => {
     try {
@@ -465,7 +483,7 @@ function ProjectPageInner() {
 
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
         <TopicsView
           topics={topics}
           documents={docs}
@@ -485,6 +503,53 @@ function ProjectPageInner() {
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
         />
+
+        {/* FR-P2-7: simple ordered timeline of extracted decision dates */}
+        {timeline.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={() => setTimelineOpen((prev) => !prev)}
+              className="w-full flex items-center justify-between px-4 py-3 text-left"
+            >
+              <span className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                <Clock className="h-4 w-4 text-gray-500" />
+                Timeline ({timeline.length})
+              </span>
+              {timelineOpen ? (
+                <ChevronUp className="h-4 w-4 text-gray-400" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-gray-400" />
+              )}
+            </button>
+
+            {timelineOpen && (
+              <ol className="px-4 pb-4 space-y-3 border-t border-gray-100 dark:border-gray-700 pt-3">
+                {timeline.map((event) => (
+                  <li key={event.id} className="flex gap-3">
+                    <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap pt-0.5">
+                      {new Date(event.occurredAt).toLocaleDateString()}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm text-gray-800 dark:text-gray-200">{event.description}</p>
+                      {event.rationale && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          <span className="font-medium">Why: </span>
+                          {event.rationale}
+                        </p>
+                      )}
+                      {event.documentFilename && (
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                          From: {event.documentFilename}
+                        </p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
       </div>
     </motion.div>
   );

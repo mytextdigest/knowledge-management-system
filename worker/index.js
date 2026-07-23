@@ -8,7 +8,7 @@ import mammoth from "mammoth";
 import { PrismaClient } from "@prisma/client";
 import OpenAI from "openai";
 import nodemailer from "nodemailer";
-import { createStructuredSummary, summarizeChunks, extractEntities } from "./summarize.js";
+import { createStructuredSummary, summarizeChunks, extractEntities, extractDecisions } from "./summarize.js";
 import { getOpenAIForDocument } from "./openai.js";
 import { processClusterJobWorker } from "./cluster.js";
 
@@ -434,6 +434,51 @@ async function processSummarizationJob(job) {
     await prisma.entity.createMany({
       data: entities.map((e) => ({ documentId: docId, name: e.name, type: e.type })),
     });
+  }
+
+  // FR-P2-6 / FR-P2-7: decision + rationale extraction, alongside FR-P2-2's
+  // entity extraction above — same chunk-summary input, same idempotent
+  // deleteMany + createMany pattern so `regenerate` mode stays safe. Decision
+  // dates (when stated) get mirrored into TimelineEvent so a project/department
+  // page can show a chronological view without manual entry.
+  const decisions = await extractDecisions(openai, chunkSummaries, filename);
+
+  // TimelineEvent.decisionId is onDelete: SetNull, so timeline rows tied to
+  // this document must be cleared before the decisions they point to —
+  // otherwise a regenerate run would leave stale timeline entries behind
+  // with a null decisionId instead of being replaced.
+  await prisma.timelineEvent.deleteMany({ where: { documentId: docId } });
+  await prisma.decision.deleteMany({ where: { documentId: docId } });
+
+  if (decisions.length > 0) {
+    const docForTimeline = await prisma.document.findUnique({
+      where: { id: docId },
+      select: { departmentId: true },
+    });
+
+    for (const d of decisions) {
+      const decision = await prisma.decision.create({
+        data: {
+          documentId: docId,
+          statement: d.statement,
+          rationale: d.rationale,
+          decidedAt: d.decidedAt,
+        },
+      });
+
+      if (d.decidedAt) {
+        await prisma.timelineEvent.create({
+          data: {
+            documentId: docId,
+            projectId: projectId || null,
+            departmentId: docForTimeline?.departmentId || null,
+            decisionId: decision.id,
+            occurredAt: d.decidedAt,
+            description: d.statement,
+          },
+        });
+      }
+    }
   }
 
   // Save document summary.
