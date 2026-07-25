@@ -129,7 +129,7 @@ export async function POST(req) {
 
 
     const planLimitBytes =
-      userSubscription.plan.storageLimitGb * 1024 * 1024 * 1024;
+      orgSubscription.plan.storageLimitGb * 1024 * 1024 * 1024;
 
     const currentUsage = BigInt(dbUser.storageUsedBytes);
     const incomingSize = BigInt(fileSizeBytes);
@@ -139,7 +139,7 @@ export async function POST(req) {
       return NextResponse.json(
         {
           error: "Storage limit exceeded",
-          limitGb: userSubscription.plan.storageLimitGb,
+          limitGb: orgSubscription.plan.storageLimitGb,
           usedBytes: Number(currentUsage),
           incomingBytes: Number(incomingSize)
         },
