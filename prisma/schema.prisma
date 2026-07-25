@@ -74,6 +74,7 @@ model Organization {
   auditLogs         AuditLog[]
   subscription      Subscription?
   orgMemberMemories OrgMemberMemory[]
+  knowledgeGaps     KnowledgeGap[]
 
   @@index([name])
 }
@@ -150,13 +151,15 @@ model DepartmentMember {
 }
 
 model OrgConversation {
-  id               String   @id @default(cuid())
-  orgId            String
-  userId           String
-  title            String?
-  activeTopic      String?
-  activeDocumentId String?
-  createdAt        DateTime @default(now()) @map("created_at")
+  id                       String   @id @default(cuid())
+  orgId                    String
+  userId                   String
+  title                    String?
+  activeTopic              String?
+  activeDocumentId         String?
+  activeWorkflowDocumentId String?
+  activeWorkflowStep       Int?
+  createdAt                DateTime @default(now()) @map("created_at")
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -174,6 +177,7 @@ model OrgMessage {
   content        String
   sources        Json?
   confidence     String?
+  feedback       String?
   createdAt      DateTime @default(now()) @map("created_at")
 
   conversation OrgConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -488,4 +492,21 @@ model OrgMemberMemory {
   @@unique([orgId, userId, topic])
   @@index([orgId, userId])
   @@index([lastSeenAt])
+}
+
+model KnowledgeGap {
+  id                 String   @id @default(cuid())
+  orgId              String
+  topic              String
+  gapScore           Float
+  occurrenceCount    Int
+  zeroCitationCount  Int
+  lowConfidenceCount Int
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, gapScore])
+  @@index([createdAt])
 }
