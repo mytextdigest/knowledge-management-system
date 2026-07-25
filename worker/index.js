@@ -10,6 +10,7 @@ import OpenAI from "openai";
 import nodemailer from "nodemailer";
 import { createStructuredSummary, summarizeChunks, extractEntities, extractDecisions } from "./summarize.js";
 import { getOpenAIForDocument } from "./openai.js";
+import { detectConflictsForDocument } from "./detectConflicts.js";
 import { processClusterJobWorker } from "./cluster.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
@@ -479,6 +480,23 @@ async function processSummarizationJob(job) {
         });
       }
     }
+  }
+
+  // FR-P2-10: conflict detection, scoped to this document vs. others sharing
+  // its department/project (chunks are already embedded by this point in the
+  // pipeline — embed runs before summarize). Clear this doc's stale conflicts
+  // first so a regenerate that changes the content doesn't leave a flag that
+  // no longer applies. Wrapped in try/catch and non-fatal: an LLM hiccup here
+  // shouldn't block the summary/decisions/entities this job already produced,
+  // unlike the earlier extraction calls which are allowed to fail the job.
+  await prisma.documentConflict.deleteMany({
+    where: { OR: [{ documentAId: docId }, { documentBId: docId }] },
+  });
+  try {
+    const { reviewed, flagged } = await detectConflictsForDocument(prisma, openai, docId);
+    console.log(`🔺 Conflict scan for ${docId}: reviewed ${reviewed}, flagged ${flagged}`);
+  } catch (err) {
+    console.error("⚠️ Conflict detection failed (non-fatal):", err.message);
   }
 
   // Save document summary.
