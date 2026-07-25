@@ -9,7 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { resolveOrgRole } from "@/lib/orgGuard";
-import { getUserSubscription } from "@/lib/subscription";
+import { getOrgSubscription, isSubscriptionActive } from "@/lib/subscription";
 
 export async function POST(req) {
   try {
@@ -62,9 +62,9 @@ export async function POST(req) {
     if (!dbUser)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-    const userSubscription = await getUserSubscription(dbUser.id);
+    const orgSubscription = await getOrgSubscription(orgId);
 
-    if (!userSubscription || !userSubscription.plan) {
+    if (!isSubscriptionActive(orgSubscription) || !orgSubscription.plan) {
       return NextResponse.json(
         { error: "No active subscription" },
         { status: 403 }
