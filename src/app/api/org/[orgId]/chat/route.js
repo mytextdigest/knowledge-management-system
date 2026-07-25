@@ -21,6 +21,7 @@ If the answer cannot be found in the context, say:
 Response format:
 - For direct factual questions, answer concisely in a short paragraph or a couple of sentences. Do not force structure onto a simple answer.
 - For broader or exploratory questions about a topic, project, or department, structure the answer with markdown headings for whichever of these sections are relevant (skip ones that don't apply): ## Overview, ## Objectives, ## Documents, ## Teams, ## Timeline, ## Related Knowledge.
+- When context spans multiple projects or departments, explicitly compare and synthesize the sources. Identify agreements, differences, dependencies, and unresolved gaps without blending unsupported claims together.
 - Use markdown (headings, bullet lists, bold) where it improves readability.
 `.trim();
 
@@ -28,6 +29,26 @@ function normalizeScope(scope) {
   return ["personal", "department", "organization"].includes(scope)
     ? scope
     : "organization";
+}
+
+
+function shouldDiversifyAcrossProjects(question, scope) {
+  if (scope !== "organization") return false;
+  const normalized = String(question || "").toLowerCase();
+  const crossProjectSignals = [
+    /\bacross\b/,
+    /\bcompare\b/,
+    /\bcombined?\b/,
+    /\borganization[- ]wide\b/,
+    /\ball projects?\b/,
+    /\bmultiple projects?\b/,
+    /\bdepartments?\b/,
+    /\bportfolio\b/,
+    /\bshared knowledge\b/,
+    /\bdependencies\b/,
+    /\bcommon themes?\b/,
+  ];
+  return crossProjectSignals.some((pattern) => pattern.test(normalized));
 }
 
 function computeConfidence(chunks) {
@@ -221,6 +242,8 @@ export async function POST(req, { params }) {
     (q) => !expandedQueries.includes(q)
   );
 
+  const requestedDiversify = shouldDiversifyAcrossProjects(question, scope);
+
   const chunks = await hybridOrgSearch({
     queries: [...expandedQueries, ...extraKeywordQueries],
     embeddings: queryEmbeddings,
@@ -230,7 +253,15 @@ export async function POST(req, { params }) {
     scope,
     departmentId,
     isSuperAdmin: isSuperAdmin(role),
+    diversify: requestedDiversify,
   });
+
+  // Reflects what actually happened, not just the keyword-based request above
+  // — hybridOrgSearch can also diversify on its own when the retrieved
+  // context is naturally multi-source, even without a keyword match here.
+  const crossProjectSynthesis =
+    scope === "organization" &&
+    new Set(chunks.map((c) => c.projectId || c.departmentId || c.document_id)).size >= 2;
 
   const confidence = computeConfidence(chunks);
 
@@ -299,7 +330,7 @@ export async function POST(req, { params }) {
       };
 
       try {
-        send("meta", { conversationId, sources, confidence });
+        send("meta", { conversationId, sources, confidence, crossProjectSynthesis });
 
         const titlePromise = isNewConversation ? generateTitle(openai, question) : null;
 

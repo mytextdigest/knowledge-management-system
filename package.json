@@ -12,7 +12,10 @@
     "start": "next start",
     "lint": "next lint",
     "postinstall": "prisma generate",
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed.js",
+    "task5d:gaps": "node scripts/task-5d/detect-knowledge-gaps.mjs",
+    "task5d:conflicts": "node scripts/task-5d/detect-document-conflicts.mjs",
+    "task5d:seed-conflict-demo": "node scripts/task-5d/seed-conflict-demo.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

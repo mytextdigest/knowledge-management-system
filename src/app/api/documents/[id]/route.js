@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
 import { resolveOrgRole, isOrgAdmin } from "@/lib/orgGuard";
+import { filterAccessibleDocuments } from "@/lib/documentAccess";
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -20,13 +21,29 @@ export async function GET(req, { params }) {
       chunks: { orderBy: { chunkIndex: "asc" } },
       project: { select: { orgId: true, departmentId: true, scope: true } },
       decisions: { orderBy: { decidedAt: "desc" } },
+      conflictsAsDocA: {
+        orderBy: { createdAt: "desc" },
+        include: {
+          documentB: { select: { id: true, filename: true, userId: true, departmentId: true, lifecycle: true } },
+        },
+      },
+      conflictsAsDocB: {
+        orderBy: { createdAt: "desc" },
+        include: {
+          documentA: { select: { id: true, filename: true, userId: true, departmentId: true, lifecycle: true } },
+        },
+      },
     },
   });
 
   if (!doc) return NextResponse.json(null, { status: 404 });
 
-  const { user } = await resolveOrgRole(session.user.email, doc.orgId || doc.project?.orgId || "");
+  const { user, role: ownerOrgRole } = await resolveOrgRole(
+    session.user.email,
+    doc.orgId || doc.project?.orgId || ""
+  );
   const isOwner = user && doc.userId === user.id;
+  let role = isOwner ? ownerOrgRole : null;
 
   if (!isOwner) {
     // Not the uploader — fall back to the same org/department RBAC used by the
@@ -34,7 +51,8 @@ export async function GET(req, { params }) {
     const orgId = doc.orgId || (doc.project?.scope === "org" ? doc.project.orgId : null);
     if (!user || !orgId) return NextResponse.json(null, { status: 404 });
 
-    const { role } = await resolveOrgRole(session.user.email, orgId);
+    const resolved = await resolveOrgRole(session.user.email, orgId);
+    role = resolved.role;
     if (!role) return NextResponse.json(null, { status: 404 });
 
     if (!isOrgAdmin(role)) {
@@ -60,8 +78,48 @@ export async function GET(req, { params }) {
     'embedding', 'embedded', 'summarizing', 'clustering',
   ]);
 
+  const rawConflicts = [
+    ...doc.conflictsAsDocA.map((c) => ({
+      id: c.id,
+      summary: c.summary,
+      status: c.status,
+      createdAt: c.createdAt,
+      otherDocument: c.documentB,
+    })),
+    ...doc.conflictsAsDocB.map((c) => ({
+      id: c.id,
+      summary: c.summary,
+      status: c.status,
+      createdAt: c.createdAt,
+      otherDocument: c.documentA,
+    })),
+  ];
+
+  // A conflict pairs two documents that share a department or project, but
+  // that doesn't guarantee *this* viewer can open both sides (e.g. a private,
+  // multi-owner project) — drop any conflict whose other document this user
+  // isn't otherwise allowed to see, same check used for timeline lists.
+  const accessibleOtherDocs = user
+    ? await filterAccessibleDocuments(
+        rawConflicts.map((c) => c.otherDocument),
+        { userId: user.id, role }
+      )
+    : [];
+  const accessibleOtherDocIds = new Set(accessibleOtherDocs.map((d) => d.id));
+
+  const conflicts = rawConflicts
+    .filter((c) => accessibleOtherDocIds.has(c.otherDocument.id))
+    .map((c) => ({
+      ...c,
+      otherDocument: { id: c.otherDocument.id, filename: c.otherDocument.filename },
+    }))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const { conflictsAsDocA, conflictsAsDocB, ...docWithoutRawConflicts } = doc;
+
   return NextResponse.json({
-    ...doc,
+    ...docWithoutRawConflicts,
+    conflicts,
     fileUrl: signedUrl,
     created_at: doc.createdAt.toISOString(),
     permissions: {
