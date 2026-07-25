@@ -89,7 +89,18 @@ export async function hybridOrgSearch({
 }) {
   const safeQueries = Array.isArray(queries) ? queries.filter(Boolean) : [];
   const safeEmbeddings = Array.isArray(embeddings) ? embeddings.filter(Boolean) : [];
-  const candidateLimit = diversify ? Math.max(limit * 3, 24) : limit;
+  // A small fixed buffer (not the full 3x widen) lets us detect when a
+  // question is *naturally* cross-project — i.e. the top-ranked chunks
+  // already span multiple projects/departments on their own merit — without
+  // depending solely on the caller's keyword-based `diversify` guess, and
+  // without paying the full widened-candidate-pool cost on every org-scope
+  // query.
+  const naturalDiversityCheck = !diversify && scope === "organization";
+  const candidateLimit = diversify
+    ? Math.max(limit * 3, 24)
+    : naturalDiversityCheck
+      ? limit + 6
+      : limit;
   const allRows = [];
 
   for (const embedding of safeEmbeddings) {
@@ -130,5 +141,11 @@ export async function hybridOrgSearch({
     ranked = mergeRows(fallbackRows);
   }
 
-  return diversify ? diversifyResults(ranked, limit) : ranked.slice(0, limit);
+  let effectiveDiversify = diversify;
+  if (naturalDiversityCheck) {
+    const distinctSources = new Set(ranked.slice(0, limit).map(sourceKey)).size;
+    effectiveDiversify = distinctSources >= 2;
+  }
+
+  return effectiveDiversify ? diversifyResults(ranked, limit) : ranked.slice(0, limit);
 }

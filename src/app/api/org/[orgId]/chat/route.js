@@ -242,7 +242,7 @@ export async function POST(req, { params }) {
     (q) => !expandedQueries.includes(q)
   );
 
-  const crossProjectSynthesis = shouldDiversifyAcrossProjects(question, scope);
+  const requestedDiversify = shouldDiversifyAcrossProjects(question, scope);
 
   const chunks = await hybridOrgSearch({
     queries: [...expandedQueries, ...extraKeywordQueries],
@@ -253,8 +253,15 @@ export async function POST(req, { params }) {
     scope,
     departmentId,
     isSuperAdmin: isSuperAdmin(role),
-    diversify: crossProjectSynthesis,
+    diversify: requestedDiversify,
   });
+
+  // Reflects what actually happened, not just the keyword-based request above
+  // — hybridOrgSearch can also diversify on its own when the retrieved
+  // context is naturally multi-source, even without a keyword match here.
+  const crossProjectSynthesis =
+    scope === "organization" &&
+    new Set(chunks.map((c) => c.projectId || c.departmentId || c.document_id)).size >= 2;
 
   const confidence = computeConfidence(chunks);
 

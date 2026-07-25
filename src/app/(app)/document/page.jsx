@@ -7,7 +7,7 @@ import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel } from 'lucide-react';
+import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
@@ -17,7 +17,7 @@ import { copySummary, printSummary } from '@/lib/summaryActions';
 import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
 import MessageActions from "@/components/chat/MessageActions";
 import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
-import { useToast } from "@/components/ui/Toast";
+import { useToast, ToastProvider } from "@/components/ui/Toast";
 
 
 
@@ -1326,6 +1326,39 @@ function DocumentContent() {
                     </div>
                   )}
 
+                  {/* Detected Conflicts (FR-P2-10) */}
+                  {doc?.conflicts?.length > 0 && (
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                      <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center space-x-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                        <span>Conflicts</span>
+                      </h3>
+                      <div className="space-y-3">
+                        {doc.conflicts.map((conflict) => (
+                          <div
+                            key={conflict.id}
+                            className="rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 p-3"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                Conflicts with{" "}
+                                <span className="font-semibold">
+                                  {conflict.otherDocument?.filename || "another document"}
+                                </span>
+                              </p>
+                              <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap capitalize">
+                                {conflict.status}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1.5">
+                              {conflict.summary}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Regenerate / Copy / Print */}
                   <div className="flex items-center justify-center gap-2">
                     <Button
@@ -1438,9 +1471,11 @@ function DocumentContent() {
 
 export default function DocumentPage() {
   return (
-    <Suspense fallback={<div>Loading document...</div>}>
-      <DocumentContent />
-    </Suspense>
+    <ToastProvider>
+      <Suspense fallback={<div>Loading document...</div>}>
+        <DocumentContent />
+      </Suspense>
+    </ToastProvider>
   );
 }
 
