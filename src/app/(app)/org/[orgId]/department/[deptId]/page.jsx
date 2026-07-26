@@ -12,6 +12,7 @@ import DeleteProjectModal from "@/components/modals/DeleteProjectModal";
 import AddDepartmentMembersModal from "@/components/modals/AddDepartmentMembersModal";
 import Layout from "@/components/layout/Layout";
 import { useSession } from "next-auth/react";
+import RelatedWorkPanel from "@/components/recommendations/RelatedWorkPanel";
 
 const FILTER_PARAM_MAP = {
   category: "category",
@@ -417,6 +418,7 @@ export default function DepartmentPage({ params }) {
 
       {tab === "documents" ? (
         <>
+          <RelatedWorkPanel orgId={orgId} departmentId={deptId} />
           <RepositoryFilters filters={filters} hideDepartmentFilter onChange={setFilters} />
 
           {docsError ? (
