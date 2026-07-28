@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { computeBM25, tokenize } from "@/lib/keywordSearch";
 
-function scopeSql({ scope = "organization", departmentId = null }) {
+export function scopeSql({ scope = "organization", departmentId = null }) {
   if (scope === "department") {
     if (departmentId) {
       return Prisma.sql`AND d."departmentId" = ${departmentId}`;

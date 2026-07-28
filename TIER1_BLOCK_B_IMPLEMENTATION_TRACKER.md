@@ -27,9 +27,9 @@
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
 | `6-A` | Shared Schema | `DONE` | Johurul | — | 2026-07-25 | 2026-07-26 |
-| `6-B` | Decision Intelligence + Knowledge Health Monitoring | `TODO` | Johurul | `6-A` | | |
-| `6-C` | Predictive Recommendations + Proactive Recommendations | `TODO` | Simran | `6-A` | | |
-| `6-D` | Organizational Learning + Workflow Assistance | `TODO` | Sandeep | `6-A` | | |
+| `6-B` | Decision Intelligence + Knowledge Health Monitoring | `DONE` | Johurul | `6-A` | 2026-07-28 | 2026-07-28 |
+| `6-C` | Predictive Recommendations + Proactive Recommendations | `DONE` | Simran | `6-A` | | 2026-07-28 |
+| `6-D` | Organizational Learning + Workflow Assistance | `DONE` | Sandeep | `6-A` | | 2026-07-28 |
 | `6-E` | Integration & RBAC Regression Check | `TODO` | Johurul | `6-B`, `6-C`, `6-D` | | |
 | `6-F` | PR + Cross-Reviews | `TODO` | All 3 | `6-E` | | |
 
@@ -46,7 +46,14 @@
 - **Incident (2026-07-25):** while sanity-checking the migration, `prisma migrate diff --from-migrations ... --shadow-database-url <DATABASE_URL>` was run with the shadow-database URL mistakenly pointed at the live `kms-postgres-dev` instance instead of a scratch database. Prisma wipes/rebuilds whatever it's given as the shadow DB to replay migration history, which emptied `kms-postgres-dev`'s `public` schema (structure intact, all rows gone, `_prisma_migrations` dropped). Recovered via RDS point-in-time restore to a new instance `kms-postgres-dev-restored` (restore point 2026-07-25 18:15 IST / 12:45 UTC), verified row counts and `_prisma_migrations` history matched pre-incident state, then `.env`'s `DATABASE_URL` was repointed at the restored endpoint and the `6-A` migration applied cleanly on top via `prisma migrate deploy`. **Follow-up still open:** decide whether to rename `kms-postgres-dev-restored` back to `kms-postgres-dev` (or update all other references to the new endpoint) and what to do with the original wiped instance — not yet resolved as of this entry. **Rule for future migration work on this DB: never pass the live `DATABASE_URL` as `--shadow-database-url` — always use a separate, empty scratch database for `prisma migrate diff`.**
 
 ### Task 6-B — Decision Intelligence + Knowledge Health Monitoring
-- **Status:** `TODO`
+- **Status:** `DONE`
+- **Implemented (2026-07-28):**
+  - `src/lib/decisionIntelligence.js` (new) — `isDecisionQuestion()` keyword/intent check (same style as `shouldDiversifyAcrossProjects`), plus `getDecisionEvidence()`: a raw-SQL keyword search over `Decision.statement`/`rationale` joined through `Document`, reusing the exact RBAC WHERE-clause shape from `orgSearch`/`orgKeywordSearch` (department-membership join, repository lifecycle check, org-scoped project membership check) via a newly-exported `scopeSql` from `src/lib/vectorSearch.js`, and ranked with the existing `computeBM25`. No new unscoped query path.
+  - `src/app/api/org/[orgId]/chat/route.js` — wired in alongside `shouldDiversifyAcrossProjects`/`classifyWorkflowRequest`: when `isDecisionQuestion()` is true, `getDecisionEvidence()` results are formatted into a "Relevant past decisions" context block plus a `DECISION_INSTRUCTION` telling the model to ground its recommendation in and cite them (not retrieve verbatim), only injected when evidence exists. Purely additive to the prompt-building path — does not touch retrieval, streaming, sources, or `activeWorkflow*`/`activeTopic` state.
+  - `scripts/task-5d/detect-knowledge-gaps.mjs` — now also persists `KnowledgeGap` rows (in addition to the existing JSON report). **Open question resolved: scheduled/manual, snapshot-replace semantics** — each run `deleteMany`s the prior `KnowledgeGap` rows for exactly the org(s) it analyzed (the `--org` arg, or the distinct `orgId`s found in that run's results) then `createMany`s the fresh set, so the table is always "current gaps" rather than an ever-growing history, and a narrow `--org`/`--days` run never touches other orgs' snapshots. `/health` does not trigger detection inline (matches the NFR to keep this off the chat-latency path).
+  - `src/app/api/org/[orgId]/health/route.js` (new) — `GET`, gated to `super_admin`/`dept_admin` (`isOrgAdmin`, matching the dashboard's existing client-side admin gate). Aggregates: last-200-message confidence distribution + weighted average (`high`=1/`medium`=0.5/`low`=0) scoped through `OrgConversation.orgId`, open `DocumentConflict` count (`status: "flagged"`, scoped via `documentA.orgId`), and top 5 `KnowledgeGap` rows by `gapScore`.
+  - `src/app/(app)/org/[orgId]/dashboard/page.jsx` — new "Knowledge Health" section (Answer Confidence / Open Conflicts / Top Knowledge Gaps cards), added via one more fetch alongside the existing settings/members/department/projects/repository calls, same pattern as every other stat on the page.
+  - Verified: `npx eslint` clean on all new/changed files; `npx next build` compiles all routes including the two new endpoints; the raw SQL in `decisionIntelligence.js` and the new Prisma queries in `health/route.js` were each dry-run against the live dev DB to confirm they resolve (no execution of the gap-detection script itself against live data, since it performs a delete+write).
 - **Objective:** Both aggregate signals Johurul already owns from Phase 1 (confidence scores) and Phase 2 (`Decision` tracking, gap/conflict detection). Decision Intelligence (`FR-P3-2`) recommends/evaluates using past decisions as evidence, not just retrieval. Knowledge Health Monitoring (`FR-P3-7`) rolls confidence/gap/conflict signals into one org-level view.
 - **Key files to create/modify:**
   - `src/lib/decisionIntelligence.js` (new) — decision-oriented question detection + evidence retrieval over `Decision` rows.
@@ -55,10 +62,16 @@
   - `src/app/api/org/[orgId]/health/route.js` (new) — aggregate confidence/conflict/gap signals.
   - `src/app/(app)/org/[orgId]/dashboard/page.jsx` — add a knowledge-health card.
 - **Acceptance criteria:** see `REQUIREMENTS_CONVERSATIONAL_ASSISTANT.md` Phase 3 Acceptance Criteria — decision-recommendation and dashboard bullets.
-- **Open question to resolve during implementation:** does `detect-knowledge-gaps.mjs` run on a schedule/manual trigger writing fresh `KnowledgeGap` rows, or does `/health` trigger it inline? Recommendation in the requirements doc is scheduled/manual — confirm or override here.
 
 ### Task 6-C — Predictive Recommendations + Proactive Recommendations
-- **Status:** `TODO`
+- **Status:** `DONE`
+- **Reviewed (2026-07-28):** PR `pr-19` (`feature/task-6c-predictive-proactive-recommendations`) reviewed against this task and `REQUIREMENTS_CONVERSATIONAL_ASSISTANT.md`'s FR-P3-4/FR-P3-9. Diffed against `dev` (not `main`, which is stale) — a clean, single-commit, fully additive PR: `src/lib/recommendations.js` (new, shared ranking module), `src/app/api/org/[orgId]/recommendations/route.js` (new endpoint), `src/components/recommendations/RelatedWorkPanel.jsx` (new, "Related to your work" panel), wired into both `project/page.jsx` and `department/[deptId]/page.jsx`. Does not touch `chat/route.js` or any file `6-B`/`6-D` touched — no merge-conflict or overwrite risk for `6-E`.
+  - Ranking module is genuinely shared (one `getRecommendations()` call, `mode: "predictive" | "proactive"` differentiated only by whether a `query` param was supplied) — satisfies the "no duplicate ranking logic" constraint.
+  - Seeds from `OrgMemberMemory.getRecentMemory` run through `hybridOrgSearch`, exactly as specified. RBAC verified: `hybridOrgSearch` → `orgSearch`/`orgKeywordSearch` apply the org/department/project access checks in the SQL `WHERE` clause (department-membership join, repository lifecycle check, org-scoped project membership check) — same pattern as Phase 2, no post-filter. Confirmed a non-member requesting a `departmentId` they don't belong to gets zero rows.
+  - OpenAI key resolution uses `getOrgOpenAIKey` + `ORG_OPENAI_KEY_MISSING`, matching `chat/route.js`'s existing pattern exactly (satisfies the NFR to reuse existing key resolution, not open a new path).
+  - `npx eslint` on the three new files and `npx next build` both pass clean.
+  - Acceptance criteria met: recommendations are personalized (informed by `OrgMemberMemory` topics, not generic) and the project/department pages show the panel without the user asking — both bullets in the doc's Acceptance Criteria section.
+- **Minor, non-blocking note:** the route accepts an explicit `query` param (the FR-P3-4 "on-request" path) but no caller in this PR ever sends one — `RelatedWorkPanel` only drives the proactive (memory-only) path. Both FRs' acceptance criteria are still satisfied by the current wiring; flagging in case a future on-request UI (e.g. a chat-triggered "show me related work") is expected later.
 - **Objective:** A natural pair per `TIER1_COMPLETION_PLAN.md` §5 — both surface content based on patterns/context, sharing one ranking module. Predictive Recommendations (`FR-P3-4`) is the on-request version; Proactive Recommendations (`FR-P3-9`) is the same logic surfaced without a query.
 - **Key files to create/modify:**
   - `src/lib/recommendations.js` (new) — shared ranking logic, seeded from `OrgMemberMemory.getRecentMemory` run back through `hybridOrgSearch`.
@@ -68,7 +81,9 @@
 - **Constraint:** do not duplicate ranking logic between the two FRs — `recommendations.js` is the single source both consume.
 
 ### Task 6-D — Organizational Learning + Workflow Assistance
-- **Status:** `TODO`
+- **Status:** `DONE`
+- **Reviewed (2026-07-28):** PR `pr-18` (`feature/task-6d-organizational-learning-workflow`) reviewed against this task and `REQUIREMENTS_CONVERSATIONAL_ASSISTANT.md`'s FR-P3-6/FR-P3-8. All key files delivered: thumbs up/down UI, `PATCH .../message/[messageId]`, feedback-weighted boost in `hybridOrgSearch`, `workflowSteps` extraction in `worker/summarize.js`, `activeWorkflowDocumentId`/`activeWorkflowStep` tracking in `chat/route.js`. Both open questions resolved per the doc's recommendation (3+ occurrence threshold for feedback boost, 3+ imperative sequential steps for workflow detection). RBAC pattern for workflow-resume document access matches `vectorSearch.js`'s existing department/project membership checks — no regression. Feedback field uses `"up"`/`"down"` values (vs. the doc's proposed `"helpful"`/`"not_helpful"`) — functionally fine since `OrgMessage.feedback` is an unconstrained `String?` and the value is used consistently end-to-end (route, ranking, UI).
+- **Known deviation (accepted, not blocking):** the doc's Non-Functional Requirements section specifies feedback-weighted score adjustment should be async/pre-computed, "never inline with chat response latency." This implementation computes it inline in `hybridOrgSearch` on every chat request (two bounded Prisma queries, capped at 120 messages). Accepted as-is for merge; revisit if this becomes a measurable latency issue.
 - **Objective:** Organizational Learning (`FR-P3-6`) is a genuinely new feedback mechanism (confirmed nothing exists to extend) feeding a feedback-weighted retrieval boost. Workflow Assistance (`FR-P3-8`) is a guided, non-autonomous walkthrough of procedural documents — explicitly not action execution (that's the deferred `FR-P3-10`).
 - **Key files to create/modify:**
   - `src/app/(app)/org/[orgId]/chat/page.jsx` — thumbs up/down control per assistant message.

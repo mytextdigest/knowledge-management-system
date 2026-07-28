@@ -103,6 +103,30 @@ try {
   await fs.writeFile(file, JSON.stringify(report, null, 2));
   console.log(`Knowledge-gap report written to ${file}`);
   console.log(`Flagged ${gaps.length} topic pattern(s).`);
+
+  // FR-P3-7: persist as KnowledgeGap rows too, so the health dashboard has
+  // something to query instead of only this JSON report. Each run replaces
+  // the prior snapshot for the org(s) it actually analyzed — this is a
+  // current-state view, not an append-only history — scoped to exactly the
+  // orgs present in `gaps` (or the single `--org` requested) so a narrow
+  // `--days`/`--org` run never wipes another org's untouched snapshot.
+  const analyzedOrgIds = orgId ? [orgId] : [...new Set(gaps.map((g) => g.orgId))];
+  if (analyzedOrgIds.length > 0) {
+    await prisma.knowledgeGap.deleteMany({ where: { orgId: { in: analyzedOrgIds } } });
+  }
+  if (gaps.length > 0) {
+    await prisma.knowledgeGap.createMany({
+      data: gaps.map((g) => ({
+        orgId: g.orgId,
+        topic: g.topic,
+        gapScore: g.gapScore,
+        occurrenceCount: g.occurrences,
+        zeroCitationCount: g.zeroCitationCount,
+        lowConfidenceCount: g.lowConfidenceAnswersInOrg,
+      })),
+    });
+  }
+  console.log(`Persisted ${gaps.length} KnowledgeGap row(s) for ${analyzedOrgIds.length} org(s).`);
 } finally {
   await prisma.$disconnect();
 }

@@ -10,6 +10,7 @@ import { getRecentMemory, recordMemoryTopics } from "@/lib/orgMemberMemory";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 import { classifyWorkflowRequest, formatWorkflowInstruction, getWorkflowSteps } from "@/lib/workflowAssistance";
+import { isDecisionQuestion, getDecisionEvidence, formatDecisionContext, DECISION_INSTRUCTION } from "@/lib/decisionIntelligence";
 
 const SYSTEM_PROMPT = `
 You are an expert assistant that answers questions using only the
@@ -254,6 +255,20 @@ export async function POST(req, { params }) {
   let nextWorkflowStep = activeWorkflowStep;
   let chunks = [];
 
+  // FR-P3-2: decision-oriented questions get past `Decision` rows as grounding
+  // evidence, same RBAC-scoped-retrieval pattern as the chunk search below.
+  const decisionEvidence = isDecisionQuestion(question)
+    ? await getDecisionEvidence({
+        question,
+        orgId,
+        userId: user.id,
+        isSuperAdmin: isSuperAdmin(role),
+        scope,
+        departmentId,
+      })
+    : [];
+  const decisionContext = formatDecisionContext(decisionEvidence);
+
   if (activeWorkflowDocumentId && workflowRequest.action !== "none") {
     const workflowDocument = await prisma.document.findFirst({
       where: {
@@ -399,9 +414,12 @@ export async function POST(req, { params }) {
   const contextBlocks = Object.values(grouped).map(
     (g) => `Document: ${g.filename}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
   );
-  const context = contextBlocks.length > 0
-    ? contextBlocks.join("\n\n")
-    : "No relevant organization documents were found for this question.";
+  const context = [
+    ...(decisionContext ? [decisionContext] : []),
+    ...(contextBlocks.length > 0
+      ? contextBlocks
+      : ["No relevant organization documents were found for this question."]),
+  ].join("\n\n");
 
   const prevMsgs = await prisma.orgMessage.findMany({
     where: { conversationId, createdAt: { lt: userMsg.createdAt } },
@@ -415,7 +433,7 @@ export async function POST(req, { params }) {
     ...prevMsgs.map((m) => ({ role: m.role, content: m.content })),
     {
       role: "user",
-      content: `${sessionContextNote}${workflowInstruction ? `${workflowInstruction}\n\n` : ""}Question: ${question}\n\nContext:\n${context}`,
+      content: `${sessionContextNote}${workflowInstruction ? `${workflowInstruction}\n\n` : ""}${decisionContext ? `${DECISION_INSTRUCTION}\n\n` : ""}Question: ${question}\n\nContext:\n${context}`,
     },
   ];
 
