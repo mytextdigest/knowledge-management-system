@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  Bot, Check, FileText, History, Loader2, MessageSquarePlus, Pencil, Send, Trash2, User, X,
+  Bot, Check, FileText, History, Loader2, MessageSquarePlus, Pencil, Send, ThumbsDown, ThumbsUp, Trash2, User, X,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
@@ -81,7 +81,7 @@ async function streamChatResponse({ orgId, question, conversationId, scope, depa
       if (eventType === 'meta') onMeta(data);
       else if (eventType === 'token') onToken(data.text);
       else if (eventType === 'title') onTitle(data.title);
-      else if (eventType === 'done') onDone();
+      else if (eventType === 'done') onDone(data);
       else if (eventType === 'error') onError(data.message);
     }
   }
@@ -214,6 +214,7 @@ export default function OrgChatPage() {
           content: m.content,
           sources: m.sources || [],
           confidence: m.confidence,
+          feedback: m.feedback || null,
         }))
       );
       setConversationId(id);
@@ -278,6 +279,37 @@ export default function OrgChatPage() {
     }
   };
 
+  const submitFeedback = async (messageId, feedback) => {
+    if (!conversationId || !messageId || String(messageId).startsWith('assistant-')) return;
+    const current = messages.find((message) => message.id === messageId)?.feedback || null;
+    const nextFeedback = current === feedback ? null : feedback;
+
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === messageId ? { ...message, feedback: nextFeedback } : message
+      )
+    );
+
+    try {
+      const res = await fetch(
+        `/api/org/${orgId}/chat/${conversationId}/message/${messageId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ feedback: nextFeedback }),
+        }
+      );
+      if (!res.ok) throw new Error('Unable to save feedback');
+    } catch {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === messageId ? { ...message, feedback: current } : message
+        )
+      );
+      setError('Unable to save feedback. Please try again.');
+    }
+  };
+
   const sendMessage = async (e) => {
     e.preventDefault();
     const question = input.trim();
@@ -322,9 +354,13 @@ export default function OrgChatPage() {
             prev.map((c) => (c.id === activeConvId ? { ...c, title, preview: title } : c))
           );
         },
-        onDone: () => {
+        onDone: ({ messageId } = {}) => {
           setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMsgId ? { ...m, streaming: false } : m))
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, id: messageId || m.id, streaming: false, feedback: null }
+                : m
+            )
           );
         },
         onError: (message) => {
@@ -463,6 +499,39 @@ export default function OrgChatPage() {
                         >
                           {m.confidence} confidence
                         </span>
+                      )}
+
+                      {m.role === 'assistant' && !m.streaming && (
+                        <div className="flex items-center gap-1" aria-label="Rate this answer">
+                          <button
+                            type="button"
+                            onClick={() => submitFeedback(m.id, 'up')}
+                            className={cn(
+                              'rounded-md p-1.5 transition',
+                              m.feedback === 'up'
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                : 'text-gray-400 hover:bg-gray-100 hover:text-green-600 dark:hover:bg-gray-800'
+                            )}
+                            title="Helpful"
+                            aria-pressed={m.feedback === 'up'}
+                          >
+                            <ThumbsUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => submitFeedback(m.id, 'down')}
+                            className={cn(
+                              'rounded-md p-1.5 transition',
+                              m.feedback === 'down'
+                                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                                : 'text-gray-400 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-800'
+                            )}
+                            title="Not helpful"
+                            aria-pressed={m.feedback === 'down'}
+                          >
+                            <ThumbsDown className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       )}
 
                       {m.sources?.length > 0 && (

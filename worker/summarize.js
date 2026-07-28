@@ -59,6 +59,7 @@ export async function createStructuredSummary(openai, chunkSummaries, filename) 
     return {
       overview: "No readable text was available for this document.",
       keyPoints: [],
+      workflowSteps: [],
     };
   }
 
@@ -79,8 +80,11 @@ Create a structured summary for the document "${filename}".
 Return JSON with exactly:
 {
   "overview": "3-5 sentence overview",
-  "keyPoints": ["5-8 key points"]
+  "keyPoints": ["5-8 key points"],
+  "workflowSteps": ["ordered imperative step"]
 }
+
+For workflowSteps, include an ordered walkthrough only when the document clearly contains at least 3 sequential procedural steps written as actions. Rewrite each as a concise imperative instruction while preserving the document's meaning. Otherwise return an empty array.
 
 Chunk summaries:
 ${joined.slice(0, 24000)}
@@ -93,10 +97,21 @@ ${joined.slice(0, 24000)}
 
   const raw = completion.choices?.[0]?.message?.content?.trim() || "";
 
-  return safeJsonParse(raw, {
+  const parsed = safeJsonParse(raw, {
     overview: raw || "Summary could not be parsed.",
     keyPoints: [],
+    workflowSteps: [],
   });
+
+  const workflowSteps = Array.isArray(parsed.workflowSteps)
+    ? parsed.workflowSteps.map((step) => String(step || "").trim()).filter(Boolean)
+    : [];
+
+  return {
+    overview: String(parsed.overview || "Summary could not be parsed."),
+    keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints : [],
+    workflowSteps: workflowSteps.length >= 3 ? workflowSteps : [],
+  };
 }
 
 const ENTITY_TYPES = ["person", "project", "department", "system"];

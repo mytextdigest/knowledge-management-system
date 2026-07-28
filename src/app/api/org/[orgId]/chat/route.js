@@ -9,6 +9,7 @@ import { extractQuestionEntities } from "@/lib/entityExtraction";
 import { getRecentMemory, recordMemoryTopics } from "@/lib/orgMemberMemory";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
+import { classifyWorkflowRequest, formatWorkflowInstruction, getWorkflowSteps } from "@/lib/workflowAssistance";
 
 const SYSTEM_PROMPT = `
 You are an expert assistant that answers questions using only the
@@ -168,6 +169,8 @@ export async function POST(req, { params }) {
   let isNewConversation = false;
   let activeTopic = null;
   let activeDocumentId = null;
+  let activeWorkflowDocumentId = null;
+  let activeWorkflowStep = null;
 
   if (conversationId) {
     const conv = await prisma.orgConversation.findFirst({
@@ -178,6 +181,8 @@ export async function POST(req, { params }) {
     }
     activeTopic = conv.activeTopic;
     activeDocumentId = conv.activeDocumentId;
+    activeWorkflowDocumentId = conv.activeWorkflowDocumentId;
+    activeWorkflowStep = conv.activeWorkflowStep;
   } else {
     const conv = await prisma.orgConversation.create({
       data: { orgId, userId: user.id },
@@ -243,18 +248,108 @@ export async function POST(req, { params }) {
   );
 
   const requestedDiversify = shouldDiversifyAcrossProjects(question, scope);
+  const workflowRequest = classifyWorkflowRequest(question, Boolean(activeWorkflowDocumentId));
+  let workflowInstruction = "";
+  let nextWorkflowDocumentId = activeWorkflowDocumentId;
+  let nextWorkflowStep = activeWorkflowStep;
+  let chunks = [];
 
-  const chunks = await hybridOrgSearch({
-    queries: [...expandedQueries, ...extraKeywordQueries],
-    embeddings: queryEmbeddings,
-    userId: user.id,
-    orgId,
-    limit: 8,
-    scope,
-    departmentId,
-    isSuperAdmin: isSuperAdmin(role),
-    diversify: requestedDiversify,
-  });
+  if (activeWorkflowDocumentId && workflowRequest.action !== "none") {
+    const workflowDocument = await prisma.document.findFirst({
+      where: {
+        id: activeWorkflowDocumentId,
+        orgId,
+        OR: [
+          {
+            scope: "repository",
+            lifecycle: "published",
+            ...(isSuperAdmin(role)
+              ? {}
+              : { OR: [{ departmentId: null }, { department: { members: { some: { userId: user.id } } } }] }),
+          },
+          {
+            project: {
+              scope: "org",
+              orgId,
+              ...(isSuperAdmin(role)
+                ? {}
+                : { department: { members: { some: { userId: user.id } } } }),
+            },
+          },
+        ],
+      },
+      select: { id: true, filename: true, filePath: true, summary: true, content: true },
+    });
+    const steps = getWorkflowSteps(workflowDocument?.summary);
+
+    if (workflowRequest.action === "stop") {
+      workflowInstruction = "Acknowledge that the guided workflow has stopped. Do not provide another step unless the user asks to restart it.";
+      nextWorkflowDocumentId = null;
+      nextWorkflowStep = null;
+    } else if (workflowDocument && steps.length >= 3) {
+      let stepIndex = Number.isInteger(activeWorkflowStep) ? activeWorkflowStep : 0;
+      if (workflowRequest.action === "next") stepIndex = Math.min(stepIndex + 1, steps.length - 1);
+      if (workflowRequest.action === "previous") stepIndex = Math.max(stepIndex - 1, 0);
+      if (workflowRequest.action === "restart") stepIndex = 0;
+      nextWorkflowStep = stepIndex;
+      workflowInstruction = formatWorkflowInstruction({
+        filename: workflowDocument.filename || "workflow document",
+        steps,
+        stepIndex,
+      });
+      chunks = [{
+        id: `workflow:${workflowDocument.id}:${stepIndex}`,
+        document_id: workflowDocument.id,
+        filename: workflowDocument.filename,
+        filePath: workflowDocument.filePath,
+        text: steps[stepIndex],
+        distance: 0,
+        keywordScore: 1,
+        hybridScore: 1,
+      }];
+    } else {
+      nextWorkflowDocumentId = null;
+      nextWorkflowStep = null;
+    }
+  }
+
+  if (chunks.length === 0 && workflowRequest.action !== "stop") {
+    chunks = await hybridOrgSearch({
+      queries: [...expandedQueries, ...extraKeywordQueries],
+      embeddings: queryEmbeddings,
+      userId: user.id,
+      orgId,
+      limit: 8,
+      scope,
+      departmentId,
+      isSuperAdmin: isSuperAdmin(role),
+      diversify: requestedDiversify,
+      feedbackQuestion: question,
+    });
+
+    if (workflowRequest.action === "start") {
+      const candidateIds = [...new Set(chunks.map((chunk) => chunk.document_id).filter(Boolean))];
+      const candidates = await prisma.document.findMany({
+        where: { id: { in: candidateIds }, orgId, lifecycle: "published" },
+        select: { id: true, filename: true, summary: true },
+      });
+      const byId = new Map(candidates.map((document) => [document.id, document]));
+      for (const chunk of chunks) {
+        const document = byId.get(chunk.document_id);
+        const steps = getWorkflowSteps(document?.summary);
+        if (document && steps.length >= 3) {
+          nextWorkflowDocumentId = document.id;
+          nextWorkflowStep = 0;
+          workflowInstruction = formatWorkflowInstruction({
+            filename: document.filename || "workflow document",
+            steps,
+            stepIndex: 0,
+          });
+          break;
+        }
+      }
+    }
+  }
 
   // Reflects what actually happened, not just the keyword-based request above
   // — hybridOrgSearch can also diversify on its own when the retrieved
@@ -318,7 +413,10 @@ export async function POST(req, { params }) {
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
     ...prevMsgs.map((m) => ({ role: m.role, content: m.content })),
-    { role: "user", content: `${sessionContextNote}Question: ${question}\n\nContext:\n${context}` },
+    {
+      role: "user",
+      content: `${sessionContextNote}${workflowInstruction ? `${workflowInstruction}\n\n` : ""}Question: ${question}\n\nContext:\n${context}`,
+    },
   ];
 
   const encoder = new TextEncoder();
@@ -351,7 +449,7 @@ export async function POST(req, { params }) {
           }
         }
 
-        await prisma.orgMessage.create({
+        const assistantMessage = await prisma.orgMessage.create({
           data: { conversationId, role: "assistant", content: answer, sources, confidence },
         });
 
@@ -367,7 +465,12 @@ export async function POST(req, { params }) {
 
         await prisma.orgConversation.update({
           where: { id: conversationId },
-          data: { activeTopic: nextActiveTopic, activeDocumentId: nextActiveDocumentId },
+          data: {
+            activeTopic: nextActiveTopic,
+            activeDocumentId: nextActiveDocumentId,
+            activeWorkflowDocumentId: nextWorkflowDocumentId,
+            activeWorkflowStep: nextWorkflowStep,
+          },
         });
 
         if (questionEntities.length > 0) {
@@ -391,7 +494,7 @@ export async function POST(req, { params }) {
           }
         }
 
-        send("done", {});
+        send("done", { messageId: assistantMessage.id });
       } catch (err) {
         send("error", { message: err?.message || "Something went wrong while generating a response." });
       } finally {
