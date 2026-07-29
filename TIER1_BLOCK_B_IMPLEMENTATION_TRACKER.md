@@ -111,6 +111,7 @@
   2. Re-verify `6-D`'s guided workflow walkthrough ("walk me through...", "next step") still works end-to-end now that `6-B`'s block sits right next to it in `chat/route.js`.
   3. Check the "Related to your work" panel (`6-C`) actually renders on a project page and a department page for a user with some `OrgMemberMemory` history.
   4. Check the new "Knowledge Health" dashboard card — note it will show "no gaps"/zero conflicts until `scripts/task-5d/detect-knowledge-gaps.mjs` has actually been run at least once against real data (a live DB write I deliberately haven't executed — let me know if you want me to run it for a specific `--org=`).
+     - **UI enhancement (2026-07-29):** clicking "Open Conflicts" now opens a modal listing each flagged `DocumentConflict` (summary + both documents involved), each linking to `/document?id=<id>` in a new tab. `health/route.js` now returns `conflicts.items` (id, summary, createdAt, documentA/documentB with filename) alongside the existing `openCount`. Verified against org `cmqln1sip0002ji7bpvnrzcyc`'s real conflict: "Remote Work Policy — Engineering (Updated).docx" vs. "...(Draft v1).docx" — genuinely contradictory (4-days-on-site vs. fully-remote), good demo material.
   5. Cross-department RBAC spot-check: log in as a `dept_admin` scoped to one department and confirm Decision evidence, recommendations, and (if you want the aggregate scope tightened) the health card don't surface content from a department they don't belong to.
 
 ### Task 6-F — PR + Cross-Reviews

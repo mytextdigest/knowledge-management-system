@@ -21,15 +21,23 @@ export async function GET(req, { params }) {
   if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   if (!isOrgAdmin(role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const [recentMessages, openConflictCount, topGaps] = await Promise.all([
+  const [recentMessages, openConflicts, topGaps] = await Promise.all([
     prisma.orgMessage.findMany({
       where: { role: "assistant", confidence: { not: null }, conversation: { orgId } },
       orderBy: { createdAt: "desc" },
       take: CONFIDENCE_SAMPLE_SIZE,
       select: { confidence: true },
     }),
-    prisma.documentConflict.count({
+    prisma.documentConflict.findMany({
       where: { status: "flagged", documentA: { orgId } },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        summary: true,
+        createdAt: true,
+        documentA: { select: { id: true, filename: true } },
+        documentB: { select: { id: true, filename: true } },
+      },
     }),
     prisma.knowledgeGap.findMany({
       where: { orgId },
@@ -59,7 +67,16 @@ export async function GET(req, { params }) {
       distribution,
       sampleSize: recentMessages.length,
     },
-    conflicts: { openCount: openConflictCount },
+    conflicts: {
+      openCount: openConflicts.length,
+      items: openConflicts.map((c) => ({
+        id: c.id,
+        summary: c.summary,
+        createdAt: c.createdAt,
+        documentA: c.documentA,
+        documentB: c.documentB,
+      })),
+    },
     gaps: topGaps,
   });
 }
