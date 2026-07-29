@@ -400,7 +400,7 @@ export async function POST(req, { params }) {
     nextActiveDocumentId = null;
   }
 
-  const sources = await Promise.all(
+  const documentSources = await Promise.all(
     Object.values(grouped).map(async (g) => ({
       documentId: g.documentId,
       filename: g.filename,
@@ -410,6 +410,21 @@ export async function POST(req, { params }) {
       url: g.filePath ? await generateSignedUrl(g.filePath).catch(() => null) : null,
     }))
   );
+
+  // FR-P3-2: surface decision evidence as its own citation type so the UI can
+  // visually distinguish "grounded in a tracked Decision" from a regular
+  // document citation, instead of it only being readable in the prose.
+  const decisionSources = decisionEvidence.map((d) => ({
+    type: "decision",
+    documentId: d.documentId,
+    filename: d.filename,
+    department: d.departmentName || null,
+    project: d.projectName || null,
+    statement: d.statement,
+    rationale: d.rationale || null,
+  }));
+
+  const sources = [...decisionSources, ...documentSources];
 
   const contextBlocks = Object.values(grouped).map(
     (g) => `Document: ${g.filename}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
