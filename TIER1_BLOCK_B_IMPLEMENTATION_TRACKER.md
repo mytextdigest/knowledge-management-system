@@ -30,7 +30,7 @@
 | `6-B` | Decision Intelligence + Knowledge Health Monitoring | `DONE` | Johurul | `6-A` | 2026-07-28 | 2026-07-28 |
 | `6-C` | Predictive Recommendations + Proactive Recommendations | `DONE` | Simran | `6-A` | | 2026-07-28 |
 | `6-D` | Organizational Learning + Workflow Assistance | `DONE` | Sandeep | `6-A` | | 2026-07-28 |
-| `6-E` | Integration & RBAC Regression Check | `TODO` | Johurul | `6-B`, `6-C`, `6-D` | | |
+| `6-E` | Integration & RBAC Regression Check | `IN_PROGRESS` | Johurul | `6-B`, `6-C`, `6-D` | 2026-07-28 | |
 | `6-F` | PR + Cross-Reviews | `TODO` | All 3 | `6-E` | | |
 
 ---
@@ -97,6 +97,19 @@
 - **Status:** `TODO`
 - **Objective:** `6-B`, `6-C`, and `6-D` all touch `chat/route.js` and retrieval — merge and reconcile before testing individually-passing-but-conflicting changes, the same discipline `4-E`/`5-E` used.
 - **Notes:** RBAC regression check is mandatory — `FR-P3-2` (decision evidence), `FR-P3-4`/`FR-P3-9` (recommendations), and `FR-P3-7` (health dashboard) all read across documents a user may not individually have access to; confirm every new query path goes through the existing SQL-`WHERE` RBAC pattern or `filterAccessibleDocuments`, never a post-filter. Confirm the three workstreams' edits to `chat/route.js` are additive (new detection blocks, not overwrites of Phase 1/2 logic already there), the same check `5-E` did for `5-B`/`5-C`/`5-D`.
+- **Static reconciliation + RBAC audit (2026-07-28, Johurul):**
+  - **`chat/route.js` additivity:** only `6-B` and `6-D` touch this file (`6-C` is fully isolated — new files only, confirmed no overlap). Read the fully-merged file end to end: `6-D`'s workflow classification/instruction block and `6-B`'s decision-evidence block are independent, sequential additions around the untouched Phase 1/2 core (entity extraction, memory, `hybridOrgSearch` call, sources/citations, confidence, audit log, `activeTopic`/`activeDocumentId` state). No overwritten logic, no shared mutable state between the two blocks.
+  - **RBAC — `FR-P3-2` (`decisionIntelligence.js`):** `getDecisionEvidence()` reuses the exact WHERE-clause shape from `orgSearch`/`orgKeywordSearch` (via the now-exported `scopeSql`) — same department-membership join, repository/lifecycle check, and org-scoped-project membership check. No post-filter. Verified by dry-running the raw SQL directly against the dev DB.
+  - **RBAC — `FR-P3-4`/`FR-P3-9` (`recommendations.js`, reviewed at `6-C`):** candidates come exclusively from `hybridOrgSearch` → `orgSearch`/`orgKeywordSearch`; confirmed again here that `collapseByDocument` only reorders/filters rows already RBAC-scoped by SQL, never widens them.
+  - **RBAC — `FR-P3-7` (`health/route.js`):** gated to `isOrgAdmin` (`super_admin`/`dept_admin`), matching the dashboard page's existing client-side admin gate. Aggregates are org-wide (not narrowed to a `dept_admin`'s specific department) — this matches existing precedent on the same dashboard (`docCount`/`memberCount`/recent projects-and-documents are already org-wide regardless of which department the admin manages), so treated as consistent with the established design, not a regression. `DocumentConflict` count filters on `documentA.orgId` only (no `COALESCE`/OR needed): confirmed via `worker/detectConflicts.js`'s candidate query that both sides of a conflict are always constrained to the same org at creation time.
+  - **`hybridSearch.js` feedback boost (`6-D`) cross-checked for RBAC leakage:** `getFeedbackDocumentWeights` reads `OrgMessage.feedback` org-wide (not department-scoped) to compute a per-document boost, but that boost only re-ranks rows that already passed RBAC-scoped SQL retrieval in `orgSearch`/`orgKeywordSearch` — it cannot surface a document the requesting user couldn't otherwise see. No new leak.
+  - **Build/lint:** full-repo `npx eslint .` clean; full `npx next build` compiles every route including the two new endpoints (`recommendations`, `health`).
+- **Needs manual verification (user) — not done here per instruction to avoid live browser-automation testing:**
+  1. Ask a decision-oriented question (e.g. "should we...") in an org that has at least one existing `Decision` row — confirm the answer actually cites/grounds in it, and confirm an unrelated question doesn't force an irrelevant citation.
+  2. Re-verify `6-D`'s guided workflow walkthrough ("walk me through...", "next step") still works end-to-end now that `6-B`'s block sits right next to it in `chat/route.js`.
+  3. Check the "Related to your work" panel (`6-C`) actually renders on a project page and a department page for a user with some `OrgMemberMemory` history.
+  4. Check the new "Knowledge Health" dashboard card — note it will show "no gaps"/zero conflicts until `scripts/task-5d/detect-knowledge-gaps.mjs` has actually been run at least once against real data (a live DB write I deliberately haven't executed — let me know if you want me to run it for a specific `--org=`).
+  5. Cross-department RBAC spot-check: log in as a `dept_admin` scoped to one department and confirm Decision evidence, recommendations, and (if you want the aggregate scope tightened) the health card don't surface content from a department they don't belong to.
 
 ### Task 6-F — PR + Cross-Reviews
 - **Status:** `TODO`
