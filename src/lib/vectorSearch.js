@@ -2,10 +2,21 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { computeBM25, tokenize } from "@/lib/keywordSearch";
 
-export function scopeSql({ scope = "organization", departmentId = null }) {
+export function scopeSql({ scope = "organization", departmentId = null, userId = null }) {
   if (scope === "department") {
     if (departmentId) {
-      return Prisma.sql`AND d."departmentId" = ${departmentId}`;
+      // A document's department can come directly (repository-scoped docs)
+      // or only via its project (project-scoped docs have Document.departmentId
+      // = null; the department lives on Project.departmentId instead) — match
+      // both, or every project-scoped document silently vanishes from
+      // department-scoped search/recommendations/decision-evidence.
+      return Prisma.sql`AND (
+        d."departmentId" = ${departmentId}
+        OR EXISTS (
+          SELECT 1 FROM "Project" scope_proj
+          WHERE scope_proj.id = d."projectId" AND scope_proj."departmentId" = ${departmentId}
+        )
+      )`;
     }
 
     // No specific department chosen (e.g. the requester belongs to none) —
@@ -13,8 +24,18 @@ export function scopeSql({ scope = "organization", departmentId = null }) {
     // join already present in every caller's WHERE clause, not every
     // department in the org. isSuperAdmin does NOT bypass this: "Department"
     // scope is a narrowing choice, and narrowing to a department you're not
-    // in must never silently widen to "all departments."
-    return Prisma.sql`AND d."departmentId" IS NOT NULL AND dm."userId" IS NOT NULL`;
+    // in must never silently widen to "all departments." Same
+    // direct-or-via-project reasoning as above applies to this membership
+    // check too.
+    return Prisma.sql`AND (
+      (d."departmentId" IS NOT NULL AND dm."userId" IS NOT NULL)
+      OR EXISTS (
+        SELECT 1 FROM "Project" scope_proj
+        JOIN "DepartmentMember" scope_pm
+          ON scope_pm."departmentId" = scope_proj."departmentId" AND scope_pm."userId" = ${userId}
+        WHERE scope_proj.id = d."projectId"
+      )
+    )`;
   }
 
   if (scope === "personal") {
@@ -50,7 +71,7 @@ export async function orgSearch(
   }
 ) {
   const embStr = JSON.stringify(queryEmbedding);
-  const scopeFilter = scopeSql({ scope, departmentId });
+  const scopeFilter = scopeSql({ scope, departmentId, userId });
 
   return prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
@@ -109,7 +130,7 @@ export async function orgKeywordSearch(
   const terms = tokenize(safeQuery).slice(0, 8);
   if (terms.length === 0) return [];
 
-  const scopeFilter = scopeSql({ scope, departmentId });
+  const scopeFilter = scopeSql({ scope, departmentId, userId });
   const termFilters = terms.map(
     (term) => Prisma.sql`
       (
@@ -188,7 +209,7 @@ export async function orgFallbackTextSearch(
 
   if (terms.length === 0) return [];
 
-  const scopeFilter = scopeSql({ scope, departmentId });
+  const scopeFilter = scopeSql({ scope, departmentId, userId });
 
   const termFilters = terms.map(
     (term) => Prisma.sql`

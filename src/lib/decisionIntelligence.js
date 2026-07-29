@@ -48,7 +48,7 @@ export async function getDecisionEvidence({
   const terms = tokenize(safeQuery).slice(0, 8);
   if (terms.length === 0) return [];
 
-  const scopeFilter = scopeSql({ scope, departmentId });
+  const scopeFilter = scopeSql({ scope, departmentId, userId });
   const termFilters = terms.map(
     (term) => Prisma.sql`
       (
