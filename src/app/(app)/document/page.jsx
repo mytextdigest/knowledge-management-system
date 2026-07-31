@@ -7,11 +7,12 @@ import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle } from 'lucide-react';
+import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2 } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
 import PdfViewer from "@/components/documents/PdfViewer";
+import DocumentFullscreenModal from "@/components/documents/DocumentFullscreenModal";
 import { cn } from '@/lib/utils';
 import { copySummary, printSummary } from '@/lib/summaryActions';
 import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
@@ -52,6 +53,7 @@ function DocumentContent() {
   const [copiedId, setCopiedId] = useState(null);
 
   const [expandedMessage, setExpandedMessage] = useState(null);
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
 
   // Reading Guide state
   const [pagesRead, setPagesRead] = useState(0);
@@ -147,7 +149,7 @@ function DocumentContent() {
       const response = await fetch('/api/page-insight', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageContent: content, pageNumber: nextPage }),
+        body: JSON.stringify({ pageContent: content, pageNumber: nextPage, documentId: doc?.id }),
       });
 
       const res = await response.json().catch(() => null);
@@ -176,7 +178,7 @@ function DocumentContent() {
     } finally {
       setIsLoadingPageInsight(false);
     }
-  }, [isLoadingPageInsight, pagesRead, totalPages, getContentUpToPage]);
+  }, [isLoadingPageInsight, pagesRead, totalPages, getContentUpToPage, doc?.id]);
 
   // Auto-trigger chain when reading guide tab is active
   useEffect(() => {
@@ -802,7 +804,16 @@ function DocumentContent() {
 
       {/* Document Content */}
       <div className="flex-1 min-h-0">
-        <Card className="h-full">
+        <Card className="h-full relative">
+          <button
+            type="button"
+            onClick={() => setIsFullscreenOpen(true)}
+            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-900/80 hover:bg-gray-900 text-white text-xs font-medium shadow-md backdrop-blur transition"
+            aria-label="Open document in fullscreen"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+            <span>Fullscreen</span>
+          </button>
           <CardContent className="p-0 h-full">
             <div className="h-full overflow-hidden">
               {renderDocument()}
@@ -1463,6 +1474,14 @@ function DocumentContent() {
         open={!!expandedMessage}
         message={expandedMessage}
         onClose={closeExpanded}
+      />
+
+      <DocumentFullscreenModal
+        open={isFullscreenOpen}
+        onClose={() => setIsFullscreenOpen(false)}
+        doc={doc}
+        ext={ext}
+        docxHtml={docxHtml}
       />
     </Layout>
   );
