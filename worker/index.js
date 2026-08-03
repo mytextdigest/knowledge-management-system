@@ -12,6 +12,7 @@ import { createStructuredSummary, summarizeChunks, extractEntities, extractDecis
 import { getOpenAIForDocument } from "./openai.js";
 import { detectConflictsForDocument } from "./detectConflicts.js";
 import { processClusterJobWorker } from "./cluster.js";
+import { processKnowledgeContext } from "./knowledgeContext.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
 const S3_BUCKET = process.env.S3_BUCKET;
@@ -583,7 +584,11 @@ async function processJob(job) {
   if (job.type === "chunk")    return processChunkJob(job);
   if (job.type === "embed")    return processEmbeddingJob(job);
   if (job.type === "summarize") return processSummarizationJob(job);
-  if (job.type === "cluster")  return processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
+  if (job.type === "cluster") {
+    const result = await processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
+    try { await processKnowledgeContext(job.docId); } catch (error) { console.error("Knowledge context job failed", error); }
+    return result;
+  }
 
   throw new Error("Unknown job type: " + job.type);
 }

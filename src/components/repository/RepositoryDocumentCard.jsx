@@ -196,6 +196,12 @@ export default function RepositoryDocumentCard({ document, orgRole, onLifecycleC
           </span>
         ) : null}
 
+        {document?.relatedDocumentCount > 0 ? (
+          <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-xs font-medium text-cyan-700 dark:border-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300">
+            {document.relatedDocumentCount} related
+          </span>
+        ) : null}
+
         {availableTransitions.length > 0 ? (
           <select
             value=""

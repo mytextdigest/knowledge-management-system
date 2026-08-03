@@ -1,5 +1,6 @@
 import { orgSearch, orgKeywordSearch, orgFallbackTextSearch } from "@/lib/vectorSearch";
 import { prisma } from "@/lib/prisma";
+import { expandWithRelatedDocuments } from "@/lib/knowledgeContext";
 
 function normalizeDistance(distance) {
   const value = Number(distance);
@@ -238,5 +239,6 @@ export async function hybridOrgSearch({
     effectiveDiversify = distinctSources >= 2;
   }
 
-  return effectiveDiversify ? diversifyResults(ranked, limit) : ranked.slice(0, limit);
+  const base = effectiveDiversify ? diversifyResults(ranked, limit) : ranked.slice(0, limit);
+  return expandWithRelatedDocuments({ rows: base, orgId, userId, isSuperAdmin, limit });
 }

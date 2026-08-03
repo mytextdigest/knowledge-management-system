@@ -125,6 +125,7 @@ export async function GET(req, { params }) {
         user:       { select: { id: true, name: true, email: true } },
         department: { select: { id: true, name: true } },
         project:    { select: { id: true, name: true, scope: true } },
+        _count: { select: { relationshipsFrom: true, relationshipsTo: true } },
       },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * PAGE_SIZE,
@@ -134,7 +135,12 @@ export async function GET(req, { params }) {
   ]);
 
   return NextResponse.json({
-    documents: docs.map((d) => ({ ...d, createdAt: d.createdAt.toISOString() })),
+    documents: docs.map((d) => ({
+      ...d,
+      relatedDocumentCount: (d._count?.relationshipsFrom || 0) + (d._count?.relationshipsTo || 0),
+      _count: undefined,
+      createdAt: d.createdAt.toISOString(),
+    })),
     total,
     page,
     pageSize: PAGE_SIZE,

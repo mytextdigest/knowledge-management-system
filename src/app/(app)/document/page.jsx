@@ -850,6 +850,29 @@ function DocumentContent() {
             )}
           </div>
 
+          {(doc?.relatedDocuments?.length > 0 || doc?.projectLinks?.length > 0) && (
+            <div className="mb-3 space-y-2 rounded-lg border border-cyan-100 bg-cyan-50/60 p-3 text-xs dark:border-cyan-900 dark:bg-cyan-950/20">
+              {doc.relatedDocuments?.length > 0 && (
+                <div>
+                  <p className="font-semibold text-cyan-900 dark:text-cyan-200">Related documents</p>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {doc.relatedDocuments.slice(0, 4).map((related) => (
+                      <button key={related.id} type="button" onClick={() => router.push(`/document?id=${related.id}`)} className="rounded border border-cyan-200 bg-white px-2 py-1 text-cyan-800 hover:bg-cyan-100 dark:border-cyan-800 dark:bg-gray-900 dark:text-cyan-200">
+                        {related.filename} · {Math.round(Number(related.weight || 0) * 100)}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {doc.projectLinks?.length > 0 && (
+                <div>
+                  <p className="font-semibold text-cyan-900 dark:text-cyan-200">Suggested project links</p>
+                  <p className="mt-1 text-cyan-800 dark:text-cyan-300">{doc.projectLinks.map((link) => link.project?.name).filter(Boolean).join(', ')}</p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Tab Navigation */}
           <div className="flex space-x-1 mt-4">
             <Button
