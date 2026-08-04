@@ -154,6 +154,7 @@ export async function POST(req) {
           filename,
           filePath: s3Key,
           status: "queued",
+          classificationStatus: "pending_classification",
           visibility,
           scope,
           ...(projectId    ? { project:      { connect: { id: projectId    } } } : {}),
