@@ -32,6 +32,7 @@ export async function GET(req, { params }) {
       content: m.content,
       sources: m.sources || [],
       confidence: m.confidence || null,
+      feedback: m.feedback || null,
       createdAt: m.createdAt,
     })),
   });

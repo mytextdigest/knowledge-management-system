@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Building2, FileText, Users, Layers, FolderKanban, Loader2, KeyRound, Clock,
+  Gauge, AlertTriangle, HelpCircle, X, ExternalLink,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 
@@ -18,7 +19,9 @@ export default function OrgDashboardPage() {
   const [recentDocuments, setRecentDocuments] = useState([]);
   const [docCount, setDocCount] = useState(0);
   const [projectCount, setProjectCount] = useState(0);
+  const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showConflicts, setShowConflicts] = useState(false);
 
   useEffect(() => {
     if (!orgId) return;
@@ -29,7 +32,8 @@ export default function OrgDashboardPage() {
       fetch(`/api/org/${orgId}/department`).then((r) => r.json()),
       fetch(`/api/org/${orgId}/projects`).then((r) => r.json()),
       fetch(`/api/org/${orgId}/repository`).then((r) => r.json()),
-    ]).then(([settingsData, membersData, departmentsData, projectsData, repoData]) => {
+      fetch(`/api/org/${orgId}/health`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([settingsData, membersData, departmentsData, projectsData, repoData, healthData]) => {
       if (settingsData.error) { router.replace('/welcome-back'); return; }
 
       const isAdmin = settingsData.role === 'super_admin' || settingsData.role === 'dept_admin';
@@ -42,6 +46,7 @@ export default function OrgDashboardPage() {
       setRecentProjects(Array.isArray(projectsData) ? projectsData.slice(0, 5) : []);
       setRecentDocuments(Array.isArray(repoData.documents) ? repoData.documents.slice(0, 5) : []);
       setDocCount(repoData.total ?? 0);
+      setHealth(healthData);
     }).finally(() => setLoading(false));
   }, [orgId]);
 
@@ -114,6 +119,62 @@ export default function OrgDashboardPage() {
           ))}
         </div>
 
+        {health && (
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2">
+              <Gauge className="h-4 w-4" />
+              Knowledge Health
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                <div className="flex items-center gap-2 text-gray-500">
+                  <Gauge className="h-4 w-4" />
+                  <span className="text-xs font-medium uppercase tracking-wide">Answer Confidence</span>
+                </div>
+                <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  {health.confidence.avgScore === null ? '—' : `${Math.round(health.confidence.avgScore * 100)}%`}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {health.confidence.sampleSize > 0
+                    ? `${health.confidence.distribution.high} high / ${health.confidence.distribution.medium} medium / ${health.confidence.distribution.low} low (last ${health.confidence.sampleSize})`
+                    : 'No recent Org Chat answers yet.'}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowConflicts(true)}
+                className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                <div className="flex items-center gap-2 text-gray-500">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="text-xs font-medium uppercase tracking-wide">Open Conflicts</span>
+                </div>
+                <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{health.conflicts.openCount}</p>
+                <p className="text-xs text-gray-500">Documents flagged with contradictory content</p>
+              </button>
+
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                <div className="flex items-center gap-2 text-gray-500">
+                  <HelpCircle className="h-4 w-4" />
+                  <span className="text-xs font-medium uppercase tracking-wide">Top Knowledge Gaps</span>
+                </div>
+                {health.gaps.length === 0 ? (
+                  <p className="mt-2 text-sm text-gray-500">No recurring gaps detected.</p>
+                ) : (
+                  <ul className="mt-2 space-y-1">
+                    {health.gaps.slice(0, 3).map((gap) => (
+                      <li key={gap.topic} className="truncate text-sm text-gray-700 dark:text-gray-300">
+                        {gap.topic}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="grid md:grid-cols-2 gap-6">
           <div className="space-y-3">
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2">
@@ -178,6 +239,61 @@ export default function OrgDashboardPage() {
           </div>
         </div>
       </div>
+
+      {showConflicts && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-gray-900">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  Open Conflicts
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Documents flagged with contradictory content
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowConflicts(false)}
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {!health?.conflicts?.items?.length ? (
+              <p className="py-4 text-sm text-gray-500 dark:text-gray-400">No open conflicts.</p>
+            ) : (
+              <div className="max-h-96 space-y-3 overflow-y-auto">
+                {health.conflicts.items.map((c) => (
+                  <div
+                    key={c.id}
+                    className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/10"
+                  >
+                    <p className="mb-2 text-sm text-gray-800 dark:text-gray-100">{c.summary}</p>
+                    <div className="flex flex-col gap-1">
+                      {[c.documentA, c.documentB].map((doc) => (
+                        <a
+                          key={doc.id}
+                          href={`/document?id=${doc.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                          <FileText className="h-3.5 w-3.5 flex-shrink-0" />
+                          <span className="truncate">{doc.filename || 'Untitled document'}</span>
+                          <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }

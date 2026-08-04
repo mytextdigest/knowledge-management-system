@@ -12,6 +12,7 @@ import { createStructuredSummary, summarizeChunks, extractEntities, extractDecis
 import { getOpenAIForDocument } from "./openai.js";
 import { detectConflictsForDocument } from "./detectConflicts.js";
 import { processClusterJobWorker } from "./cluster.js";
+import { classifyDocument, computeContentHash, detectDocumentDuplicates } from "./classify.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
 const S3_BUCKET = process.env.S3_BUCKET;
@@ -109,7 +110,7 @@ async function processChunkJob(job) {
 
   await prisma.document.update({
     where: { id: docId },
-    data: { status: "extracting" },
+    data: { status: "extracting", classificationStatus: "pending_classification" },
   });
 
   // -----------------------------
@@ -353,11 +354,27 @@ async function processEmbeddingJob(job) {
     await prisma.$executeRaw`UPDATE "Chunk" SET "embedding_vec" = ${embStr}::vector WHERE id = ${chunk.id}`;
   }
 
-  // Mark as embedded
+  // Mark as embedded and persist a normalized content hash for exact duplicate checks.
+  const embeddedDoc = await prisma.document.findUnique({
+    where: { id: docId },
+    select: { content: true },
+  });
   await prisma.document.update({
     where: { id: docId },
-    data: { status: "embedded" },
+    data: {
+      status: "embedded",
+      contentHash: computeContentHash(embeddedDoc?.content),
+    },
   });
+
+  // Duplicate detection is advisory and non-blocking. It uses existing embeddings,
+  // so it adds no LLM call and cannot reject the upload.
+  try {
+    const matches = await detectDocumentDuplicates({ prisma, documentId: docId });
+    console.log(`🟨 Duplicate scan for ${docId}: ${matches.length} possible match(es)`);
+  } catch (err) {
+    console.error("⚠️ Duplicate detection failed (non-fatal):", err.message);
+  }
 
   // Enqueue summarization (pass projectId forward for cluster job)
   await sqs.send(
@@ -425,6 +442,31 @@ async function processSummarizationJob(job) {
 
   // Final structured summary
   const structured = await createStructuredSummary(openai, chunkSummaries, filename);
+
+  // Rank 4 FR-1/FR-2: one combined LLM call produces category and optional
+  // department suggestion. This is advisory and never overwrites an explicitly
+  // selected department. Classification failure must not block summarization.
+  try {
+    const docForClassification = await prisma.document.findUnique({
+      where: { id: docId },
+      select: { content: true },
+    });
+    const classification = await classifyDocument({
+      prisma,
+      openai,
+      documentId: docId,
+      filename,
+      text: docForClassification?.content || chunkTexts.join("\n"),
+      summary: JSON.stringify(structured),
+    });
+    console.log(`🏷️ Classification for ${docId}:`, classification);
+  } catch (err) {
+    console.error("⚠️ Automatic classification failed (non-fatal):", err.message);
+    await prisma.document.update({
+      where: { id: docId },
+      data: { classificationStatus: "needs_review" },
+    });
+  }
 
   // FR-P2-2: entity extraction (people/projects/departments/systems named in
   // the document), alongside the summary calls above. Re-run on regenerate

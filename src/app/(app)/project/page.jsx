@@ -16,7 +16,6 @@ import DeleteConfirmationModal from '@/components/modals/DeleteConfirmationModal
 import EditDocumentModal from '@/components/modals/EditDocumentModal';
 import EditProjectModal from '@/components/modals/EditProjectModal';
 import { useSession } from "next-auth/react";
-import RelatedWorkPanel from "@/components/recommendations/RelatedWorkPanel";
 
 const PROCESSING_STATUSES = new Set([
   'queued',
@@ -504,14 +503,6 @@ function ProjectPageInner() {
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
         />
-
-        {project?.orgId && (
-          <RelatedWorkPanel
-            orgId={project.orgId}
-            departmentId={project.departmentId}
-            excludeProjectId={projectId}
-          />
-        )}
 
         {/* FR-P2-7: simple ordered timeline of extracted decision dates */}
         {timeline.length > 0 && (

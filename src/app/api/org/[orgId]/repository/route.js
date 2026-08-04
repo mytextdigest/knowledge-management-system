@@ -70,7 +70,19 @@ export async function GET(req, { params }) {
   }
 
   if (category) andConditions.push({ category });
-  if (deptFilter) andConditions.push({ departmentId: deptFilter });
+  if (deptFilter) {
+    // A document's department can come directly (repository-scoped docs) or
+    // only via its project (project-scoped docs have Document.departmentId
+    // = null; the department lives on Project.departmentId instead) — match
+    // both, or every project-scoped document silently vanishes from this
+    // department's listing. Same root cause/fix as scopeSql in vectorSearch.js.
+    andConditions.push({
+      OR: [
+        { departmentId: deptFilter },
+        { project: { departmentId: deptFilter } },
+      ],
+    });
+  }
 
   if (dateFrom || dateTo) {
     const range = {};
@@ -107,12 +119,28 @@ export async function GET(req, { params }) {
         scope: true,
         lifecycle: true,
         category: true,
+        categoryConfidence: true,
+        classificationStatus: true,
+        suggestedDepartmentId: true,
+        departmentSuggestionConfidence: true,
+        lifecycleSuggestion: true,
+        lifecycleSuggestionReason: true,
+        lifecycleSuggestedAt: true,
         orgId: true,
         departmentId: true,
         createdAt: true,
         user:       { select: { id: true, name: true, email: true } },
         department: { select: { id: true, name: true } },
         project:    { select: { id: true, name: true, scope: true } },
+        suggestedDepartment: { select: { id: true, name: true } },
+        duplicatesAsDocument: {
+          where: { status: "pending" },
+          select: {
+            id: true, similarity: true, status: true,
+            duplicateOf: { select: { id: true, filename: true } },
+          },
+          orderBy: { similarity: "desc" },
+        },
       },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * PAGE_SIZE,

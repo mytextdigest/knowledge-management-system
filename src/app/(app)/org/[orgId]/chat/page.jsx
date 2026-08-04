@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  Bot, Check, FileText, History, Loader2, MessageSquarePlus, Pencil, Send, Trash2, User, X,
+  Bot, Check, FileText, History, Loader2, MessageSquarePlus, Pencil, Scale, Send, ThumbsDown, ThumbsUp, Trash2, User, X,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
@@ -81,7 +81,7 @@ async function streamChatResponse({ orgId, question, conversationId, scope, depa
       if (eventType === 'meta') onMeta(data);
       else if (eventType === 'token') onToken(data.text);
       else if (eventType === 'title') onTitle(data.title);
-      else if (eventType === 'done') onDone();
+      else if (eventType === 'done') onDone(data);
       else if (eventType === 'error') onError(data.message);
     }
   }
@@ -214,6 +214,7 @@ export default function OrgChatPage() {
           content: m.content,
           sources: m.sources || [],
           confidence: m.confidence,
+          feedback: m.feedback || null,
         }))
       );
       setConversationId(id);
@@ -278,6 +279,37 @@ export default function OrgChatPage() {
     }
   };
 
+  const submitFeedback = async (messageId, feedback) => {
+    if (!conversationId || !messageId || String(messageId).startsWith('assistant-')) return;
+    const current = messages.find((message) => message.id === messageId)?.feedback || null;
+    const nextFeedback = current === feedback ? null : feedback;
+
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === messageId ? { ...message, feedback: nextFeedback } : message
+      )
+    );
+
+    try {
+      const res = await fetch(
+        `/api/org/${orgId}/chat/${conversationId}/message/${messageId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ feedback: nextFeedback }),
+        }
+      );
+      if (!res.ok) throw new Error('Unable to save feedback');
+    } catch {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === messageId ? { ...message, feedback: current } : message
+        )
+      );
+      setError('Unable to save feedback. Please try again.');
+    }
+  };
+
   const sendMessage = async (e) => {
     e.preventDefault();
     const question = input.trim();
@@ -322,9 +354,13 @@ export default function OrgChatPage() {
             prev.map((c) => (c.id === activeConvId ? { ...c, title, preview: title } : c))
           );
         },
-        onDone: () => {
+        onDone: ({ messageId } = {}) => {
           setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMsgId ? { ...m, streaming: false } : m))
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, id: messageId || m.id, streaming: false, feedback: null }
+                : m
+            )
           );
         },
         onError: (message) => {
@@ -465,14 +501,52 @@ export default function OrgChatPage() {
                         </span>
                       )}
 
+                      {m.role === 'assistant' && !m.streaming && (
+                        <div className="flex items-center gap-1" aria-label="Rate this answer">
+                          <button
+                            type="button"
+                            onClick={() => submitFeedback(m.id, 'up')}
+                            className={cn(
+                              'rounded-md p-1.5 transition',
+                              m.feedback === 'up'
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                : 'text-gray-400 hover:bg-gray-100 hover:text-green-600 dark:hover:bg-gray-800'
+                            )}
+                            title="Helpful"
+                            aria-pressed={m.feedback === 'up'}
+                          >
+                            <ThumbsUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => submitFeedback(m.id, 'down')}
+                            className={cn(
+                              'rounded-md p-1.5 transition',
+                              m.feedback === 'down'
+                                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                                : 'text-gray-400 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-gray-800'
+                            )}
+                            title="Not helpful"
+                            aria-pressed={m.feedback === 'down'}
+                          >
+                            <ThumbsDown className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+
                       {m.sources?.length > 0 && (
                         <div className="flex flex-wrap gap-2">
                           {m.sources.map((s, i) => {
-                            const label = [s.filename, s.department, s.project]
-                              .filter(Boolean)
-                              .join(' → ');
-                            const className =
-                              'inline-flex max-w-[220px] items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-600 hover:border-blue-300 hover:text-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-blue-700 dark:hover:text-blue-400';
+                            const isDecision = s.type === 'decision';
+                            const label = isDecision
+                              ? s.statement
+                              : [s.filename, s.department, s.project].filter(Boolean).join(' → ');
+                            const className = cn(
+                              'inline-flex max-w-[260px] items-center gap-1 rounded-full border px-2.5 py-1 text-xs',
+                              isDecision
+                                ? 'border-purple-200 bg-purple-50 text-purple-700 hover:border-purple-400 dark:border-purple-800 dark:bg-purple-900/20 dark:text-purple-300 dark:hover:border-purple-600'
+                                : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-blue-700 dark:hover:text-blue-400'
+                            );
 
                             return (
                               <button
@@ -482,8 +556,12 @@ export default function OrgChatPage() {
                                 title={label}
                                 className={className}
                               >
-                                <FileText className="h-3 w-3 flex-shrink-0" />
-                                <span className="truncate">{label || 'Source document'}</span>
+                                {isDecision ? (
+                                  <Scale className="h-3 w-3 flex-shrink-0" />
+                                ) : (
+                                  <FileText className="h-3 w-3 flex-shrink-0" />
+                                )}
+                                <span className="truncate">{label || (isDecision ? 'Decision' : 'Source document')}</span>
                               </button>
                             );
                           })}
@@ -575,8 +653,9 @@ export default function OrgChatPage() {
           <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl dark:bg-gray-900">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Citation Preview
+                <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {selectedSource.type === 'decision' && <Scale className="h-4 w-4 text-purple-600 dark:text-purple-400" />}
+                  {selectedSource.type === 'decision' ? 'Decision Evidence' : 'Citation Preview'}
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {selectedSource.filename || 'Source document'}
@@ -592,9 +671,24 @@ export default function OrgChatPage() {
               </button>
             </div>
 
-            <div className="mb-4 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100">
-              {selectedSource.preview || 'Preview text is not available for this citation.'}
-            </div>
+            {selectedSource.type === 'decision' ? (
+              <div className="mb-4 max-h-72 space-y-3 overflow-y-auto rounded-lg border border-purple-200 bg-purple-50 p-4 text-sm text-gray-800 dark:border-purple-800 dark:bg-purple-900/10 dark:text-gray-100">
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-300">Decision</p>
+                  <p>{selectedSource.statement}</p>
+                </div>
+                {selectedSource.rationale && (
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-300">Rationale</p>
+                    <p>{selectedSource.rationale}</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mb-4 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100">
+                {selectedSource.preview || 'Preview text is not available for this citation.'}
+              </div>
+            )}
 
             <div className="space-y-1 text-sm text-gray-600 dark:text-gray-300">
               {selectedSource.department && <p>Department: {selectedSource.department}</p>}
