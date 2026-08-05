@@ -52,4 +52,3 @@ https://github.com/mytextdigest/mytextdigest/actions
 
 ## Milestone 9 — Knowledge Context Engine handoff
 
-See [`TASK_9_IMPLEMENTATION.md`](./TASK_9_IMPLEMENTATION.md) for the complete VS Code/PowerShell setup, migration, testing, background rebuild, commit, push, and PR workflow.

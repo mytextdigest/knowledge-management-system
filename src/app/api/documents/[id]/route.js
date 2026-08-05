@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
-import { resolveOrgRole, isOrgAdmin } from "@/lib/orgGuard";
+import { resolveOrgRole, isOrgAdmin, isSuperAdmin } from "@/lib/orgGuard";
 import { filterAccessibleDocuments } from "@/lib/documentAccess";
 import { getAccessibleRelatedDocuments } from "@/lib/knowledgeContext";
 
@@ -126,7 +126,7 @@ export async function GET(req, { params }) {
         documentId: doc.id,
         orgId: doc.orgId || doc.project?.orgId || "",
         userId: user.id,
-        isSuperAdmin: isOrgAdmin(role),
+        isSuperAdmin: isSuperAdmin(role),
       })
     : [];
 

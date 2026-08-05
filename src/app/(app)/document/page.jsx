@@ -73,6 +73,27 @@ function DocumentContent() {
   const isSpreadsheet = ['csv', 'xlsx', 'xls'].includes(ext);
   const canRegenerateSummary = doc?.permissions?.canRegenerate !== false;
 
+  const updateProjectLinkStatus = async (linkId, status) => {
+    try {
+      const res = await fetch(`/api/documents/${id}/project-links/${linkId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Unable to update project suggestion");
+      setDoc((current) => ({
+        ...current,
+        projectLinks: status === "dismissed"
+          ? (current.projectLinks || []).filter((link) => link.id !== linkId)
+          : (current.projectLinks || []).map((link) => link.id === linkId ? data.link : link),
+      }));
+      toast.success(status === "confirmed" ? "Project link confirmed" : "Project suggestion dismissed");
+    } catch (error) {
+      toast.error(error.message || "Unable to update project suggestion");
+    }
+  };
+
   // Derive a per-sheet breakdown from chunk metadata stored during ingestion
   // (workbookName, sheetName, rowRange, columnHeaders — see worker/extractSpreadsheet.js)
   const sheets = useMemo(() => {
@@ -867,7 +888,22 @@ function DocumentContent() {
               {doc.projectLinks?.length > 0 && (
                 <div>
                   <p className="font-semibold text-cyan-900 dark:text-cyan-200">Suggested project links</p>
-                  <p className="mt-1 text-cyan-800 dark:text-cyan-300">{doc.projectLinks.map((link) => link.project?.name).filter(Boolean).join(', ')}</p>
+                  <div className="mt-1 space-y-1.5">
+                    {doc.projectLinks.map((link) => (
+                      <div key={link.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-cyan-200 bg-white px-2 py-1.5 dark:border-cyan-800 dark:bg-gray-900">
+                        <span className="text-cyan-800 dark:text-cyan-300">
+                          {link.project?.name}
+                          {link.status === "confirmed" && <span className="ml-1 text-green-600">Confirmed</span>}
+                        </span>
+                        {link.status === "suggested" && (
+                          <span className="flex gap-1">
+                            <button type="button" onClick={() => updateProjectLinkStatus(link.id, "confirmed")} className="rounded bg-green-600 px-2 py-1 text-white hover:bg-green-700">Confirm</button>
+                            <button type="button" onClick={() => updateProjectLinkStatus(link.id, "dismissed")} className="rounded border border-gray-300 px-2 py-1 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300">Dismiss</button>
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
