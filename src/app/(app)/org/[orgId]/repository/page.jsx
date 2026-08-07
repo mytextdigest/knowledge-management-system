@@ -203,6 +203,12 @@ export default function RepositoryPage({ params }) {
               key={document.id}
               document={document}
               orgRole={orgRole}
+              departments={departments}
+              onDocumentSignalChange={(docId, patch) =>
+                setDocuments((prev) =>
+                  prev.map((d) => (d.id === docId ? { ...d, ...patch } : d))
+                )
+              }
               onLifecycleChange={(docId, newLifecycle) =>
                 setDocuments((prev) =>
                   prev.map((d) => (d.id === docId ? { ...d, lifecycle: newLifecycle } : d))

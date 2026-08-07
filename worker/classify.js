@@ -73,6 +73,13 @@ export function cosineSimilarity(a, b) {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+export function isClassificationRelevant(document) {
+  if (!document) return false;
+  if (document.scope === "repository" && document.orgId) return true;
+  if (document.scope === "project" && document.project?.scope === "org" && document.project?.orgId) return true;
+  return false;
+}
+
 export async function classifyDocument({ prisma, openai, documentId, filename, text, summary }) {
   const document = await prisma.document.findUnique({
     where: { id: documentId },
@@ -83,13 +90,22 @@ export async function classifyDocument({ prisma, openai, documentId, filename, t
       departmentId: true,
       category: true,
       scope: true,
+      project: { select: { scope: true, orgId: true } },
     },
   });
   if (!document) throw new Error(`Document ${documentId} not found`);
 
-  const departments = document.orgId
+  // Rank 4 is repository intelligence. Private documents and project documents
+  // that have not been promoted to org scope are intentionally skipped so we
+  // do not spend an LLM call on content that cannot appear in the Repository.
+  if (!isClassificationRelevant(document)) {
+    return { skipped: true, reason: "document_not_repository_relevant" };
+  }
+
+  const effectiveOrgId = document.orgId || document.project?.orgId;
+  const departments = effectiveOrgId
     ? await prisma.department.findMany({
-        where: { orgId: document.orgId },
+        where: { orgId: effectiveOrgId },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       })

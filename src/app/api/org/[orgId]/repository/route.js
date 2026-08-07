@@ -63,7 +63,10 @@ export async function GET(req, { params }) {
   const andConditions = [{ OR: [sourceA, sourceB] }];
 
   // Non-admins cannot see draft docs
-  if (lifecycle) {
+  if (lifecycle === "suggested_review") {
+    andConditions.push({ lifecycleSuggestion: { not: null } });
+    if (!isOrgAdmin(role)) andConditions.push({ lifecycle: { not: "draft" } });
+  } else if (lifecycle) {
     andConditions.push({ lifecycle });
   } else if (!isOrgAdmin(role)) {
     andConditions.push({ lifecycle: { not: "draft" } });
