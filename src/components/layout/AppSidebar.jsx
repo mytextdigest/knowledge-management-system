@@ -13,6 +13,7 @@ import {
   MessageSquare,
   LayoutDashboard,
   Library,
+  ClipboardList,
   Settings,
   Plus,
   CreditCard,
@@ -117,6 +118,9 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
           ? [{ label: "Dashboard", href: `/org/${orgId}/dashboard`, icon: LayoutDashboard }]
           : []),
         { label: "Knowledge Repository", href: `/org/${orgId}/repository`, icon: Library },
+        ...(isSuperAdmin
+          ? [{ label: "Needs Review", href: `/org/${orgId}/needs-review`, icon: ClipboardList }]
+          : []),
       ]
     : [];
 

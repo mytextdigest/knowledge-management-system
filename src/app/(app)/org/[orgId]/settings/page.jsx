@@ -6,7 +6,7 @@ import {
   Building2, Users, Key, Eye, EyeOff, Loader2,
   CheckCircle2, ArrowLeft, Mail, Shield, Layers,
   Plus, ChevronDown, ChevronUp, UserPlus, Trash2, ExternalLink,
-  ScrollText, Pencil, Check, X as XIcon,
+  ScrollText, Pencil, Check, X as XIcon, Plug, Unplug,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
@@ -41,6 +41,12 @@ export default function OrgSettingsPage() {
   const [showKey, setShowKey] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
   const [keyStatus, setKeyStatus] = useState(null);
+
+  // Integrations tab (Rank 3) — lean list + status; the actual per-provider
+  // UI (connect, sync, disconnect, ...) lives on its own dedicated page.
+  const [integrations, setIntegrations] = useState([]);
+  const [integrationsLoading, setIntegrationsLoading] = useState(false);
+  const [integrationsError, setIntegrationsError] = useState('');
 
   // Audit log
   const [auditEntries, setAuditEntries] = useState([]);
@@ -115,7 +121,7 @@ export default function OrgSettingsPage() {
       }
 
       const validTabs = settingsData.role === 'super_admin'
-        ? ['general', 'members', 'departments', 'apikey', 'audit']
+        ? ['general', 'members', 'departments', 'apikey', 'integrations', 'audit']
         : ['members', 'departments'];
       setActiveTab(
         validTabs.includes(requestedTab)
@@ -169,6 +175,26 @@ export default function OrgSettingsPage() {
     if (activeTab === 'audit') { loadAuditLog(); loadSecurityEvents(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, auditPage, auditOutcomeFilter, orgId]);
+
+  const loadIntegrations = async () => {
+    setIntegrationsLoading(true);
+    setIntegrationsError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/integrations`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to load integrations.');
+      setIntegrations(Array.isArray(data.integrations) ? data.integrations : []);
+    } catch (err) {
+      setIntegrationsError(err.message || 'Failed to load integrations.');
+    } finally {
+      setIntegrationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'integrations') loadIntegrations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, orgId]);
 
   useEffect(() => {
     setAuditPage(1);
@@ -444,12 +470,13 @@ export default function OrgSettingsPage() {
     { id: 'members', label: 'Members', icon: Users },
     { id: 'departments', label: 'Departments', icon: Layers },
     ...(org?.role === 'super_admin' ? [{ id: 'apikey', label: 'API Key', icon: Key }] : []),
+    ...(org?.role === 'super_admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
     ...(org?.role === 'super_admin' ? [{ id: 'audit', label: 'Audit Log', icon: ScrollText }] : []),
   ];
 
   return (
     <Layout orgId={orgId}>
-      <div className="max-w-3xl mx-auto py-8 px-4">
+      <div className="max-w-5xl mx-auto py-8 px-4">
         {/* Back link */}
         <button
           onClick={() => router.push('/welcome-back')}
@@ -971,6 +998,71 @@ export default function OrgSettingsPage() {
               <p className={cn('text-sm', keyStatus.type === 'success' ? 'text-green-600' : 'text-red-600')}>
                 {keyStatus.msg}
               </p>
+            )}
+          </motion.div>
+        )}
+
+        {/* Integrations tab */}
+        {activeTab === 'integrations' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Connect external platforms to automatically bring their Knowledge into this org's repository.
+            </p>
+
+            {integrationsError ? (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
+                {integrationsError}
+              </div>
+            ) : integrationsLoading ? (
+              <div className="flex justify-center py-10">
+                <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+                {integrations.map((integ) => (
+                  <div key={integ.provider} className="flex items-center justify-between gap-4 px-4 py-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-9 w-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+                        <Plug className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-gray-900 dark:text-gray-100">{integ.displayName}</p>
+                          <span className={cn(
+                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0',
+                            integ.connected
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                              : integ.status === 'disconnected'
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                          )}>
+                            {integ.connected ? (
+                              <CheckCircle2 className="h-3 w-3" />
+                            ) : integ.status === 'disconnected' ? (
+                              <Unplug className="h-3 w-3" />
+                            ) : null}
+                            {integ.connected ? 'Connected' : integ.status === 'disconnected' ? 'Disconnected' : 'Not Connected'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {integ.connected
+                            ? `${integ.siteCount} site${integ.siteCount === 1 ? '' : 's'}${integ.lastSyncAt ? ` · last synced ${new Date(integ.lastSyncAt).toLocaleDateString()}` : ''}`
+                            : integ.status === 'disconnected'
+                            ? 'Sync paused — reconnect to resume'
+                            : 'Connect to start syncing documents'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => router.push(`/org/${orgId}/integrations/${integ.provider}`)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium flex-shrink-0"
+                    >
+                      Manage
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
           </motion.div>
         )}

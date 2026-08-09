@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, SendMessageCommand } from "@aws-sdk/client-sqs";
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { extractPdfText } from "./extractPdf.js";
 import { extractSpreadsheetChunks } from "./extractSpreadsheet.js";
 import { runOCR } from "./runOcr.js";
@@ -12,6 +12,10 @@ import { createStructuredSummary, summarizeChunks, extractEntities, extractDecis
 import { getOpenAIForDocument } from "./openai.js";
 import { detectConflictsForDocument } from "./detectConflicts.js";
 import { processClusterJobWorker } from "./cluster.js";
+import { decrypt, encrypt } from "../src/lib/crypto.js";
+import { getAppOnlyToken } from "../src/lib/msGraph.js";
+import { getConnector } from "../src/lib/connectors/index.js";
+import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
 const S3_BUCKET = process.env.S3_BUCKET;
@@ -579,11 +583,244 @@ async function processSummarizationJob(job) {
 }
 
 
+// -----------------------------------------------------------------------
+// Rank 3 — SharePoint sync (Task 7-C). FR-3's MVP slice: a manual "Sync Now"
+// trigger only (the API route enqueues this job and returns immediately,
+// per the NFR that sync work never runs inline with the request).
+// -----------------------------------------------------------------------
+
+// Re-mints the app-only token if it's expiring soon — client-credentials
+// tokens have no refresh token, they're just re-requested with the same
+// client_id/secret against the org's tenant.
+async function ensureFreshAppOnlyToken(integration) {
+  const REFRESH_BUFFER_MS = 2 * 60 * 1000;
+  if (new Date(integration.tokenExpiry).getTime() - Date.now() > REFRESH_BUFFER_MS) {
+    return decrypt(integration.accessToken);
+  }
+  const tenantId = integration.scopeConfig?.tenantId;
+  const { accessToken, expiresIn } = await getAppOnlyToken(tenantId);
+  await prisma.orgIntegration.update({
+    where: { id: integration.id },
+    data: { accessToken: encrypt(accessToken), tokenExpiry: new Date(Date.now() + expiresIn * 1000) },
+  });
+  return accessToken;
+}
+
+// Pulls one changed file into the existing pipeline exactly as a manual
+// upload would (same S3 + Document + SQS "chunk" entrypoint), with
+// sourceProvider/externalId/externalModifiedAt set.
+//
+// FR-4 (Task 7-D) — source-level dedup: a file already ingested from this
+// (sourceProvider, externalId) is skipped entirely if its content hasn't
+// actually changed (compared on Graph's lastModifiedDateTime), and updated
+// in place — not re-created as a duplicate row — if it has. Returns
+// { skipped } so the caller can report an accurate filesFound count.
+async function syncOneFile({ change, integration, site, connectedByUserId, accessToken }) {
+  const orgId = integration.orgId;
+
+  const existing = await prisma.document.findFirst({
+    where: { orgId, sourceProvider: "sharepoint", externalId: change.externalId },
+    select: { id: true, externalModifiedAt: true },
+  });
+  if (existing?.externalModifiedAt && existing.externalModifiedAt.getTime() === new Date(change.modifiedAt).getTime()) {
+    return { skipped: true };
+  }
+
+  const dbUser = await prisma.user.findUnique({ where: { id: connectedByUserId } });
+  if (!dbUser) throw new Error("Connecting user no longer exists");
+
+  const orgSubscription = await prisma.subscription.findUnique({ where: { orgId }, include: { plan: true } });
+  if (!orgSubscription?.plan || !["active", "trialing"].includes(orgSubscription.status)) {
+    throw new Error("No active subscription for org");
+  }
+  const planLimitBytes = BigInt(orgSubscription.plan.storageLimitGb) * 1024n * 1024n * 1024n;
+
+  const s3Key = `uploads/${connectedByUserId}/org/${orgId}/sharepoint/${change.externalId}/${change.name}`;
+
+  // Re-syncing a changed file overwrites the same deterministic S3 key —
+  // account for the storage *delta* (new size minus old), not the full new
+  // size again, or a repeatedly-edited SharePoint file would inflate a
+  // user's usage forever.
+  let oldSizeBytes = 0n;
+  if (existing) {
+    try {
+      const head = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
+      oldSizeBytes = BigInt(head.ContentLength || 0);
+    } catch {
+      oldSizeBytes = 0n; // nothing there to subtract (shouldn't normally happen)
+    }
+  }
+  const storageDelta = BigInt(change.size || 0) - oldSizeBytes;
+  const projectedUsage = BigInt(dbUser.storageUsedBytes) + storageDelta;
+  if (projectedUsage > planLimitBytes) {
+    throw new Error("Storage limit exceeded");
+  }
+
+  const connector = getConnector("sharepoint", { accessToken, siteId: site.siteId });
+  const buffer = await connector.downloadFile(change.externalId);
+  await s3.send(new PutObjectCommand({ Bucket: S3_BUCKET, Key: s3Key, Body: buffer }));
+
+  const [doc] = await prisma.$transaction([
+    existing
+      ? prisma.document.update({
+          where: { id: existing.id },
+          data: { filePath: s3Key, status: "queued", externalModifiedAt: new Date(change.modifiedAt) },
+        })
+      : prisma.document.create({
+          data: {
+            filename: change.name,
+            filePath: s3Key,
+            status: "queued",
+            visibility: "private",
+            scope: "repository",
+            // FR-5/FR-6: a newly-synced file isn't canonical yet — it sits out
+            // of the regular repository/search (existing `lifecycle: "draft"`
+            // filtering already excludes drafts by default) until a super
+            // admin confirms it via the Needs-Review queue (7-E/7-F), which
+            // transitions it to "published". Only new rows start this way —
+            // an update to an already-published document (re-sync of an
+            // edited file) intentionally leaves lifecycle alone, so a minor
+            // content edit doesn't force a previously-approved doc back
+            // through review.
+            lifecycle: "draft",
+            sourceProvider: "sharepoint",
+            externalId: change.externalId,
+            externalModifiedAt: new Date(change.modifiedAt),
+            organization: { connect: { id: orgId } },
+            department: { connect: { id: site.departmentId } },
+            user: { connect: { id: connectedByUserId } },
+          },
+        }),
+    prisma.user.update({
+      where: { id: connectedByUserId },
+      data: { storageUsedBytes: { increment: storageDelta } },
+    }),
+  ]);
+
+  await sqs.send(
+    new SendMessageCommand({
+      QueueUrl: QUEUE_URL,
+      MessageBody: JSON.stringify({
+        type: "chunk",
+        docId: doc.id,
+        s3Key,
+        filename: change.name,
+        projectId: null,
+        userId: connectedByUserId,
+        orgId,
+        visibility: "private",
+        regenerate: false,
+      }),
+    })
+  );
+
+  return { skipped: false };
+}
+
+async function processSharePointSyncJob(job) {
+  const { integrationId, syncRunId } = job;
+  console.log(`🔷 SHAREPOINT SYNC JOB: integration=${integrationId} run=${syncRunId}`);
+
+  const integration = await prisma.orgIntegration.findUnique({ where: { id: integrationId } });
+  if (!integration) throw new Error(`OrgIntegration ${integrationId} not found`);
+
+  const connectedByUserId = integration.scopeConfig?.connectedByUserId;
+  let filesFound = 0;
+  let filesFailed = 0;
+  let runError = null;
+  let scopeConfig = integration.scopeConfig;
+
+  try {
+    if (!connectedByUserId) throw new Error("scopeConfig.connectedByUserId is missing");
+
+    const accessToken = await ensureFreshAppOnlyToken(integration);
+    const sites = scopeConfig.sites || [];
+
+    for (const site of sites) {
+      const connector = getConnector("sharepoint", { accessToken, siteId: site.siteId });
+      let changes = [];
+      let cursor = site.lastSyncCursor;
+      try {
+        ({ changes, cursor } = await connector.listChanges(site.lastSyncCursor));
+      } catch (err) {
+        console.error(`❌ Delta query failed for site ${site.siteId}:`, err.message);
+        filesFailed++;
+        continue; // keep going with the next site rather than aborting the whole run
+      }
+
+      for (const change of changes) {
+        if (change.deleted) continue; // FR-2 MVP: no orphan/archive handling yet (Open Question #4)
+        try {
+          const result = await syncOneFile({ change, integration, site, connectedByUserId, accessToken });
+          if (!result.skipped) filesFound++;
+        } catch (err) {
+          console.error(`❌ Failed to sync file "${change.name}" (${change.externalId}):`, err.message);
+          filesFailed++;
+        }
+      }
+
+      // Persist this site's cursor as soon as it's done — a later site
+      // failing shouldn't force this one to be re-walked from scratch. Must
+      // map over the accumulating scopeConfig.sites, not the outer `sites`
+      // snapshot — otherwise each site's update clobbers the previous
+      // site's freshly-persisted cursor with its stale pre-loop value.
+      scopeConfig = { ...scopeConfig, sites: scopeConfig.sites.map((s) => (s.siteId === site.siteId ? { ...s, lastSyncCursor: cursor } : s)) };
+      await prisma.orgIntegration.update({ where: { id: integrationId }, data: { scopeConfig } });
+    }
+  } catch (err) {
+    runError = err.message;
+    console.error("❌ SharePoint sync run failed:", err);
+  }
+
+  await prisma.orgIntegration.update({ where: { id: integrationId }, data: { lastSyncAt: new Date() } });
+  await prisma.syncRun.update({
+    where: { id: syncRunId },
+    data: {
+      status: runError ? "failed" : "completed",
+      finishedAt: new Date(),
+      filesFound,
+      filesFailed,
+      error: runError,
+    },
+  });
+
+  console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed}`);
+
+  // FR-7 — one digest email per sync run (not one per file), only when
+  // there's actually something new to review. Non-fatal: an email hiccup
+  // shouldn't retroactively fail a sync that otherwise succeeded.
+  if (filesFound > 0) {
+    try {
+      const [org, superAdmins] = await Promise.all([
+        prisma.organization.findUnique({ where: { id: integration.orgId }, select: { name: true } }),
+        prisma.organizationMember.findMany({
+          where: { orgId: integration.orgId, role: "super_admin" },
+          select: { user: { select: { email: true } } },
+        }),
+      ]);
+      const recipients = superAdmins.map((m) => m.user.email).filter(Boolean);
+      if (recipients.length > 0) {
+        await sendSyncDigestEmail({
+          to: recipients,
+          orgName: org?.name || "your organization",
+          source: "SharePoint",
+          filesFound,
+          needsReviewUrl: `${process.env.NEXT_PUBLIC_APP_URL}/org/${integration.orgId}/needs-review`,
+        });
+        console.log(`📧 Sync digest sent to ${recipients.length} super admin(s)`);
+      }
+    } catch (err) {
+      console.error("⚠️ Failed to send sync digest email (non-fatal):", err.message);
+    }
+  }
+}
+
 async function processJob(job) {
   if (job.type === "chunk")    return processChunkJob(job);
   if (job.type === "embed")    return processEmbeddingJob(job);
   if (job.type === "summarize") return processSummarizationJob(job);
   if (job.type === "cluster")  return processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
+  if (job.type === "sharepoint_sync") return processSharePointSyncJob(job);
 
   throw new Error("Unknown job type: " + job.type);
 }
