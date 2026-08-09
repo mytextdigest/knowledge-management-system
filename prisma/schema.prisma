@@ -75,6 +75,7 @@ model Organization {
   subscription      Subscription?
   orgMemberMemories OrgMemberMemory[]
   knowledgeGaps     KnowledgeGap[]
+  integrations      OrgIntegration[]
 
   @@index([name])
 }
@@ -267,6 +268,12 @@ model Document {
   lifecycle    String  @default("published")
   category     String?
 
+  // Rank 3 — Ingestion Pipeline (Task 7-A): set for connector-synced documents,
+  // "manual" (default) for everything uploaded through the existing upload flow.
+  sourceProvider     String?   @default("manual") @map("source_provider")
+  externalId         String?   @map("external_id")
+  externalModifiedAt DateTime? @map("external_modified_at")
+
   chunks          Chunk[]
   conversations   Conversation[]
   topicDocument   TopicDocument?
@@ -285,6 +292,7 @@ model Document {
   @@index([departmentId])
   @@index([lifecycle])
   @@index([category])
+  @@index([sourceProvider, externalId])
 }
 
 model Chunk {
@@ -509,4 +517,52 @@ model KnowledgeGap {
   @@index([orgId])
   @@index([orgId, gapScore])
   @@index([createdAt])
+}
+
+// Rank 3 — Automated Knowledge Ingestion Pipeline (Task 7-A)
+
+model OrgIntegration {
+  id        String @id @default(cuid())
+  orgId     String
+  provider  String // "sharepoint" | "google_drive" | "confluence" ...
+  status    String @default("connected") // "connected" | "disconnected" | "error"
+
+  // { sites: [{ siteId, siteUrl, departmentId, lastSyncCursor }] } — one entry
+  // per connected site; cursor lives per-site since an org can connect more
+  // than one site, each synced independently. See REQUIREMENTS_INGESTION_PIPELINE.md FR-2.
+  scopeConfig Json @map("scope_config")
+
+  // App-only client-credentials token, scoped to only the sites granted in
+  // scopeConfig. Encrypted at rest — do not reuse the plaintext
+  // Organization.openaiApiKey pattern (NFR in requirements doc).
+  // refreshToken is nullable: SharePoint's app-only client-credentials flow
+  // has no refresh token (re-minted from client_id/secret + tenantId in
+  // scopeConfig instead) — kept nullable for future providers that do use one.
+  accessToken  String    @map("access_token")
+  refreshToken String?   @map("refresh_token")
+  tokenExpiry  DateTime  @map("token_expiry")
+  lastSyncAt   DateTime? @map("last_sync_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  syncRuns     SyncRun[]
+
+  @@unique([orgId, provider])
+  @@index([orgId])
+}
+
+model SyncRun {
+  id            String    @id @default(cuid())
+  integrationId String    @map("integration_id")
+  startedAt     DateTime  @default(now()) @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+  status        String    @default("running") // "running" | "completed" | "failed"
+  filesFound    Int       @default(0) @map("files_found")
+  filesFailed   Int       @default(0) @map("files_failed")
+  error         String?
+
+  integration OrgIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([integrationId])
+  @@index([status])
 }
