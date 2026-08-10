@@ -132,6 +132,7 @@ model Department {
   projects             Project[]
   lastVisitedByMembers OrganizationMember[]
   timelineEvents       TimelineEvent[]
+  suggestedDocuments   Document[] @relation("SuggestedDocumentDepartment")
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -271,6 +272,20 @@ model Document {
   lifecycle    String  @default("published")
   category     String?
 
+  // Rank 4: automatic knowledge classification signals. Topic/TopicDocument
+  // remain project-specific clustering models; the fixed enterprise category
+  // taxonomy is document metadata and intentionally stays separate.
+  categoryConfidence            Float?
+  classificationStatus          String  @default("pending_classification")
+  suggestedDepartmentId         String?
+  departmentSuggestionConfidence Float?
+  contentHash                   String?
+  lifecycleSuggestion           String?
+  lifecycleSuggestionReason     String?
+  lifecycleSuggestedAt          DateTime?
+  lifecycleSuggestionDismissedAt DateTime?
+  classifiedAt                  DateTime?
+
   // Rank 3 — Ingestion Pipeline (Task 7-A): set for connector-synced documents,
   // "manual" (default) for everything uploaded through the existing upload flow.
   sourceProvider     String?   @default("manual") @map("source_provider")
@@ -284,6 +299,9 @@ model Document {
   user            User               @relation(fields: [userId], references: [id])
   organization    Organization?      @relation(fields: [orgId], references: [id], onDelete: SetNull)
   department      Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  suggestedDepartment Department?    @relation("SuggestedDocumentDepartment", fields: [suggestedDepartmentId], references: [id], onDelete: SetNull)
+  duplicatesAsDocument  DocumentDuplicate[] @relation("DuplicateDocument")
+  duplicatesAsOriginal  DocumentDuplicate[] @relation("DuplicateOriginal")
   entities        Entity[]
   decisions       Decision[]
   timelineEvents  TimelineEvent[]
@@ -298,7 +316,29 @@ model Document {
   @@index([departmentId])
   @@index([lifecycle])
   @@index([category])
+  @@index([classificationStatus])
+  @@index([suggestedDepartmentId])
+  @@index([contentHash])
+  @@index([lifecycleSuggestion])
   @@index([sourceProvider, externalId])
+}
+
+model DocumentDuplicate {
+  id            String   @id @default(cuid())
+  documentId    String
+  duplicateOfId String
+  similarity    Float
+  status        String   @default("pending")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  document    Document @relation("DuplicateDocument", fields: [documentId], references: [id], onDelete: Cascade)
+  duplicateOf Document @relation("DuplicateOriginal", fields: [duplicateOfId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, duplicateOfId])
+  @@index([documentId])
+  @@index([duplicateOfId])
+  @@index([status])
 }
 
 model Chunk {

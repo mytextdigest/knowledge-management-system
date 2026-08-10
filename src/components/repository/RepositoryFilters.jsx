@@ -81,6 +81,7 @@ export default function RepositoryFilters({
         <option value="draft">Draft</option>
         <option value="archived">Archived</option>
         <option value="retired">Retired</option>
+        <option value="suggested_review">Needs lifecycle review</option>
       </select>
 
       <div className="flex flex-wrap items-center gap-2 md:col-span-2">

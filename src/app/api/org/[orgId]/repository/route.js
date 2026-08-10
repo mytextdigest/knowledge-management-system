@@ -63,7 +63,10 @@ export async function GET(req, { params }) {
   const andConditions = [{ OR: [sourceA, sourceB] }];
 
   // Non-admins cannot see draft docs
-  if (lifecycle) {
+  if (lifecycle === "suggested_review") {
+    andConditions.push({ lifecycleSuggestion: { not: null } });
+    if (!isOrgAdmin(role)) andConditions.push({ lifecycle: { not: "draft" } });
+  } else if (lifecycle) {
     andConditions.push({ lifecycle });
   } else if (!isOrgAdmin(role)) {
     andConditions.push({ lifecycle: { not: "draft" } });
@@ -119,12 +122,28 @@ export async function GET(req, { params }) {
         scope: true,
         lifecycle: true,
         category: true,
+        categoryConfidence: true,
+        classificationStatus: true,
+        suggestedDepartmentId: true,
+        departmentSuggestionConfidence: true,
+        lifecycleSuggestion: true,
+        lifecycleSuggestionReason: true,
+        lifecycleSuggestedAt: true,
         orgId: true,
         departmentId: true,
         createdAt: true,
         user:       { select: { id: true, name: true, email: true } },
         department: { select: { id: true, name: true } },
         project:    { select: { id: true, name: true, scope: true } },
+        suggestedDepartment: { select: { id: true, name: true } },
+        duplicatesAsDocument: {
+          where: { status: "pending" },
+          select: {
+            id: true, similarity: true, status: true,
+            duplicateOf: { select: { id: true, filename: true } },
+          },
+          orderBy: { similarity: "desc" },
+        },
         _count: { select: { relationshipsFrom: true, relationshipsTo: true } },
       },
       orderBy: { createdAt: "desc" },

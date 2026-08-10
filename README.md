@@ -50,5 +50,25 @@ https://github.com/mytextdigest/mytextdigest/actions
 
 5. Click on the latest build version, scroll down and download the latest one.
 
-## Milestone 9 — Knowledge Context Engine handoff
+## Task 8 review validation
 
+Task 8 repository UI now surfaces classification confidence/status, Uncategorized documents, duplicate review actions, lifecycle suggestions, and editable category/department recommendations. Automatic classification is limited to repository documents and org-promoted project documents.
+
+```powershell
+npx prisma generate
+npm run task8:test
+npx eslint src worker scripts/task-8
+npm run dev
+```
+
+Optional DB-level integration validation (development/test DB only):
+
+```powershell
+$env:TASK8_INTEGRATION_DB="1"
+npm run task8:test:integration
+Remove-Item Env:TASK8_INTEGRATION_DB
+```
+
+See `TIER1_AUTO_CLASSIFICATION_IMPLEMENTATION_TRACKER.md` for Task 8-A–8-H status and the recorded spreadsheet whole-document classification decision.
+
+## Milestone 9 — Knowledge Context Engine handoff
