@@ -49,3 +49,6 @@ https://github.com/mytextdigest/mytextdigest/actions
 ```
 
 5. Click on the latest build version, scroll down and download the latest one.
+
+## Milestone 9 — Knowledge Context Engine handoff
+

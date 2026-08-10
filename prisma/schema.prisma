@@ -34,6 +34,7 @@ model User {
   auditLogsAsActor  AuditLog[]           @relation("AuditLogActor")
   auditLogsAsTarget AuditLog[]           @relation("AuditLogTarget")
   orgMemberMemories OrgMemberMemory[]
+  topicExpertise    TopicExpertise[]
 }
 
 model OtpToken {
@@ -75,6 +76,7 @@ model Organization {
   subscription      Subscription?
   orgMemberMemories OrgMemberMemory[]
   knowledgeGaps     KnowledgeGap[]
+  repositoryTopics  Topic[]
   integrations      OrgIntegration[]
 
   @@index([name])
@@ -239,6 +241,7 @@ model Project {
   organization   Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
   department     Department            @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   projectChats   ProjectConversation[]
+  documentProjectLinks DocumentProjectLink[]
   timelineEvents TimelineEvent[]
 
   @@unique([departmentId, name])
@@ -286,6 +289,9 @@ model Document {
   timelineEvents  TimelineEvent[]
   conflictsAsDocA DocumentConflict[] @relation("DocumentConflictA")
   conflictsAsDocB DocumentConflict[] @relation("DocumentConflictB")
+  relationshipsFrom DocumentRelationship[] @relation("DocumentRelationshipFrom")
+  relationshipsTo   DocumentRelationship[] @relation("DocumentRelationshipTo")
+  projectLinks      DocumentProjectLink[]
 
   @@index([scope])
   @@index([orgId])
@@ -353,7 +359,9 @@ model ProjectMessage {
 
 model Topic {
   id                  String   @id @default(cuid())
-  projectId           String
+  projectId           String?
+  orgId               String?
+  scope               String   @default("project")
   name                String
   centroidEmbedding   Json?
   keywordDistribution Json?
@@ -361,10 +369,14 @@ model Topic {
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
-  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organization   Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   topicDocuments TopicDocument[]
+  expertise      TopicExpertise[]
 
   @@index([projectId])
+  @@index([orgId, scope])
+  @@unique([orgId, scope, name])
 }
 
 model TopicDocument {
@@ -378,6 +390,61 @@ model TopicDocument {
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@index([topicId])
+}
+
+
+model DocumentRelationship {
+  id             String   @id @default(cuid())
+  orgId          String
+  fromDocumentId String
+  toDocumentId   String
+  type           String   @default("related")
+  weight         Float
+  evidence       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  fromDocument Document @relation("DocumentRelationshipFrom", fields: [fromDocumentId], references: [id], onDelete: Cascade)
+  toDocument   Document @relation("DocumentRelationshipTo", fields: [toDocumentId], references: [id], onDelete: Cascade)
+
+  @@unique([fromDocumentId, toDocumentId, type])
+  @@index([orgId, fromDocumentId, weight])
+  @@index([orgId, toDocumentId, weight])
+}
+
+model DocumentProjectLink {
+  id         String   @id @default(cuid())
+  documentId String
+  projectId  String
+  confidence Float
+  status     String   @default("suggested")
+  evidence   String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, projectId])
+  @@index([projectId, status])
+  @@index([documentId, status])
+}
+
+model TopicExpertise {
+  id        String   @id @default(cuid())
+  topicId   String
+  userId    String
+  score     Float
+  signals   Json?
+  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([topicId, userId])
+  @@index([topicId, score])
+  @@index([userId])
 }
 
 // Subscription Extension

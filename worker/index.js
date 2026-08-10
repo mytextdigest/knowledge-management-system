@@ -12,6 +12,7 @@ import { createStructuredSummary, summarizeChunks, extractEntities, extractDecis
 import { getOpenAIForDocument } from "./openai.js";
 import { detectConflictsForDocument } from "./detectConflicts.js";
 import { processClusterJobWorker } from "./cluster.js";
+import { processKnowledgeContext } from "./knowledgeContext.js";
 import { decrypt, encrypt } from "../src/lib/crypto.js";
 import { getAppOnlyToken } from "../src/lib/msGraph.js";
 import { getConnector } from "../src/lib/connectors/index.js";
@@ -819,7 +820,11 @@ async function processJob(job) {
   if (job.type === "chunk")    return processChunkJob(job);
   if (job.type === "embed")    return processEmbeddingJob(job);
   if (job.type === "summarize") return processSummarizationJob(job);
-  if (job.type === "cluster")  return processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
+  if (job.type === "cluster") {
+    const result = await processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
+    try { await processKnowledgeContext(job.docId); } catch (error) { console.error("Knowledge context job failed", error); }
+    return result;
+  }
   if (job.type === "sharepoint_sync") return processSharePointSyncJob(job);
 
   throw new Error("Unknown job type: " + job.type);

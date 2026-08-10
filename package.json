@@ -15,7 +15,9 @@
     "seed": "node prisma/seed.js",
     "task5d:gaps": "node scripts/task-5d/detect-knowledge-gaps.mjs",
     "task5d:conflicts": "node scripts/task-5d/detect-document-conflicts.mjs",
-    "task5d:seed-conflict-demo": "node scripts/task-5d/seed-conflict-demo.mjs"
+    "task5d:seed-conflict-demo": "node scripts/task-5d/seed-conflict-demo.mjs",
+    "task9:rebuild": "node scripts/task-9/rebuild-context.mjs",
+    "task9:test": "node --test scripts/task-9/*.test.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

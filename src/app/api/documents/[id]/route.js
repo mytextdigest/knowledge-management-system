@@ -3,8 +3,9 @@ import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
-import { resolveOrgRole, isOrgAdmin } from "@/lib/orgGuard";
+import { resolveOrgRole, isOrgAdmin, isSuperAdmin } from "@/lib/orgGuard";
 import { filterAccessibleDocuments } from "@/lib/documentAccess";
+import { getAccessibleRelatedDocuments } from "@/lib/knowledgeContext";
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -26,6 +27,11 @@ export async function GET(req, { params }) {
         include: {
           documentB: { select: { id: true, filename: true, userId: true, departmentId: true, lifecycle: true } },
         },
+      },
+      projectLinks: {
+        where: { status: { in: ["suggested", "confirmed"] } },
+        include: { project: { select: { id: true, name: true } } },
+        orderBy: { confidence: "desc" },
       },
       conflictsAsDocB: {
         orderBy: { createdAt: "desc" },
@@ -115,11 +121,21 @@ export async function GET(req, { params }) {
     }))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
+  const relatedDocuments = user
+    ? await getAccessibleRelatedDocuments({
+        documentId: doc.id,
+        orgId: doc.orgId || doc.project?.orgId || "",
+        userId: user.id,
+        isSuperAdmin: isSuperAdmin(role),
+      })
+    : [];
+
   const { conflictsAsDocA, conflictsAsDocB, ...docWithoutRawConflicts } = doc;
 
   return NextResponse.json({
     ...docWithoutRawConflicts,
     conflicts,
+    relatedDocuments,
     fileUrl: signedUrl,
     created_at: doc.createdAt.toISOString(),
     permissions: {

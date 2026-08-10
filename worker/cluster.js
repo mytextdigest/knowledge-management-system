@@ -350,3 +350,102 @@ export async function processClusterJobWorker(docId, projectId, recluster = fals
 }
 
 export { computeDocumentEmbedding, extractKeywordDistribution };
+
+// Repository-scoped variant used by the Knowledge Context Engine. It deliberately
+// reuses the same embedding, keyword distribution, LLM naming, Bhattacharyya
+// signal, and cosine thresholds as the existing project clustering pipeline.
+export async function classifyRepositoryDocument(docId, orgId, openai) {
+  const docEmbedding = await computeDocumentEmbedding(docId);
+  if (!docEmbedding) return null;
+
+  const doc = await prisma.document.findUnique({
+    where: { id: docId },
+    select: { content: true, filename: true },
+  });
+  const docContent = `${doc?.filename || ""}\n${doc?.content || ""}`;
+  const docKeywords = extractKeywordDistribution(docContent);
+  const topics = await prisma.topic.findMany({
+    where: { orgId, scope: "repository" },
+    orderBy: { documentCount: "desc" },
+  });
+
+  let bestTopic = null;
+  let bestCosine = -Infinity;
+  let bestBhatt = 0;
+  for (const topic of topics) {
+    const centroid = topic.centroidEmbedding;
+    if (!Array.isArray(centroid) || centroid.length !== docEmbedding.length) continue;
+    const cosine = cosineSimilarity(docEmbedding, centroid);
+    const bhatt = bhattacharyya(docKeywords, topic.keywordDistribution || {});
+    if (cosine > bestCosine) {
+      bestTopic = topic;
+      bestCosine = cosine;
+      bestBhatt = bhatt;
+    }
+  }
+
+  const existingAssignment = await prisma.topicDocument.findUnique({
+    where: { documentId: docId },
+    include: { topic: true },
+  });
+
+  if (!bestTopic || bestCosine < THRESHOLDS.WEAK_MATCH) {
+    const generatedName = await generateTopicName(docContent, openai);
+    bestTopic = await prisma.topic.findFirst({
+      where: { orgId, scope: "repository", name: generatedName },
+    });
+    if (!bestTopic) {
+      bestTopic = await prisma.topic.create({
+        data: {
+          orgId,
+          scope: "repository",
+          name: generatedName,
+          centroidEmbedding: docEmbedding,
+          keywordDistribution: docKeywords,
+          documentCount: 0,
+        },
+      });
+    }
+    bestCosine = bestTopic.documentCount ? Math.max(0, bestCosine) : 1;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (existingAssignment && existingAssignment.topicId !== bestTopic.id) {
+      const oldCount = await tx.topicDocument.count({ where: { topicId: existingAssignment.topicId } });
+      if (oldCount <= 1) await tx.topic.delete({ where: { id: existingAssignment.topicId } });
+      else await tx.topic.update({ where: { id: existingAssignment.topicId }, data: { documentCount: oldCount - 1 } });
+    }
+
+    const topicCountBefore = await tx.topicDocument.count({ where: { topicId: bestTopic.id } });
+    const oldCentroid = bestTopic.centroidEmbedding;
+    const nextCentroid = topicCountBefore > 0 && Array.isArray(oldCentroid)
+      ? oldCentroid.map((value, index) => (value * topicCountBefore + docEmbedding[index]) / (topicCountBefore + 1))
+      : docEmbedding;
+    const nextKeywords = topicCountBefore > 0
+      ? mergeKeywordDistributions(bestTopic.keywordDistribution || {}, docKeywords, topicCountBefore)
+      : docKeywords;
+
+    await tx.topicDocument.upsert({
+      where: { documentId: docId },
+      create: { topicId: bestTopic.id, documentId: docId, confidence: bestCosine },
+      update: { topicId: bestTopic.id, confidence: bestCosine },
+    });
+    const count = await tx.topicDocument.count({ where: { topicId: bestTopic.id } });
+    await tx.topic.update({
+      where: { id: bestTopic.id },
+      data: {
+        centroidEmbedding: nextCentroid,
+        keywordDistribution: nextKeywords,
+        documentCount: count,
+      },
+    });
+  });
+
+  return {
+    topicId: bestTopic.id,
+    topicName: bestTopic.name,
+    isNew: bestTopic.documentCount === 0,
+    confidence: bestCosine,
+    bhattacharyyaScore: bestBhatt,
+  };
+}
