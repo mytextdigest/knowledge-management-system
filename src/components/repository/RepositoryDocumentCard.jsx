@@ -237,6 +237,12 @@ export default function RepositoryDocumentCard({
         <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
           Classification: {(document?.classificationStatus || "pending_classification").replaceAll("_", " ")}{categoryConfidence ? ` · ${categoryConfidence}` : ""}
         </span>
+
+        {document?.relatedDocumentCount > 0 ? (
+          <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-xs font-medium text-cyan-700 dark:border-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300">
+            {document.relatedDocumentCount} related
+          </span>
+        ) : null}
         {availableTransitions.length > 0 ? (
           <select value="" disabled={changingLifecycle} onChange={(e) => handleLifecycleChange(e.target.value)} className="rounded-full border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">
             <option value="" disabled>{changingLifecycle ? "Updating…" : "Change status…"}</option>

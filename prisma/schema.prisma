@@ -34,6 +34,7 @@ model User {
   auditLogsAsActor  AuditLog[]           @relation("AuditLogActor")
   auditLogsAsTarget AuditLog[]           @relation("AuditLogTarget")
   orgMemberMemories OrgMemberMemory[]
+  topicExpertise    TopicExpertise[]
 }
 
 model OtpToken {
@@ -75,6 +76,8 @@ model Organization {
   subscription      Subscription?
   orgMemberMemories OrgMemberMemory[]
   knowledgeGaps     KnowledgeGap[]
+  repositoryTopics  Topic[]
+  integrations      OrgIntegration[]
 
   @@index([name])
 }
@@ -239,6 +242,7 @@ model Project {
   organization   Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
   department     Department            @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   projectChats   ProjectConversation[]
+  documentProjectLinks DocumentProjectLink[]
   timelineEvents TimelineEvent[]
 
   @@unique([departmentId, name])
@@ -282,6 +286,12 @@ model Document {
   lifecycleSuggestionDismissedAt DateTime?
   classifiedAt                  DateTime?
 
+  // Rank 3 — Ingestion Pipeline (Task 7-A): set for connector-synced documents,
+  // "manual" (default) for everything uploaded through the existing upload flow.
+  sourceProvider     String?   @default("manual") @map("source_provider")
+  externalId         String?   @map("external_id")
+  externalModifiedAt DateTime? @map("external_modified_at")
+
   chunks          Chunk[]
   conversations   Conversation[]
   topicDocument   TopicDocument?
@@ -297,6 +307,9 @@ model Document {
   timelineEvents  TimelineEvent[]
   conflictsAsDocA DocumentConflict[] @relation("DocumentConflictA")
   conflictsAsDocB DocumentConflict[] @relation("DocumentConflictB")
+  relationshipsFrom DocumentRelationship[] @relation("DocumentRelationshipFrom")
+  relationshipsTo   DocumentRelationship[] @relation("DocumentRelationshipTo")
+  projectLinks      DocumentProjectLink[]
 
   @@index([scope])
   @@index([orgId])
@@ -307,6 +320,7 @@ model Document {
   @@index([suggestedDepartmentId])
   @@index([contentHash])
   @@index([lifecycleSuggestion])
+  @@index([sourceProvider, externalId])
 }
 
 model DocumentDuplicate {
@@ -385,7 +399,9 @@ model ProjectMessage {
 
 model Topic {
   id                  String   @id @default(cuid())
-  projectId           String
+  projectId           String?
+  orgId               String?
+  scope               String   @default("project")
   name                String
   centroidEmbedding   Json?
   keywordDistribution Json?
@@ -393,10 +409,14 @@ model Topic {
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
-  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organization   Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   topicDocuments TopicDocument[]
+  expertise      TopicExpertise[]
 
   @@index([projectId])
+  @@index([orgId, scope])
+  @@unique([orgId, scope, name])
 }
 
 model TopicDocument {
@@ -410,6 +430,61 @@ model TopicDocument {
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@index([topicId])
+}
+
+
+model DocumentRelationship {
+  id             String   @id @default(cuid())
+  orgId          String
+  fromDocumentId String
+  toDocumentId   String
+  type           String   @default("related")
+  weight         Float
+  evidence       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  fromDocument Document @relation("DocumentRelationshipFrom", fields: [fromDocumentId], references: [id], onDelete: Cascade)
+  toDocument   Document @relation("DocumentRelationshipTo", fields: [toDocumentId], references: [id], onDelete: Cascade)
+
+  @@unique([fromDocumentId, toDocumentId, type])
+  @@index([orgId, fromDocumentId, weight])
+  @@index([orgId, toDocumentId, weight])
+}
+
+model DocumentProjectLink {
+  id         String   @id @default(cuid())
+  documentId String
+  projectId  String
+  confidence Float
+  status     String   @default("suggested")
+  evidence   String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, projectId])
+  @@index([projectId, status])
+  @@index([documentId, status])
+}
+
+model TopicExpertise {
+  id        String   @id @default(cuid())
+  topicId   String
+  userId    String
+  score     Float
+  signals   Json?
+  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([topicId, userId])
+  @@index([topicId, score])
+  @@index([userId])
 }
 
 // Subscription Extension
@@ -549,4 +624,52 @@ model KnowledgeGap {
   @@index([orgId])
   @@index([orgId, gapScore])
   @@index([createdAt])
+}
+
+// Rank 3 — Automated Knowledge Ingestion Pipeline (Task 7-A)
+
+model OrgIntegration {
+  id        String @id @default(cuid())
+  orgId     String
+  provider  String // "sharepoint" | "google_drive" | "confluence" ...
+  status    String @default("connected") // "connected" | "disconnected" | "error"
+
+  // { sites: [{ siteId, siteUrl, departmentId, lastSyncCursor }] } — one entry
+  // per connected site; cursor lives per-site since an org can connect more
+  // than one site, each synced independently. See REQUIREMENTS_INGESTION_PIPELINE.md FR-2.
+  scopeConfig Json @map("scope_config")
+
+  // App-only client-credentials token, scoped to only the sites granted in
+  // scopeConfig. Encrypted at rest — do not reuse the plaintext
+  // Organization.openaiApiKey pattern (NFR in requirements doc).
+  // refreshToken is nullable: SharePoint's app-only client-credentials flow
+  // has no refresh token (re-minted from client_id/secret + tenantId in
+  // scopeConfig instead) — kept nullable for future providers that do use one.
+  accessToken  String    @map("access_token")
+  refreshToken String?   @map("refresh_token")
+  tokenExpiry  DateTime  @map("token_expiry")
+  lastSyncAt   DateTime? @map("last_sync_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  syncRuns     SyncRun[]
+
+  @@unique([orgId, provider])
+  @@index([orgId])
+}
+
+model SyncRun {
+  id            String    @id @default(cuid())
+  integrationId String    @map("integration_id")
+  startedAt     DateTime  @default(now()) @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+  status        String    @default("running") // "running" | "completed" | "failed"
+  filesFound    Int       @default(0) @map("files_found")
+  filesFailed   Int       @default(0) @map("files_failed")
+  error         String?
+
+  integration OrgIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([integrationId])
+  @@index([status])
 }

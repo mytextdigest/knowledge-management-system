@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  Bot, Check, FileText, History, Loader2, MessageSquarePlus, Pencil, Scale, Send, ThumbsDown, ThumbsUp, Trash2, User, X,
+  Bot, Check, FileText, History, Loader2, MessageSquarePlus, Pencil, Scale, Send, ThumbsDown, ThumbsUp, Trash2, User, Users, X,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
@@ -189,6 +189,8 @@ export default function OrgChatPage() {
   const [error, setError] = useState('');
   const [convListOpen, setConvListOpen] = useState(false);
   const [selectedSource, setSelectedSource] = useState(null);
+  const [suggestedExperts, setSuggestedExperts] = useState([]);
+  const [expertsLoading, setExpertsLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
   const loadConversations = async () => {
@@ -254,6 +256,24 @@ export default function OrgChatPage() {
     setMessages([]);
     setError('');
     setSelectedSource(null);
+    setSuggestedExperts([]);
+  };
+
+  const loadSuggestedExperts = async (query) => {
+    if (!query || query.trim().length < 2) {
+      setSuggestedExperts([]);
+      return;
+    }
+    setExpertsLoading(true);
+    try {
+      const res = await fetch(`/api/org/${orgId}/context/experts?q=${encodeURIComponent(query)}`);
+      const data = await res.json().catch(() => ({}));
+      setSuggestedExperts(res.ok && Array.isArray(data.experts) ? data.experts : []);
+    } catch {
+      setSuggestedExperts([]);
+    } finally {
+      setExpertsLoading(false);
+    }
   };
 
   const renameConversation = async (id, title) => {
@@ -317,6 +337,7 @@ export default function OrgChatPage() {
 
     setInput('');
     setError('');
+    loadSuggestedExperts(question);
 
     const wasNewConversation = !conversationId;
     let activeConvId = conversationId;
@@ -437,6 +458,26 @@ export default function OrgChatPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 sm:px-6">
+            {(expertsLoading || suggestedExperts.length > 0) && (
+              <section className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 dark:border-indigo-800 dark:bg-indigo-950/20" aria-label="Suggested people">
+                <div className="flex items-center gap-2 text-sm font-semibold text-indigo-900 dark:text-indigo-200">
+                  <Users className="h-4 w-4" />
+                  Suggested people to ask
+                  {expertsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                </div>
+                {!expertsLoading && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {suggestedExperts.map((expert) => (
+                      <div key={`${expert.id}-${expert.topic}`} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs dark:border-indigo-800 dark:bg-gray-900">
+                        <p className="font-medium text-gray-900 dark:text-gray-100">{expert.name || expert.email}</p>
+                        <p className="text-indigo-700 dark:text-indigo-300">{expert.topic} · score {Number(expert.score || 0).toFixed(1)}</p>
+                        {expert.name && <p className="text-gray-500">{expert.email}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
             {loadingHistory ? (
               <div className="flex justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-gray-400" />

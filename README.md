@@ -70,3 +70,5 @@ Remove-Item Env:TASK8_INTEGRATION_DB
 ```
 
 See `TIER1_AUTO_CLASSIFICATION_IMPLEMENTATION_TRACKER.md` for Task 8-A–8-H status and the recorded spreadsheet whole-document classification decision.
+
+## Milestone 9 — Knowledge Context Engine handoff

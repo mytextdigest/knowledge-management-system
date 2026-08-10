@@ -18,7 +18,9 @@
     "task5d:seed-conflict-demo": "node scripts/task-5d/seed-conflict-demo.mjs",
     "task8:stale": "node scripts/task-8/flag-stale-documents.mjs",
     "task8:test": "node --test scripts/task-8/*.test.mjs",
-    "task8:test:integration": "node --test scripts/task-8/classification.integration.test.mjs"
+    "task8:test:integration": "node --test scripts/task-8/classification.integration.test.mjs",
+    "task9:rebuild": "node scripts/task-9/rebuild-context.mjs",
+    "task9:test": "node --test scripts/task-9/*.test.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
