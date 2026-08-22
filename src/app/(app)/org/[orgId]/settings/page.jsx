@@ -681,29 +681,29 @@ export default function OrgSettingsPage() {
                   </button>
                 </div>
 
-                {inviteRole === 'dept_admin' && (
-                  <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
-                      Departments this Dept Admin will manage
-                    </p>
-                    {departments.length === 0 ? (
-                      <p className="text-xs text-gray-500">No departments yet. Create one first.</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-3">
-                        {departments.map((dept) => (
-                          <label key={dept.id} className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
-                            <input
-                              type="checkbox"
-                              checked={inviteDeptIds.includes(dept.id)}
-                              onChange={() => toggleInviteDept(dept.id)}
-                            />
-                            {dept.name}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                    {inviteRole === 'dept_admin'
+                      ? 'Departments this Dept Admin will manage'
+                      : 'Departments to add this member to (optional)'}
+                  </p>
+                  {departments.length === 0 ? (
+                    <p className="text-xs text-gray-500">No departments yet. Create one first.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-3">
+                      {departments.map((dept) => (
+                        <label key={dept.id} className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={inviteDeptIds.includes(dept.id)}
+                            onChange={() => toggleInviteDept(dept.id)}
+                          />
+                          {dept.name}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 {inviteStatus && (
                   <p className={cn('mt-2 text-sm', inviteStatus.type === 'success' ? 'text-green-600' : 'text-red-600')}>
