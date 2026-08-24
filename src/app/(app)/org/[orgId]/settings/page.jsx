@@ -76,6 +76,14 @@ export default function OrgSettingsPage() {
   const [manageSaving, setManageSaving] = useState(false);
   const [manageError, setManageError] = useState('');
 
+  // Edit role / remove member (super_admin only)
+  const [roleEditUserId, setRoleEditUserId] = useState(null);
+  const [roleEditValue, setRoleEditValue] = useState('employee');
+  const [savingRole, setSavingRole] = useState(false);
+  const [roleError, setRoleError] = useState('');
+  const [removingUserId, setRemovingUserId] = useState(null);
+  const [removeError, setRemoveError] = useState('');
+
   // Departments
   const [departments, setDepartments] = useState([]);
   const [departmentsError, setDepartmentsError] = useState('');
@@ -455,6 +463,47 @@ export default function OrgSettingsPage() {
     finally { setManageSaving(false); }
   };
 
+  const startEditRole = (member) => {
+    setRoleEditUserId(member.userId);
+    setRoleEditValue(member.role);
+    setRoleError('');
+  };
+
+  const cancelEditRole = () => {
+    setRoleEditUserId(null);
+    setRoleError('');
+  };
+
+  const saveRole = async (member) => {
+    setSavingRole(true);
+    setRoleError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/members/${member.userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: roleEditValue }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setRoleError(data.error || 'Failed to update role.'); return; }
+      setMembers((prev) => prev.map((m) => (m.userId === member.userId ? { ...m, role: data.role } : m)));
+      setRoleEditUserId(null);
+    } catch { setRoleError('Failed to update role.'); }
+    finally { setSavingRole(false); }
+  };
+
+  const removeMember = async (member) => {
+    if (!confirm(`Remove ${member.name || member.email} from this organization?`)) return;
+    setRemovingUserId(member.userId);
+    setRemoveError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/members/${member.userId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) { setRemoveError(data.error || 'Failed to remove member.'); return; }
+      setMembers((prev) => prev.filter((m) => m.userId !== member.userId));
+    } catch { setRemoveError('Failed to remove member.'); }
+    finally { setRemovingUserId(null); }
+  };
+
   if (loading) {
     return (
       <Layout orgId={orgId}>
@@ -569,31 +618,89 @@ export default function OrgSettingsPage() {
                         <p className="text-xs text-gray-500">{m.email}</p>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={cn(
-                          'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
-                          m.role === 'super_admin'
-                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
-                            : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                        )}>
-                          {m.role === 'super_admin' && <Shield className="h-3 w-3" />}
-                          {ROLE_LABELS[m.role] ?? m.role}
-                        </span>
+                        {roleEditUserId === m.userId ? (
+                          <select
+                            value={roleEditValue}
+                            onChange={(e) => setRoleEditValue(e.target.value)}
+                            className="p-1.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            {Object.keys(ROLE_LABELS).map((r) => (
+                              <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className={cn(
+                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+                            m.role === 'super_admin'
+                              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                              : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                          )}>
+                            {m.role === 'super_admin' && <Shield className="h-3 w-3" />}
+                            {ROLE_LABELS[m.role] ?? m.role}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {m.role === 'dept_admin' && org?.role === 'super_admin' && (
-                          <button
-                            onClick={() => openManageDepartments(m)}
-                            className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-                          >
-                            Manage departments
-                          </button>
-                        )}
+                        <div className="flex items-center justify-end gap-3">
+                          {m.role === 'dept_admin' && org?.role === 'super_admin' && roleEditUserId !== m.userId && (
+                            <button
+                              onClick={() => openManageDepartments(m)}
+                              className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                              Manage departments
+                            </button>
+                          )}
+                          {org?.role === 'super_admin' && (
+                            roleEditUserId === m.userId ? (
+                              <>
+                                <button
+                                  onClick={() => saveRole(m)}
+                                  disabled={savingRole}
+                                  title="Save role"
+                                  className="text-green-600 hover:text-green-700 disabled:opacity-50"
+                                >
+                                  {savingRole ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                                </button>
+                                <button
+                                  onClick={cancelEditRole}
+                                  disabled={savingRole}
+                                  title="Cancel"
+                                  className="text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                                >
+                                  <XIcon className="h-4 w-4" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => startEditRole(m)}
+                                  title="Edit role"
+                                  className="text-gray-500 hover:text-blue-600 dark:hover:text-blue-400"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => removeMember(m)}
+                                  disabled={removingUserId === m.userId}
+                                  title="Remove from organization"
+                                  className="text-gray-500 hover:text-red-600 disabled:opacity-50"
+                                >
+                                  {removingUserId === m.userId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                </button>
+                              </>
+                            )
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            {(roleError || removeError) && (
+              <p className="text-sm text-red-600">{roleError || removeError}</p>
+            )}
 
             {manageTarget && (
               <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
