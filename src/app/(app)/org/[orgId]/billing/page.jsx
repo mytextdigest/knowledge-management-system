@@ -16,6 +16,7 @@ export default function OrgBillingPage() {
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
+  const [billingInterval, setBillingInterval] = useState('month');
 
   useEffect(() => {
     if (!orgId) return;
@@ -39,6 +40,7 @@ export default function OrgBillingPage() {
 
       setPlans(plansData);
       setSubscription(subData);
+      if (subData?.plan?.billingInterval) setBillingInterval(subData.plan.billingInterval);
     } catch (err) {
       console.error('Failed to load subscription data', err);
     } finally {
@@ -87,10 +89,35 @@ export default function OrgBillingPage() {
           </p>
         </div>
 
-        <div className="flex justify-center mb-10">
+        <div className="flex justify-center mb-6">
           <Button variant="outline" onClick={openPortal}>
             Manage billing & payment
           </Button>
+        </div>
+
+        <div className="flex justify-center mb-10">
+          <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-1 bg-gray-50 dark:bg-gray-800">
+            <button
+              onClick={() => setBillingInterval('month')}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                billingInterval === 'month'
+                  ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400'
+              }`}
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => setBillingInterval('year')}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                billingInterval === 'year'
+                  ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400'
+              }`}
+            >
+              Yearly
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -100,10 +127,10 @@ export default function OrgBillingPage() {
         ) : (
           <div className="flex justify-center">
             <div className="grid gap-6 w-full max-w-4xl grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
-              {plans.map((plan) => {
+              {plans.filter((plan) => plan.billingInterval === billingInterval).map((plan) => {
                 const isCurrent = currentPlan && plan.id === currentPlan.id;
-                const isLowerOrSame = currentPlan && plan.storageLimitGb <= currentPlan.storageLimitGb;
-                const disabled = isLowerOrSame;
+                const isDowngrade = currentPlan && plan.storageLimitGb < currentPlan.storageLimitGb;
+                const displayName = plan.name.replace(/\s+(Monthly|Yearly)$/i, '');
 
                 return (
                   <motion.div
@@ -112,7 +139,7 @@ export default function OrgBillingPage() {
                     animate={{ opacity: 1, y: 0 }}
                     className="border rounded-lg p-6 bg-white dark:bg-gray-900"
                   >
-                    <h2 className="text-lg font-semibold mb-1">{plan.name}</h2>
+                    <h2 className="text-lg font-semibold mb-1">{displayName}</h2>
                     <p className="text-sm text-gray-500 mb-4">{plan.description}</p>
                     <p className="text-sm mb-2">
                       <strong>{plan.storageLimitGb} GB</strong> storage
@@ -125,8 +152,8 @@ export default function OrgBillingPage() {
                     {isCurrent ? (
                       <Button disabled className="w-full">Current Plan</Button>
                     ) : (
-                      <Button className="w-full" disabled={disabled} onClick={openPortal}>
-                        {disabled ? 'Not Available' : 'Upgrade'}
+                      <Button className="w-full" disabled={isDowngrade} onClick={openPortal}>
+                        {isDowngrade ? 'Not Available' : 'Upgrade'}
                       </Button>
                     )}
                   </motion.div>
