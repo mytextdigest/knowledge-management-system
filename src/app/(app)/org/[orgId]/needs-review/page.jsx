@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ClipboardList, Loader2, Cloud, Upload, ExternalLink, Check, FolderPlus, X as XIcon } from 'lucide-react';
+import { ClipboardList, Loader2, Cloud, Upload, ExternalLink, Check, FolderPlus, X as XIcon, AlertTriangle } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
 
@@ -87,9 +87,30 @@ export default function NeedsReviewPage() {
     }
   };
 
+  const [dismissingDuplicateId, setDismissingDuplicateId] = useState(null);
+
+  const resolveDuplicate = async (docId, duplicateId, status) => {
+    setDismissingDuplicateId(duplicateId);
+    setActionError('');
+    try {
+      const res = await fetch(`/api/documents/${docId}/duplicates/${duplicateId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to update duplicate flag.');
+      setDocuments((prev) => prev.map((d) => (d.id === docId ? { ...d, duplicateFlag: null } : d)));
+    } catch (err) {
+      setActionError(err.message || 'Failed to update duplicate flag.');
+    } finally {
+      setDismissingDuplicateId(null);
+    }
+  };
+
   const openReassignModal = (doc) => {
     setReassignTarget(doc);
-    setReassignDeptId(doc.departmentId || '');
+    setReassignDeptId(doc.departmentId || doc.suggestedDepartment?.id || '');
     setNewProjectMode(false);
     setNewProjectName('');
     setActionError('');
@@ -208,6 +229,29 @@ export default function NeedsReviewPage() {
                           {stillProcessing && (
                             <p className="text-xs text-amber-600 dark:text-amber-400">Processing ({doc.processingStatus})…</p>
                           )}
+                          {doc.duplicateFlag && (
+                            <div className="mt-1 flex items-center gap-1.5 flex-wrap text-xs text-amber-700 dark:text-amber-400">
+                              <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+                              <span>
+                                Possible duplicate of {doc.duplicateFlag.duplicateOfFilename || 'another document'}
+                                {' '}({Math.round((doc.duplicateFlag.similarity || 0) * 100)}%)
+                              </span>
+                              <button
+                                onClick={() => resolveDuplicate(doc.id, doc.duplicateFlag.id, 'confirmed')}
+                                disabled={dismissingDuplicateId === doc.duplicateFlag.id}
+                                className="underline hover:no-underline disabled:opacity-50"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                onClick={() => resolveDuplicate(doc.id, doc.duplicateFlag.id, 'dismissed')}
+                                disabled={dismissingDuplicateId === doc.duplicateFlag.id}
+                                className="underline hover:no-underline disabled:opacity-50"
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className={cn(
@@ -221,10 +265,26 @@ export default function NeedsReviewPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                          {doc.departmentName || <span className="text-gray-400">—</span>}
+                          {doc.departmentName || (doc.suggestedDepartment ? (
+                            <span className="text-purple-600 dark:text-purple-400">
+                              Suggested: {doc.suggestedDepartment.name}
+                              {doc.departmentSuggestionConfidence != null && ` (${Math.round(doc.departmentSuggestionConfidence * 100)}%)`}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          ))}
                         </td>
                         <td className="px-4 py-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                          {doc.suggestedCategory || <span className="text-gray-400">—</span>}
+                          {doc.suggestedCategory ? (
+                            <>
+                              {doc.suggestedCategory}
+                              {doc.categoryConfidence != null && (
+                                <span className="text-gray-400"> ({Math.round(doc.categoryConfidence * 100)}%)</span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
                           {new Date(doc.createdAt).toLocaleDateString()}

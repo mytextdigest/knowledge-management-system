@@ -8,8 +8,14 @@ import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 //   {}                                        -> Accept as-is
 //   { departmentId }                          -> Reassign to a different department
 //   { newProjectName, departmentId }          -> Create a new project under departmentId, assign the doc to it
-// All three transition the document to lifecycle: "published". Viewing and
-// acting on the queue are both super_admin-only (NFR in requirements doc).
+// A document can be awaiting review for either of 7-J's two reasons —
+// connector-synced and unconfirmed (`lifecycle: "draft"`) or classification-
+// flagged (`classificationStatus: "needs_review"`, Rank 4) — independently
+// of each other. All three actions clear both signals (`lifecycle:
+// "published"`, `classificationStatus: "published"`) regardless of which
+// reason brought the document here, so a document flagged by both is fully
+// resolved in one action. Viewing and acting on the queue are both
+// super_admin-only (NFR in requirements doc).
 export async function POST(req, { params }) {
   const session = await getServerSession();
   if (!session?.user?.email)
@@ -22,10 +28,13 @@ export async function POST(req, { params }) {
 
   const doc = await prisma.document.findFirst({
     where: { id: docId, orgId, scope: "repository" },
-    select: { id: true, filename: true, filePath: true, departmentId: true, sourceProvider: true, lifecycle: true, userId: true, visibility: true },
+    select: {
+      id: true, filename: true, filePath: true, departmentId: true, suggestedDepartmentId: true,
+      sourceProvider: true, lifecycle: true, classificationStatus: true, userId: true, visibility: true,
+    },
   });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (doc.lifecycle !== "draft") {
+  if (doc.lifecycle !== "draft" && doc.classificationStatus !== "needs_review") {
     return NextResponse.json({ error: "Document is not awaiting review" }, { status: 409 });
   }
 
@@ -36,7 +45,10 @@ export async function POST(req, { params }) {
     return NextResponse.json({ error: "departmentId is required to create a project" }, { status: 400 });
   }
 
-  let targetDepartmentId = doc.departmentId;
+  // Accept-as-is (no explicit departmentId) promotes classification's
+  // suggested department when there's no confirmed one yet — "accept" means
+  // confirm the suggestion, not leave the document undeparmented.
+  let targetDepartmentId = doc.departmentId || doc.suggestedDepartmentId || null;
   if (departmentId) {
     const dept = await prisma.department.findFirst({ where: { id: departmentId, orgId }, select: { id: true } });
     if (!dept) return NextResponse.json({ error: "Invalid department for this organization" }, { status: 400 });
@@ -63,7 +75,10 @@ export async function POST(req, { params }) {
       where: { id: doc.id },
       data: {
         lifecycle: "published",
+        classificationStatus: "published",
         departmentId: targetDepartmentId,
+        suggestedDepartmentId: null,
+        departmentSuggestionConfidence: null,
         ...(projectId ? { projectId, scope: "project" } : {}),
       },
       select: { id: true, filename: true, lifecycle: true, departmentId: true, projectId: true, scope: true },

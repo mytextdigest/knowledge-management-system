@@ -7,14 +7,10 @@ import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 // upload and SharePoint-synced alike, in one source-agnostic list. Viewing
 // is super_admin-only, same as connector setup (NFR in requirements doc).
 //
-// Classification's signals (categoryConfidence, classificationStatus,
-// DocumentDuplicate) aren't in the schema yet — Rank 4 hasn't merged — so
-// the manual-upload half of this queue is currently always empty. Once it
-// merges, add an OR branch here:
-//   OR: [{ lifecycle: "draft" }, { classificationStatus: "needs_review" }]
-// and include categoryConfidence/duplicate info in `select` below. Until
-// then this only surfaces connector-synced documents, which is exactly what
-// `lifecycle: "draft"` means today (see worker/index.js's syncOneFile).
+// 7-J: a document can be awaiting review for either reason, independently —
+// a connector-synced file not yet confirmed (`lifecycle: "draft"`) or a
+// manual/synced upload classification flagged (`classificationStatus:
+// "needs_review"`, set by worker/classify.js, Rank 4). Both surface here.
 export async function GET(req, { params }) {
   const session = await getServerSession();
   if (!session?.user?.email)
@@ -32,7 +28,7 @@ export async function GET(req, { params }) {
   const where = {
     orgId,
     scope: "repository",
-    lifecycle: "draft",
+    OR: [{ lifecycle: "draft" }, { classificationStatus: "needs_review" }],
     ...(source ? { sourceProvider: source } : {}),
     ...(departmentId ? { departmentId } : {}),
   };
@@ -45,24 +41,42 @@ export async function GET(req, { params }) {
       sourceProvider: true,
       status: true,
       category: true,
+      classificationStatus: true,
+      categoryConfidence: true,
+      departmentSuggestionConfidence: true,
       createdAt: true,
       departmentId: true,
       department: { select: { id: true, name: true } },
+      suggestedDepartment: { select: { id: true, name: true } },
+      duplicatesAsDocument: {
+        where: { status: "pending" },
+        select: { id: true, similarity: true, duplicateOf: { select: { id: true, filename: true } } },
+        take: 1,
+      },
     },
     orderBy: { createdAt: "desc" },
   });
 
   return NextResponse.json({
-    documents: documents.map((d) => ({
-      id: d.id,
-      filename: d.filename,
-      source: d.sourceProvider === "manual" ? "manual" : d.sourceProvider,
-      processingStatus: d.status,
-      suggestedCategory: d.category, // stub — real value comes from Rank 4's classification once merged
-      duplicateFlag: null, // stub — DocumentDuplicate isn't in the schema yet
-      departmentId: d.departmentId,
-      departmentName: d.department?.name || null,
-      createdAt: d.createdAt,
-    })),
+    documents: documents.map((d) => {
+      const duplicate = d.duplicatesAsDocument[0];
+      return {
+        id: d.id,
+        filename: d.filename,
+        source: d.sourceProvider === "manual" ? "manual" : d.sourceProvider,
+        processingStatus: d.status,
+        classificationStatus: d.classificationStatus,
+        suggestedCategory: d.category,
+        categoryConfidence: d.categoryConfidence,
+        suggestedDepartment: d.suggestedDepartment,
+        departmentSuggestionConfidence: d.departmentSuggestionConfidence,
+        duplicateFlag: duplicate
+          ? { id: duplicate.id, similarity: duplicate.similarity, duplicateOfFilename: duplicate.duplicateOf?.filename || null }
+          : null,
+        departmentId: d.departmentId,
+        departmentName: d.department?.name || null,
+        createdAt: d.createdAt,
+      };
+    }),
   });
 }
