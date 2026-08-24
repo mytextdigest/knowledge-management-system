@@ -374,6 +374,7 @@ export default function OrgSettingsPage() {
       const data = await res.json();
       if (!res.ok) { setNameStatus({ type: 'error', msg: data.error }); return; }
       setOrg((o) => ({ ...o, name: data.name }));
+      window.dispatchEvent(new CustomEvent('kms:org-updated', { detail: { orgId, name: data.name } }));
       setNameStatus({ type: 'success', msg: 'Name updated.' });
     } catch { setNameStatus({ type: 'error', msg: 'Failed to save.' }); }
     finally { setSavingName(false); }

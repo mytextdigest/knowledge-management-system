@@ -68,6 +68,16 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
   }, [orgId]);
 
   useEffect(() => {
+    function handleOrgUpdated(e) {
+      if (e.detail?.orgId === orgId && e.detail?.name) {
+        setOrg((prev) => (prev ? { ...prev, name: e.detail.name } : prev));
+      }
+    }
+    window.addEventListener('kms:org-updated', handleOrgUpdated);
+    return () => window.removeEventListener('kms:org-updated', handleOrgUpdated);
+  }, [orgId]);
+
+  useEffect(() => {
     function handleClickOutside(e) {
       if (switcherRef.current && !switcherRef.current.contains(e.target)) {
         setSwitcherOpen(false);
