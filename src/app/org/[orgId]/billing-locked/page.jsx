@@ -1,5 +1,6 @@
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole } from "@/lib/orgGuard";
@@ -40,7 +41,7 @@ export default async function BillingLockedPage({ params, searchParams }) {
         <p className="text-muted-foreground text-sm mb-6">{message} Contact an admin to restore access.</p>
 
         {admins.length > 0 && (
-          <div className="rounded-xl border border-border bg-card p-4 text-left">
+          <div className="rounded-xl border border-border bg-card p-4 text-left mb-6">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Admins</p>
             <ul className="space-y-1">
               {admins.map((a) => (
@@ -51,6 +52,13 @@ export default async function BillingLockedPage({ params, searchParams }) {
             </ul>
           </div>
         )}
+
+        <Link
+          href="/welcome-back"
+          className="inline-block px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 transition-colors"
+        >
+          Switch organization
+        </Link>
       </div>
     </div>
   );
