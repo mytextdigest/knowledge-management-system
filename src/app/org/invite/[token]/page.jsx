@@ -21,6 +21,7 @@ export default function InvitePage() {
   const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [accepting, setAccepting] = useState(false);
+  const [declining, setDeclining] = useState(false);
   const [result, setResult] = useState(null); // { success, message }
 
   useEffect(() => {
@@ -57,7 +58,17 @@ export default function InvitePage() {
     }
   };
 
-  const handleDecline = () => router.push('/welcome-back');
+  const handleDecline = async () => {
+    setDeclining(true);
+    try {
+      await fetch(`/api/org/invite/${token}/decline`, { method: 'POST' });
+    } catch {
+      // Non-blocking: still send the user on even if the request failed.
+    } finally {
+      setDeclining(false);
+      router.push('/welcome-back');
+    }
+  };
 
   if (loading) {
     return (
@@ -146,13 +157,15 @@ export default function InvitePage() {
         <div className="flex gap-3">
           <button
             onClick={handleDecline}
-            className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            disabled={declining || accepting}
+            className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
           >
+            {declining && <Loader2 className="h-4 w-4 animate-spin" />}
             Decline
           </button>
           <button
             onClick={handleAccept}
-            disabled={accepting}
+            disabled={accepting || declining}
             className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
           >
             {accepting && <Loader2 className="h-4 w-4 animate-spin" />}

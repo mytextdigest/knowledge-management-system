@@ -9,7 +9,7 @@ export async function GET(req, { params }) {
     include: { organization: { select: { name: true } } },
   });
 
-  if (!invite || invite.acceptedAt || invite.expiresAt < new Date())
+  if (!invite || invite.acceptedAt || invite.declinedAt || invite.expiresAt < new Date())
     return NextResponse.json({ error: "Invite not found or expired" }, { status: 404 });
 
   const departments = invite.departmentIds.length

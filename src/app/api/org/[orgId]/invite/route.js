@@ -70,7 +70,7 @@ export async function POST(req, { params }) {
     subject: `You've been invited to join ${org.name} on KMS`,
     html: `
       <p>You've been invited to join <strong>${org.name}</strong> as <strong>${role.replace("_", " ")}</strong>.</p>
-      <p><a href="${appUrl}/org/invite/${token}" style="padding:10px 20px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;">Accept Invitation</a></p>
+      <p><a href="${appUrl}/org/invite/${token}" style="padding:10px 20px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;">View Invitation</a></p>
       <p style="color:#6b7280;font-size:14px;">This invite expires in 7 days. If you didn't expect this, you can ignore it.</p>
     `,
   });
