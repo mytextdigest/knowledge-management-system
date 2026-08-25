@@ -23,7 +23,9 @@ export async function POST(req, { params }) {
     return NextResponse.json({ error: "Email is required" }, { status: 400 });
   if (!VALID_ROLES.includes(role))
     return NextResponse.json({ error: "Invalid role" }, { status: 400 });
-  if (role === "dept_admin" && (!Array.isArray(departmentIds) || departmentIds.length === 0))
+  if (!Array.isArray(departmentIds))
+    return NextResponse.json({ error: "Invalid department selection" }, { status: 400 });
+  if (role === "dept_admin" && departmentIds.length === 0)
     return NextResponse.json(
       { error: "At least one department is required for a Dept Admin invite" },
       { status: 400 }
@@ -35,7 +37,7 @@ export async function POST(req, { params }) {
   });
   if (!org) return NextResponse.json({ error: "Org not found" }, { status: 404 });
 
-  if (role === "dept_admin") {
+  if (departmentIds.length > 0) {
     const validCount = await prisma.department.count({
       where: { id: { in: departmentIds }, orgId },
     });
@@ -51,7 +53,7 @@ export async function POST(req, { params }) {
       orgId,
       email: email.trim().toLowerCase(),
       role,
-      departmentIds: role === "dept_admin" ? departmentIds : [],
+      departmentIds,
       token,
       expiresAt,
     },
@@ -68,7 +70,7 @@ export async function POST(req, { params }) {
     subject: `You've been invited to join ${org.name} on KMS`,
     html: `
       <p>You've been invited to join <strong>${org.name}</strong> as <strong>${role.replace("_", " ")}</strong>.</p>
-      <p><a href="${appUrl}/org/invite/${token}" style="padding:10px 20px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;">Accept Invitation</a></p>
+      <p><a href="${appUrl}/org/invite/${token}" style="padding:10px 20px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;">View Invitation</a></p>
       <p style="color:#6b7280;font-size:14px;">This invite expires in 7 days. If you didn't expect this, you can ignore it.</p>
     `,
   });

@@ -17,7 +17,7 @@ export async function POST(req, { params }) {
 
   const invite = await prisma.organizationInvite.findUnique({ where: { token } });
 
-  if (!invite || invite.acceptedAt || invite.expiresAt < new Date())
+  if (!invite || invite.acceptedAt || invite.declinedAt || invite.expiresAt < new Date())
     return NextResponse.json({ error: "Invite not found or expired" }, { status: 404 });
 
   // If already a member, just mark invite accepted
@@ -33,6 +33,8 @@ export async function POST(req, { params }) {
     return NextResponse.json({ orgId: invite.orgId, role: existing.role });
   }
 
+  const departmentMemberRole = invite.role === "dept_admin" ? "admin" : "member";
+
   await prisma.$transaction([
     prisma.organizationMember.create({
       data: { orgId: invite.orgId, userId: user.id, role: invite.role },
@@ -40,8 +42,8 @@ export async function POST(req, { params }) {
     ...invite.departmentIds.map((departmentId) =>
       prisma.departmentMember.upsert({
         where: { departmentId_userId: { departmentId, userId: user.id } },
-        update: { role: "admin" },
-        create: { departmentId, userId: user.id, role: "admin" },
+        update: { role: departmentMemberRole },
+        create: { departmentId, userId: user.id, role: departmentMemberRole },
       })
     ),
     prisma.organizationInvite.update({

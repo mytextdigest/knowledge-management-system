@@ -98,6 +98,7 @@ model OrganizationMember {
   @@unique([orgId, userId])
   @@index([orgId])
   @@index([userId])
+  @@index([lastDepartmentId])
 }
 
 model OrganizationInvite {
@@ -109,6 +110,7 @@ model OrganizationInvite {
   token         String    @unique
   expiresAt     DateTime
   acceptedAt    DateTime?
+  declinedAt    DateTime?
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
