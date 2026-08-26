@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { generateSignedUrl } from "@/lib/s3SignedUrl";
+import { generateSignedUrl, generateSignedDownloadUrl } from "@/lib/s3SignedUrl";
 import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
-import { resolveOrgRole, isOrgAdmin, isSuperAdmin } from "@/lib/orgGuard";
+import { resolveOrgRole, isOrgAdmin, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
 import { filterAccessibleDocuments } from "@/lib/documentAccess";
 import { getAccessibleRelatedDocuments } from "@/lib/knowledgeContext";
+import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -75,8 +76,12 @@ export async function GET(req, { params }) {
   }
 
   let signedUrl = null;
+  let downloadUrl = null;
   if (doc.filePath) {
-    signedUrl = await generateSignedUrl(doc.filePath);
+    [signedUrl, downloadUrl] = await Promise.all([
+      generateSignedUrl(doc.filePath),
+      generateSignedDownloadUrl(doc.filePath, doc.filename || "document"),
+    ]);
   }
 
   const PROCESSING_STATUSES = new Set([
@@ -130,6 +135,15 @@ export async function GET(req, { params }) {
       })
     : [];
 
+  const effectiveDepartmentId = doc.departmentId ?? doc.project?.departmentId ?? null;
+  const canManage =
+    Boolean(isOwner) ||
+    isSuperAdmin(role) ||
+    (role === "dept_admin" &&
+      Boolean(user?.id) &&
+      Boolean(effectiveDepartmentId) &&
+      (await canManageDepartment(role, effectiveDepartmentId, user.id)));
+
   const { conflictsAsDocA, conflictsAsDocB, ...docWithoutRawConflicts } = doc;
 
   return NextResponse.json({
@@ -137,11 +151,18 @@ export async function GET(req, { params }) {
     conflicts,
     relatedDocuments,
     fileUrl: signedUrl,
+    fileDownloadUrl: downloadUrl,
     created_at: doc.createdAt.toISOString(),
     permissions: {
-      canRegenerate: !!doc.filePath && !PROCESSING_STATUSES.has(doc.status),
-      canStar: true,
-      canUnassign: true,
+      canManage,
+      canRegenerate: canManage && !!doc.filePath && !PROCESSING_STATUSES.has(doc.status),
+      canAsk: canManage,
+      canClearChat: canManage,
+      canStar: canManage,
+      canRename: canManage,
+      canDelete: canManage,
+      canUnassign: canManage,
+      canMoveToTopic: canManage,
     },
   });
 }
@@ -162,11 +183,9 @@ export async function PATCH(req, { params }) {
     return NextResponse.json({ error: "Filename is required" }, { status: 400 });
   }
 
-  const doc = await prisma.document.findFirst({
-    where: { id, user: { email: session.user.email } },
-    select: { id: true },
-  });
-  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const access = await resolveDocumentManagementAccess(session.user.email, id);
+  if (!access.document) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!access.canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const updated = await prisma.document.update({
     where: { id },
@@ -185,13 +204,16 @@ export async function DELETE(req, { params }) {
   const { id } = await params;
   if (!id) return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 
-  const doc = await prisma.document.findFirst({
-    where: { id, user: { email: session.user.email } },
+  const access = await resolveDocumentManagementAccess(session.user.email, id);
+  if (!access.document) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!access.canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const doc = await prisma.document.findUnique({
+    where: { id },
     include: {
       topicDocument: { include: { topic: true } },
     },
   });
-  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Adjust topic centroid before deleting (topic may be deleted if this was last doc)
   if (doc.topicDocument) {

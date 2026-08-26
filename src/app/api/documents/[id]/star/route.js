@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
+import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 
 export async function PATCH(req, { params }) {
   try {
@@ -14,18 +15,18 @@ export async function PATCH(req, { params }) {
       return NextResponse.json({ error: "Invalid document ID" }, { status: 400 });
     }
 
-    // Get current document for this user
-    const doc = await prisma.document.findFirst({
-      where: {
-        id: docId,
-        user: { email: session.user.email },
-      },
-      select: { id: true, starred: true },
-    });
-
-    if (!doc) {
+    const access = await resolveDocumentManagementAccess(session.user.email, docId);
+    if (!access.document) {
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
     }
+    if (!access.canManage) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const doc = await prisma.document.findUnique({
+      where: { id: docId },
+      select: { id: true, starred: true },
+    });
 
     const newStarred = doc.starred === 1 ? 0 : 1;
 

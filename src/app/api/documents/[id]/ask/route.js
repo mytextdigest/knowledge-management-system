@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import OpenAI from "openai";
 import { resolveOpenAIKey } from "@/utils/key_helper";
 import { activeRequests } from "@/lib/requestCancellation";
+import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 
 // const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -31,25 +32,32 @@ export async function POST(req, { params }) {
       return NextResponse.json({ error: "Missing params" }, { status: 400 });
 
     // ----------------------------
-    // 2) DOCUMENT OWNERSHIP CHECK
+    // 2) DOCUMENT MANAGEMENT CHECK
     // ----------------------------
-    const doc = await prisma.document.findFirst({
-      where: {
-        id: documentId,
-        user: { email: session.user.email },
-        selected: 1   // ← only include selected docs
-      },
-      include: { user: true }
-    });
+    const access = await resolveDocumentManagementAccess(session.user.email, documentId);
+    if (!access.document)
+      return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    if (!access.canManage)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    if (!doc)
+    const doc = await prisma.document.findUnique({
+      where: { id: documentId },
+      include: { user: true, project: { select: { orgId: true } } },
+    });
+    if (!doc || doc.selected !== 1)
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
 
-    const userId = doc.userId;
+    const actingUser = access.user || await prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { id: true },
+    });
+    if (!actingUser)
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    const userId = actingUser.id;
 
     const apiKey = await resolveOpenAIKey({
       userId,
-      orgId: doc.orgId,
+      orgId: doc.orgId || doc.project?.orgId || null,
     });
 
     if (!apiKey) {

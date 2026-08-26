@@ -6,6 +6,7 @@ import OpenAI from "openai";
 import { getUserOpenAIKey } from "@/utils/key_helper";
 import { activeRequests } from "@/lib/requestCancellation";
 import { normalize, computeBM25 } from "@/lib/keywordSearch";
+import { resolveProjectManagementAccess } from "@/lib/projectManagementPolicy";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -29,11 +30,10 @@ export async function POST(req) {
     if (!projectId || !question)
       return NextResponse.json({ error: "Missing projectId or question" }, { status: 400 });
 
-    // verify project belongs to user
-    const project = await prisma.project.findFirst({
-      where: { id: projectId, user: { email: session.user.email } },
-    });
+    const { project, user: actingUser, canManage } =
+      await resolveProjectManagementAccess(session.user.email, projectId);
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    if (!canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     console.log("💬 Project ask:", projectId, question);
 
@@ -51,20 +51,15 @@ export async function POST(req) {
 
     // 1) Conversation (latest or new)
     let conv = await prisma.projectConversation.findFirst({
-      where: { projectId },
+      where: { projectId, userId: actingUser.id },
       orderBy: { createdAt: "desc" },
     });
 
     if (!conv) {
-      const user = await prisma.user.findUnique({
-        where: { email: session.user.email },
-        select: { id: true },
-      });
-
       conv = await prisma.projectConversation.create({
         data: {
           projectId,
-          userId: user.id,
+          userId: actingUser.id,
         },
       });
     }

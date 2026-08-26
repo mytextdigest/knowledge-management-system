@@ -1,19 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
-import { resolveOrgRole } from "@/lib/orgGuard";
+import { resolveProjectManagementAccess } from "@/lib/projectManagementPolicy";
 
-async function verifyTopicOwnership(session, projectId, topicId) {
+async function verifyTopicManagement(session, projectId, topicId) {
   const topic = await prisma.topic.findFirst({
     where: { id: topicId, project: { id: projectId } },
-    select: { id: true, project: { select: { orgId: true } } },
+    select: { id: true, projectId: true },
   });
   if (!topic) return null;
 
-  const { role } = await resolveOrgRole(session.user.email, topic.project.orgId);
-  if (!role) return null;
-
-  return topic;
+  const { canManage } = await resolveProjectManagementAccess(
+    session.user.email,
+    projectId
+  );
+  return canManage ? topic : null;
 }
 
 export async function PATCH(req, { params }) {
@@ -29,7 +30,7 @@ export async function PATCH(req, { params }) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
   }
 
-  const topic = await verifyTopicOwnership(session, projectId, topicId);
+  const topic = await verifyTopicManagement(session, projectId, topicId);
   if (!topic) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const updated = await prisma.topic.update({
@@ -49,7 +50,7 @@ export async function DELETE(req, { params }) {
 
   const { id: projectId, topicId } = await params;
 
-  const topic = await verifyTopicOwnership(session, projectId, topicId);
+  const topic = await verifyTopicManagement(session, projectId, topicId);
   if (!topic) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Cascade deletes TopicDocument rows, documents become unassigned
