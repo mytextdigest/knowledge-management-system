@@ -59,3 +59,30 @@ test('repository surfaces suggested project links for confirmation or dismissal'
   assert.match(card, /Suggested for project:/);
   assert.match(card, /Add to project/);
 });
+
+test('BUG-04 project document list uses project management access and project UI surfaces mutation errors', () => {
+  const list = read('src/app/api/documents/route.js');
+  assert.match(list, /resolveProjectManagementAccess/);
+  assert.match(list, /if \(!canManage\).*Forbidden/s);
+  assert.match(list, /where:\s*\{ projectId \}/);
+  assert.doesNotMatch(list, /userId:\s*dbUser\.id/);
+  assert.match(list, /canStar:\s*true/);
+  assert.match(list, /canDelete:\s*true/);
+
+  const page = read('src/app/(app)/project/page.jsx');
+  assert.match(page, /useToast/);
+  assert.match(page, /toast\.error\(data\.error \|\| "Unable to delete this document\."\)/);
+  assert.match(page, /toast\.error\(data\.error \|\| "Unable to update the document star\."\)/);
+  assert.match(page, /toast\.error\(data\.error \|\| 'Unable to rename this document\.'\)/);
+  assert.match(page, /<ToastProvider>/);
+});
+
+test('BUG-01 project message history uses management access and acting-user conversation', () => {
+  const text = read('src/app/api/projects/messages/[projectId]/route.js');
+  assert.match(text, /resolveProjectManagementAccess/);
+  assert.match(text, /user:\s*actingUser/);
+  assert.match(text, /if \(!canManage\).*Forbidden/s);
+  assert.match(text, /where:\s*\{ projectId, userId: actingUser\.id \}/);
+  assert.doesNotMatch(text, /user:\s*\{ email: session\.user\.email \}/);
+  assert.doesNotMatch(text, /where:\s*\{ projectId \},\s*orderBy/);
+});
