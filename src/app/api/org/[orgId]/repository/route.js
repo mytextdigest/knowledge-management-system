@@ -55,10 +55,18 @@ export async function GET(req, { params }) {
         ],
       };
 
-  // Source B: documents from projects promoted to org scope
-  const sourceB = {
-    project: { scope: "org", orgId },
-  };
+  // Source B: documents from projects promoted to org scope.
+  // Keep listing visibility aligned with the document detail route: for
+  // non-admins, org promotion does not bypass the project's department gate.
+  const sourceB = isOrgAdmin(role)
+    ? { project: { scope: "org", orgId } }
+    : {
+        project: {
+          scope: "org",
+          orgId,
+          departmentId: { in: userDeptIds },
+        },
+      };
 
   const andConditions = [{ OR: [sourceA, sourceB] }];
 
@@ -136,6 +144,17 @@ export async function GET(req, { params }) {
         department: { select: { id: true, name: true } },
         project:    { select: { id: true, name: true, scope: true } },
         suggestedDepartment: { select: { id: true, name: true } },
+        projectLinks: {
+          where: { status: "suggested" },
+          select: {
+            id: true,
+            confidence: true,
+            evidence: true,
+            status: true,
+            project: { select: { id: true, name: true, departmentId: true } },
+          },
+          orderBy: { confidence: "desc" },
+        },
         duplicatesAsDocument: {
           where: { status: "pending" },
           select: {

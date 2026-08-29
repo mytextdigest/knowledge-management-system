@@ -16,6 +16,7 @@ import DeleteConfirmationModal from '@/components/modals/DeleteConfirmationModal
 import EditDocumentModal from '@/components/modals/EditDocumentModal';
 import EditProjectModal from '@/components/modals/EditProjectModal';
 import { useSession } from "next-auth/react";
+import { useToast, ToastProvider } from "@/components/ui/Toast";
 
 const PROCESSING_STATUSES = new Set([
   'queued',
@@ -55,6 +56,7 @@ function ProjectPageInner() {
   const projectId = searchParams.get("id");
 
   const { data: session } = useSession();
+  const toast = useToast();
   const userId = session?.user?.id;
 
   const pollRef = useRef(null);
@@ -271,7 +273,9 @@ function ProjectPageInner() {
       });
 
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         console.error("Failed to delete document:", res.status);
+        toast.error(data.error || "Unable to delete this document.");
         return;
       }
 
@@ -279,6 +283,7 @@ function ProjectPageInner() {
       setShowDeleteModal(false);
     } catch (err) {
       console.error("Error deleting document:", err);
+      toast.error("Unable to delete this document. Please try again.");
     } finally {
       setIsDeleting(false);
     }
@@ -297,7 +302,9 @@ function ProjectPageInner() {
       });
 
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         console.error("Failed to toggle star:", res.status);
+        toast.error(data.error || "Unable to update the document star.");
         return;
       }
 
@@ -310,6 +317,7 @@ function ProjectPageInner() {
       );
     } catch (err) {
       console.error("Failed to toggle star:", err);
+      toast.error("Unable to update the document star. Please try again.");
     }
   };
 
@@ -350,8 +358,9 @@ function ProjectPageInner() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         console.error('Rename failed:', data.error);
+        toast.error(data.error || 'Unable to rename this document.');
         return;
       }
 
@@ -365,6 +374,7 @@ function ProjectPageInner() {
       setDocumentToRename(null);
     } catch (err) {
       console.error('Rename error:', err);
+      toast.error('Unable to rename this document. Please try again.');
     } finally {
       setIsRenaming(false);
     }
@@ -638,8 +648,10 @@ function ProjectLoading() {
 
 export default function ProjectPage() {
   return (
-    <Suspense fallback={<ProjectLoading />}>
-      <ProjectPageInner />
-    </Suspense>
+    <ToastProvider>
+      <Suspense fallback={<ProjectLoading />}>
+        <ProjectPageInner />
+      </Suspense>
+    </ToastProvider>
   );
 }

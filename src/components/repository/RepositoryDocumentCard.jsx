@@ -58,13 +58,16 @@ export default function RepositoryDocumentCard({
   onDocumentSignalChange,
 }) {
   const router = useRouter();
-  const isPdf = (document?.filename || "").toLowerCase().endsWith(".pdf");
+  const lowerFilename = (document?.filename || "").toLowerCase();
+  const isPdf = lowerFilename.endsWith(".pdf");
+  const isSpreadsheet = /\.(xlsx|xls|csv)$/.test(lowerFilename);
   const [pendingAction, setPendingAction] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [preview, setPreview] = useState(null);
   const [lifecycle, setLifecycle] = useState(document?.lifecycle || "published");
   const [changingLifecycle, setChangingLifecycle] = useState(false);
   const [duplicateSignals, setDuplicateSignals] = useState(document?.duplicatesAsDocument || []);
+  const [projectSuggestions, setProjectSuggestions] = useState(document?.projectLinks || []);
   const [lifecycleSuggestion, setLifecycleSuggestion] = useState(document?.lifecycleSuggestion || null);
   const [lifecycleSuggestionReason, setLifecycleSuggestionReason] = useState(document?.lifecycleSuggestionReason || null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -74,6 +77,7 @@ export default function RepositoryDocumentCard({
 
   useEffect(() => setLifecycle(document?.lifecycle || "published"), [document?.lifecycle]);
   useEffect(() => setDuplicateSignals(document?.duplicatesAsDocument || []), [document?.duplicatesAsDocument]);
+  useEffect(() => setProjectSuggestions(document?.projectLinks || []), [document?.projectLinks]);
   useEffect(() => {
     setLifecycleSuggestion(document?.lifecycleSuggestion || null);
     setLifecycleSuggestionReason(document?.lifecycleSuggestionReason || null);
@@ -181,25 +185,63 @@ export default function RepositoryDocumentCard({
     }
   }
 
+  async function handleProjectSuggestion(linkId, status) {
+    setActionError(null);
+    setPendingAction(`project-${linkId}`);
+    try {
+      const res = await fetch(`/api/documents/${document.id}/project-links/${linkId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Unable to update project suggestion.");
+      setProjectSuggestions((current) => current.filter((link) => link.id !== linkId));
+      onDocumentSignalChange?.(document.id, {
+        projectLinks: projectSuggestions.filter((link) => link.id !== linkId),
+      });
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   const uploadedAt = document?.createdAt ? new Date(document.createdAt).toLocaleDateString() : "Unknown date";
 
-  async function getFileUrl() {
+  async function getFileUrls() {
     const res = await fetch(`/api/documents/${document.id}`);
     if (!res.ok) throw new Error("Unable to load this document's file.");
     const data = await res.json();
     if (!data?.fileUrl) throw new Error("No file is attached to this document.");
-    return data.fileUrl;
+    return { fileUrl: data.fileUrl, fileDownloadUrl: data.fileDownloadUrl || data.fileUrl };
   }
 
   async function handleOpen() {
     setActionError(null); setPendingAction("open");
-    try { window.open(await getFileUrl(), "_blank", "noopener,noreferrer"); }
+    try {
+      // Browsers do not render XLSX/XLS reliably. Open our document detail
+      // viewer instead, which renders extracted spreadsheet rows as a grid.
+      if (isSpreadsheet) {
+        window.open(`/document?id=${document.id}`, "_blank", "noopener,noreferrer");
+      } else {
+        const { fileUrl } = await getFileUrls();
+        window.open(fileUrl, "_blank", "noopener,noreferrer");
+      }
+    }
     catch (err) { setActionError(err.message); }
     finally { setPendingAction(null); }
   }
   async function handlePreview() {
     setActionError(null); setPendingAction("preview");
-    try { setPreview({ fileUrl: await getFileUrl() }); }
+    try {
+      if (isSpreadsheet) {
+        window.open(`/document?id=${document.id}`, "_blank", "noopener,noreferrer");
+      } else {
+        const { fileUrl } = await getFileUrls();
+        setPreview({ fileUrl });
+      }
+    }
     catch (err) { setActionError(err.message); }
     finally { setPendingAction(null); }
   }
@@ -207,7 +249,8 @@ export default function RepositoryDocumentCard({
     setActionError(null); setPendingAction("download");
     try {
       const link = window.document.createElement("a");
-      link.href = await getFileUrl();
+      const { fileDownloadUrl } = await getFileUrls();
+      link.href = fileDownloadUrl;
       link.download = document?.filename || "download";
       window.document.body.appendChild(link); link.click(); link.remove();
     } catch (err) { setActionError(err.message); }
@@ -276,6 +319,20 @@ export default function RepositoryDocumentCard({
           ) : null}
         </div>
       ) : null}
+
+      {projectSuggestions.map((link) => (
+        <div key={link.id} className="mt-3 rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-xs text-cyan-900 dark:border-cyan-800 dark:bg-cyan-900/20 dark:text-cyan-200">
+          <p className="font-semibold">Suggested for project: {link.project?.name || "Project"}</p>
+          <p className="mt-1">
+            Confidence {Math.round(Number(link.confidence || 0) * 100)}%
+            {link.evidence ? ` · ${link.evidence}` : ""}
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button type="button" disabled={pendingAction === `project-${link.id}`} onClick={() => handleProjectSuggestion(link.id, "confirmed")} className="inline-flex items-center gap-1 rounded-md bg-cyan-700 px-2 py-1 font-medium text-white disabled:opacity-50"><Check className="h-3 w-3" /> Add to project</button>
+            <button type="button" disabled={pendingAction === `project-${link.id}`} onClick={() => handleProjectSuggestion(link.id, "dismissed")} className="inline-flex items-center gap-1 rounded-md border border-cyan-300 bg-white px-2 py-1 font-medium text-cyan-800 dark:bg-gray-900 dark:text-cyan-200"><X className="h-3 w-3" /> Dismiss</button>
+          </div>
+        </div>
+      ))}
 
       {duplicateSignals.map((duplicate) => (
         <div key={duplicate.id} className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">

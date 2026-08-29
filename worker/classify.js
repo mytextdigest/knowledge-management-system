@@ -188,6 +188,7 @@ export async function detectDocumentDuplicates({ prisma, documentId, threshold =
       orgId: true,
       scope: true,
       contentHash: true,
+      content: true,
       chunks: { select: { embedding: true } },
       project: { select: { orgId: true, scope: true } },
     },
@@ -212,6 +213,7 @@ export async function detectDocumentDuplicates({ prisma, documentId, threshold =
     select: {
       id: true,
       contentHash: true,
+      content: true,
       chunks: { select: { embedding: true } },
     },
   });
@@ -219,7 +221,17 @@ export async function detectDocumentDuplicates({ prisma, documentId, threshold =
   const matches = [];
   for (const candidate of candidates) {
     let similarity = 0;
-    if (current.contentHash && candidate.contentHash === current.contentHash) {
+    const candidateHash = candidate.contentHash || computeContentHash(candidate.content);
+    if (candidateHash && !candidate.contentHash) {
+      // Backfill the hash when a candidate is still earlier in the worker
+      // pipeline. This removes the upload-order race for exact duplicates.
+      await prisma.document.update({
+        where: { id: candidate.id },
+        data: { contentHash: candidateHash },
+      }).catch(() => {});
+    }
+
+    if (current.contentHash && candidateHash === current.contentHash) {
       similarity = 1;
     } else if (currentVector) {
       const candidateVector = averageEmbeddings(candidate.chunks.map((c) => c.embedding));

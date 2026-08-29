@@ -72,6 +72,8 @@ function DocumentContent() {
   const ext = doc?.filename?.split('.').pop().toLowerCase() ?? '';
   const isSpreadsheet = ['csv', 'xlsx', 'xls'].includes(ext);
   const canRegenerateSummary = doc?.permissions?.canRegenerate !== false;
+  const canAskDocument = doc?.permissions?.canAsk !== false;
+  const canClearDocumentChat = doc?.permissions?.canClearChat !== false;
 
   const updateProjectLinkStatus = async (linkId, status) => {
     try {
@@ -110,9 +112,22 @@ function DocumentContent() {
           sheetName: meta.sheetName,
           columnHeaders: meta.columnHeaders || [],
           rowRanges: meta.rowRange ? [meta.rowRange] : [],
+          previewRows: [],
         });
       } else if (meta.rowRange) {
         existing.rowRanges.push(meta.rowRange);
+      }
+
+      const target = bySheet.get(meta.sheetName);
+      const headers = target.columnHeaders || [];
+      const lines = String(chunk?.text || "").split("\n").filter((line) => line.includes(":") && line.includes(" | "));
+      for (const line of lines) {
+        if (target.previewRows.length >= 50) break;
+        const cells = line.split(" | ").map((part) => {
+          const idx = part.indexOf(":");
+          return idx >= 0 ? part.slice(idx + 1).trim() : part.trim();
+        });
+        if (cells.length) target.previewRows.push(cells.slice(0, Math.max(headers.length, cells.length)));
       }
     }
 
@@ -560,6 +575,10 @@ function DocumentContent() {
   //  --- Asking document queries ----
   const handleAsk = async (e) => {
     e.preventDefault();
+    if (!canAskDocument) {
+      toast.warning("You do not have permission to chat with this document.");
+      return;
+    }
     if (!question.trim()) return;
   
     const userMessage = {
@@ -753,6 +772,38 @@ function DocumentContent() {
       );
     }
 
+    if (["xlsx", "xls", "csv"].includes(ext)) {
+      return (
+        <div className="w-full h-full overflow-auto bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-5">
+          {sheets.length === 0 ? (
+            <div className="text-sm text-gray-500 dark:text-gray-400">Spreadsheet data is still being processed. You can download the original file in the meantime.</div>
+          ) : sheets.map((sheet) => (
+            <div key={sheet.sheetName} className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 px-3 py-2">
+                <span className="font-semibold text-sm">{sheet.sheetName}</span>
+                {sheet.rowSpan ? <span className="text-xs text-gray-500">Rows {sheet.rowSpan}</span> : null}
+              </div>
+              <div className="overflow-auto max-h-[360px]">
+                <table className="min-w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800">
+                    <tr>{(sheet.columnHeaders || []).map((header, index) => <th key={`${header}-${index}`} className="border-b border-r border-gray-200 dark:border-gray-700 px-3 py-2 text-left font-semibold whitespace-nowrap">{header || `Column ${index + 1}`}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {(sheet.previewRows || []).map((row, rowIndex) => (
+                      <tr key={rowIndex} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-900 dark:even:bg-gray-800/60">
+                        {Array.from({ length: Math.max(sheet.columnHeaders?.length || 0, row.length) }).map((_, colIndex) => <td key={colIndex} className="border-b border-r border-gray-100 dark:border-gray-800 px-3 py-2 align-top whitespace-nowrap">{row[colIndex] ?? ""}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {(sheet.previewRows || []).length === 0 ? <p className="p-3 text-xs text-gray-500">No data rows extracted for this sheet.</p> : null}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
     return (
       <div className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center">
         <p className="text-gray-500 dark:text-gray-400">Unsupported file type: {ext}</p>
@@ -857,7 +908,7 @@ function DocumentContent() {
             </CardTitle>
             
             {/* Clear Chat Button - Only show when chat has messages */}
-            {chat.some(msg => msg.role !== "system") && (
+            {canClearDocumentChat && chat.some(msg => msg.role !== "system") && (
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Button
                   variant="ghost"
@@ -1207,7 +1258,7 @@ function DocumentContent() {
                     onChange={(e) => setQuestion(e.target.value)}
                     placeholder="Ask about this document..."
                     className="flex-1"
-                    disabled={isTyping}
+                    disabled={isTyping || !canAskDocument}
                   />
                   {isTyping ? (
                     <Button
@@ -1222,7 +1273,7 @@ function DocumentContent() {
                     <Button
                       type="submit"
                       size="icon"
-                      disabled={!question.trim()}
+                      disabled={!question.trim() || !canAskDocument}
                       className="flex-shrink-0"
                     >
                       <Send className="h-4 w-4" />

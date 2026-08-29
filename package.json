@@ -20,7 +20,8 @@
     "task8:test": "node --test scripts/task-8/*.test.mjs",
     "task8:test:integration": "node --test scripts/task-8/classification.integration.test.mjs",
     "task9:rebuild": "node scripts/task-9/rebuild-context.mjs",
-    "task9:test": "node --test scripts/task-9/*.test.mjs"
+    "task9:test": "node --test scripts/task-9/*.test.mjs",
+    "alpha:combined-test": "node --test scripts/alpha-bugfix/combined-permissions.test.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

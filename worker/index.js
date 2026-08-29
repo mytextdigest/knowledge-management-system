@@ -557,6 +557,17 @@ async function processSummarizationJob(job) {
     },
   });
 
+  // Re-run the advisory duplicate scan after summarization. Two identical
+  // uploads can enter embedding in parallel; the first scan may occur before
+  // the other candidate has finished persisting embeddings/hash. This second,
+  // still non-blocking pass closes that race without delaying ingestion.
+  try {
+    const matches = await detectDocumentDuplicates({ prisma, documentId: docId });
+    console.log(`🟨 Final duplicate scan for ${docId}: ${matches.length} possible match(es)`);
+  } catch (err) {
+    console.error("⚠️ Final duplicate detection failed (non-fatal):", err.message);
+  }
+
   // Load user details
   const doc = await prisma.document.findUnique({
     where: { id: docId },
