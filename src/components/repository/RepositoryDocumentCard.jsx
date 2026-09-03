@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ExternalLink, Eye, Download, Info, Loader2, Check, X, AlertTriangle } from "lucide-react";
+import { Eye, Download, Info, Loader2, Check, X, AlertTriangle } from "lucide-react";
 import { Modal, ModalHeader, ModalTitle, ModalContent } from "@/components/ui/Modal";
 
 const CATEGORIES = [
@@ -217,21 +217,6 @@ export default function RepositoryDocumentCard({
     return { fileUrl: data.fileUrl, fileDownloadUrl: data.fileDownloadUrl || data.fileUrl };
   }
 
-  async function handleOpen() {
-    setActionError(null); setPendingAction("open");
-    try {
-      // Browsers do not render XLSX/XLS reliably. Open our document detail
-      // viewer instead, which renders extracted spreadsheet rows as a grid.
-      if (isSpreadsheet) {
-        window.open(`/document?id=${document.id}`, "_blank", "noopener,noreferrer");
-      } else {
-        const { fileUrl } = await getFileUrls();
-        window.open(fileUrl, "_blank", "noopener,noreferrer");
-      }
-    }
-    catch (err) { setActionError(err.message); }
-    finally { setPendingAction(null); }
-  }
   async function handlePreview() {
     setActionError(null); setPendingAction("preview");
     try {
@@ -353,16 +338,15 @@ export default function RepositoryDocumentCard({
       {document?.status ? <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Status: <span className="font-medium">{document.status}</span></p> : null}
 
       <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
-        <button type="button" onClick={handleOpen} disabled={pendingAction === "open"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "open" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />} Open</button>
         <button type="button" onClick={handlePreview} disabled={pendingAction === "preview"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "preview" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />} Preview</button>
         <button type="button" onClick={handleDownload} disabled={pendingAction === "download"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "download" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download</button>
-        <button type="button" onClick={() => router.push(`/document?id=${document.id}`)} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"><Info className="h-3.5 w-3.5" /> View Details</button>
+        <button type="button" onClick={() => router.push(`/document?id=${document.id}`)} title="Open the full document viewer to read, chat with, and summarize this document" className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"><Info className="h-3.5 w-3.5" /> View</button>
       </div>
       {actionError ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{actionError}</p> : null}
 
       <Modal isOpen={!!preview} onClose={() => setPreview(null)} size="xl">
         <ModalHeader><ModalTitle>{document?.filename || "Document preview"}</ModalTitle></ModalHeader>
-        <ModalContent>{preview && isPdf ? <iframe src={preview.fileUrl} title={document?.filename || "Document preview"} className="h-[70vh] w-full rounded-md border border-gray-200 dark:border-gray-700" /> : <p className="text-sm text-gray-600 dark:text-gray-300">Preview isn't available for this file type yet. Use Open or Download to view the file.</p>}</ModalContent>
+        <ModalContent>{preview && isPdf ? <iframe src={preview.fileUrl} title={document?.filename || "Document preview"} className="h-[70vh] w-full rounded-md border border-gray-200 dark:border-gray-700" /> : <p className="text-sm text-gray-600 dark:text-gray-300">Preview isn't available for this file type yet. Use View or Download to see the file.</p>}</ModalContent>
       </Modal>
     </div>
   );

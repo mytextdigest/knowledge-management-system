@@ -36,7 +36,9 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
 
   const [orgs, setOrgs] = useState([]);
   const [org, setOrg] = useState(null); // { name, role, hasApiKey }
+  const [orgLoading, setOrgLoading] = useState(true);
   const [departments, setDepartments] = useState([]);
+  const [deptsLoading, setDeptsLoading] = useState(true);
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -57,14 +59,18 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
 
   useEffect(() => {
     if (!orgId) return;
+    setOrgLoading(true);
+    setDeptsLoading(true);
     fetch(`/api/org/${orgId}/settings`)
       .then((r) => r.json())
       .then((data) => !data.error && setOrg(data))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setOrgLoading(false));
     fetch(`/api/org/${orgId}/department`)
       .then((r) => r.json())
       .then((data) => Array.isArray(data) && setDepartments(data))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setDeptsLoading(false));
   }, [orgId]);
 
   useEffect(() => {
@@ -179,9 +185,13 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
               <Image src="/logo.png" alt="" width={20} height={20} className="object-contain" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-white">
-                {org?.name || "Loading..."}
-              </p>
+              {orgLoading && !org?.name ? (
+                <div className="h-4 w-28 animate-pulse rounded bg-gray-700" />
+              ) : (
+                <p className="truncate text-sm font-semibold text-white">
+                  {org?.name || "Untitled workspace"}
+                </p>
+              )}
               <p className="text-xs text-gray-400">Workspace</p>
             </div>
             <ChevronDown className="h-4 w-4 flex-shrink-0 text-gray-400" />
@@ -224,46 +234,51 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
           </AnimatePresence>
         </div>
 
-        {/* Scrollable nav */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          {/* Org Chat - prominent */}
-          {orgId && (
-            <button
-              onClick={() => navTo(`/org/${orgId}/chat`)}
-              className={cn(
-                "mb-3 flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-sm font-semibold shadow-sm transition-colors",
-                isActive(`/org/${orgId}/chat`)
-                  ? "bg-primary-600 text-white"
-                  : "bg-primary-600/20 text-primary-300 hover:bg-primary-600/30"
-              )}
-            >
-              <MessageSquare className="h-5 w-5" />
-              Org Chat
-            </button>
-          )}
-
-          {primaryNav.map((item) => {
-            const Icon = item.icon;
-            const active = isActive(item.href);
-            return (
+        {/* Nav: top items fixed, departments scroll in their own bounded region,
+            Org Settings stays pinned above the bottom user menu so neither
+            jumps around while departments are loading or change in count. */}
+        <nav className="flex min-h-0 flex-1 flex-col px-3 py-4">
+          <div className="flex-shrink-0 space-y-1">
+            {/* Org Chat - prominent */}
+            {orgId && (
               <button
-                key={item.href}
-                onClick={() => navTo(item.href)}
+                onClick={() => navTo(`/org/${orgId}/chat`)}
                 className={cn(
-                  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
-                  active ? "bg-gray-800 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                  "mb-3 flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-sm font-semibold shadow-sm transition-colors",
+                  isActive(`/org/${orgId}/chat`)
+                    ? "bg-primary-600 text-white"
+                    : "bg-primary-600/20 text-primary-300 hover:bg-primary-600/30"
                 )}
               >
-                <Icon className="h-4 w-4" />
-                {item.label}
+                <MessageSquare className="h-5 w-5" />
+                Org Chat
               </button>
-            );
-          })}
+            )}
 
-          {/* Departments */}
+            {primaryNav.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(item.href);
+              return (
+                <button
+                  key={item.href}
+                  onClick={() => navTo(item.href)}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                    active ? "bg-gray-800 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Departments - own scrollable region, so its height never pushes
+              Org Settings / the user menu around */}
           {orgId && (
-            <div className="mt-5">
-              <div className="flex items-center justify-between px-3 pb-1">
+            <div className="mt-5 flex min-h-0 flex-1 flex-col">
+              <div className="flex flex-shrink-0 items-center justify-between px-3 pb-1">
                 <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Departments
                 </span>
@@ -279,7 +294,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
               </div>
 
               {showCreateDept && (
-                <div className="mb-2 flex gap-1.5 px-3">
+                <div className="mb-2 flex flex-shrink-0 gap-1.5 px-3">
                   <input
                     autoFocus
                     type="text"
@@ -299,36 +314,48 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
                 </div>
               )}
 
-              {departments.length === 0 ? (
-                <p className="px-3 py-1 text-xs text-gray-500">No departments yet.</p>
-              ) : (
-                departments.map((dept) => {
-                  const href = `/org/${orgId}/department/${dept.id}`;
-                  const active = isActive(href);
-                  return (
-                    <button
-                      key={dept.id}
-                      onClick={() => navTo(href)}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors",
-                        active ? "bg-gray-800 text-white" : "text-gray-400 hover:bg-gray-800 hover:text-white"
-                      )}
-                    >
-                      <Layers className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span className="truncate">{dept.name}</span>
-                    </button>
-                  );
-                })
-              )}
+              <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+                {deptsLoading ? (
+                  [0, 1, 2].map((i) => (
+                    <div key={i} className="flex items-center gap-2 rounded-lg px-3 py-1.5">
+                      <div className="h-3.5 w-3.5 flex-shrink-0 animate-pulse rounded bg-gray-800" />
+                      <div
+                        className="h-3 flex-1 animate-pulse rounded bg-gray-800"
+                        style={{ maxWidth: `${70 - i * 15}%` }}
+                      />
+                    </div>
+                  ))
+                ) : departments.length === 0 ? (
+                  <p className="px-3 py-1 text-xs text-gray-500">No departments yet.</p>
+                ) : (
+                  departments.map((dept) => {
+                    const href = `/org/${orgId}/department/${dept.id}`;
+                    const active = isActive(href);
+                    return (
+                      <button
+                        key={dept.id}
+                        onClick={() => navTo(href)}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors",
+                          active ? "bg-gray-800 text-white" : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                        )}
+                      >
+                        <Layers className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="truncate">{dept.name}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
           )}
 
-          {/* Org Settings */}
+          {/* Org Settings - pinned above the bottom user menu */}
           {orgId && (
             <button
               onClick={() => navTo(`/org/${orgId}/settings`)}
               className={cn(
-                "mt-5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                "mt-3 flex w-full flex-shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
                 isActive(`/org/${orgId}/settings`)
                   ? "bg-gray-800 text-white"
                   : "text-gray-300 hover:bg-gray-800 hover:text-white"
