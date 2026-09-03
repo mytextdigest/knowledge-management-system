@@ -12,7 +12,7 @@ import DeleteProjectModal from "@/components/modals/DeleteProjectModal";
 import AddDepartmentMembersModal from "@/components/modals/AddDepartmentMembersModal";
 import Layout from "@/components/layout/Layout";
 import { useSession } from "next-auth/react";
-import RelatedWorkPanel from "@/components/recommendations/RelatedWorkPanel";
+// import RelatedWorkPanel from "@/components/recommendations/RelatedWorkPanel";
 
 const FILTER_PARAM_MAP = {
   category: "category",
@@ -28,6 +28,7 @@ const initialFilters = {
   fileType: "",
   dateFrom: "",
   dateTo: "",
+  search: "",
 };
 
 export default function DepartmentPage({ params }) {
@@ -234,7 +235,14 @@ export default function DepartmentPage({ params }) {
 
   useEffect(() => {
     setPage(1);
-  }, [filters.category, filters.lifecycle, filters.fileType, filters.dateFrom, filters.dateTo]);
+  }, [
+    filters.category,
+    filters.lifecycle,
+    filters.fileType,
+    filters.dateFrom,
+    filters.dateTo,
+    filters.search,
+  ]);
 
   useEffect(() => {
     if (tab === "documents") loadDocuments();
@@ -418,7 +426,7 @@ export default function DepartmentPage({ params }) {
 
       {tab === "documents" ? (
         <>
-          <RelatedWorkPanel orgId={orgId} departmentId={deptId} />
+          {/* <RelatedWorkPanel orgId={orgId} departmentId={deptId} /> */}
           <RepositoryFilters filters={filters} hideDepartmentFilter onChange={setFilters} />
 
           {docsError ? (

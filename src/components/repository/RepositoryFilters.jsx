@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { Search } from "lucide-react";
+
 const FIELD_CLASS =
   "rounded-md border border-gray-300 bg-white p-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100";
 
@@ -19,8 +22,39 @@ export default function RepositoryFilters({
   hideDepartmentFilter = false,
   onChange,
 }) {
+  const [searchInput, setSearchInput] = useState(filters.search || "");
+
+  // Keep the input in sync if filters are reset/changed from outside (e.g.
+  // clearing all filters), without fighting the user's own typing.
+  useEffect(() => {
+    setSearchInput(filters.search || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.search]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      if (searchInput !== (filters.search || "")) {
+        onChange({ ...filters, search: searchInput });
+      }
+    }, 400);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput]);
+
   return (
     <div className="grid gap-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 md:grid-cols-4">
+      <div className="relative md:col-span-4">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+        <input
+          type="text"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Search by meaning, e.g. 'vendor contracts renewed last quarter'"
+          title="Semantic search — finds documents by meaning, not just exact keyword matches"
+          className={`${FIELD_CLASS} w-full pl-9`}
+        />
+      </div>
+
       {hideDepartmentFilter ? null : (
         <select
           className="rounded-md border border-gray-300 bg-white p-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"

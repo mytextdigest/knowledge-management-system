@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isOrgAdmin } from "@/lib/orgGuard";
+import { orgSearch } from "@/lib/vectorSearch";
+import { resolveOpenAIKey } from "@/utils/key_helper";
 
 const PAGE_SIZE = 20;
 
@@ -32,6 +35,7 @@ export async function GET(req, { params }) {
   const fileType    = searchParams.get("fileType")  || null;
   const dateFrom    = searchParams.get("dateFrom")  || null;
   const dateTo      = searchParams.get("dateTo")    || null;
+  const search      = searchParams.get("search")    || null;
   const page        = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
 
   // Resolve user's department memberships for RBAC
@@ -118,59 +122,129 @@ export async function GET(req, { params }) {
     });
   }
 
+  // Semantic search: rank candidate documents by chunk-embedding similarity
+  // to the query, scoped by the same RBAC rules as chat/recommendations, then
+  // restrict the listing to that candidate set. If no embedding key is
+  // configured or the embedding call fails, fall back to a plain substring
+  // match so search still returns something rather than erroring out.
+  let rankMap = null;
+  const trimmedSearch = search?.trim() || null;
+
+  if (trimmedSearch) {
+    let candidateIds = null;
+
+    try {
+      const apiKey = await resolveOpenAIKey({ userId: user.id, orgId });
+      if (apiKey) {
+        const openai = new OpenAI({ apiKey });
+        const embRes = await openai.embeddings.create({
+          model: "text-embedding-3-small",
+          input: trimmedSearch,
+        });
+        const queryEmbedding = embRes.data[0].embedding;
+
+        const rows = await orgSearch(queryEmbedding, {
+          userId: user.id,
+          orgId,
+          limit: 200,
+          isSuperAdmin: isOrgAdmin(role),
+          scope: deptFilter ? "department" : "organization",
+          departmentId: deptFilter,
+        });
+
+        const seen = new Set();
+        candidateIds = [];
+        for (const row of rows) {
+          if (seen.has(row.document_id)) continue;
+          seen.add(row.document_id);
+          candidateIds.push(row.document_id);
+        }
+      }
+    } catch (err) {
+      console.error("Semantic search embedding failed, falling back to text search:", err);
+    }
+
+    if (candidateIds) {
+      rankMap = new Map(candidateIds.map((id, idx) => [id, idx]));
+      andConditions.push({ id: { in: candidateIds.length ? candidateIds : ["__no_match__"] } });
+    } else {
+      andConditions.push({
+        OR: [
+          { filename: { contains: trimmedSearch, mode: "insensitive" } },
+          { content: { contains: trimmedSearch, mode: "insensitive" } },
+          { summary: { contains: trimmedSearch, mode: "insensitive" } },
+        ],
+      });
+    }
+  }
+
   const where = { AND: andConditions };
 
-  const [docs, total] = await Promise.all([
-    prisma.document.findMany({
-      where,
+  const documentSelect = {
+    id: true,
+    filename: true,
+    status: true,
+    scope: true,
+    lifecycle: true,
+    category: true,
+    categoryConfidence: true,
+    classificationStatus: true,
+    suggestedDepartmentId: true,
+    departmentSuggestionConfidence: true,
+    lifecycleSuggestion: true,
+    lifecycleSuggestionReason: true,
+    lifecycleSuggestedAt: true,
+    orgId: true,
+    departmentId: true,
+    createdAt: true,
+    user:       { select: { id: true, name: true, email: true } },
+    department: { select: { id: true, name: true } },
+    project:    { select: { id: true, name: true, scope: true } },
+    suggestedDepartment: { select: { id: true, name: true } },
+    projectLinks: {
+      where: { status: "suggested" },
       select: {
         id: true,
-        filename: true,
+        confidence: true,
+        evidence: true,
         status: true,
-        scope: true,
-        lifecycle: true,
-        category: true,
-        categoryConfidence: true,
-        classificationStatus: true,
-        suggestedDepartmentId: true,
-        departmentSuggestionConfidence: true,
-        lifecycleSuggestion: true,
-        lifecycleSuggestionReason: true,
-        lifecycleSuggestedAt: true,
-        orgId: true,
-        departmentId: true,
-        createdAt: true,
-        user:       { select: { id: true, name: true, email: true } },
-        department: { select: { id: true, name: true } },
-        project:    { select: { id: true, name: true, scope: true } },
-        suggestedDepartment: { select: { id: true, name: true } },
-        projectLinks: {
-          where: { status: "suggested" },
-          select: {
-            id: true,
-            confidence: true,
-            evidence: true,
-            status: true,
-            project: { select: { id: true, name: true, departmentId: true } },
-          },
-          orderBy: { confidence: "desc" },
-        },
-        duplicatesAsDocument: {
-          where: { status: "pending" },
-          select: {
-            id: true, similarity: true, status: true,
-            duplicateOf: { select: { id: true, filename: true } },
-          },
-          orderBy: { similarity: "desc" },
-        },
-        _count: { select: { relationshipsFrom: true, relationshipsTo: true } },
+        project: { select: { id: true, name: true, departmentId: true } },
       },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-    }),
-    prisma.document.count({ where }),
-  ]);
+      orderBy: { confidence: "desc" },
+    },
+    duplicatesAsDocument: {
+      where: { status: "pending" },
+      select: {
+        id: true, similarity: true, status: true,
+        duplicateOf: { select: { id: true, filename: true } },
+      },
+      orderBy: { similarity: "desc" },
+    },
+    _count: { select: { relationshipsFrom: true, relationshipsTo: true } },
+  };
+
+  let docs, total;
+
+  if (rankMap) {
+    // Prisma can't ORDER BY an arbitrary id list, so rank in memory. The
+    // candidate set is already bounded (limit: 200 above), so fetching it in
+    // full before paginating is cheap.
+    const allMatches = await prisma.document.findMany({ where, select: documentSelect });
+    allMatches.sort((a, b) => rankMap.get(a.id) - rankMap.get(b.id));
+    total = allMatches.length;
+    docs = allMatches.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  } else {
+    [docs, total] = await Promise.all([
+      prisma.document.findMany({
+        where,
+        select: documentSelect,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+      }),
+      prisma.document.count({ where }),
+    ]);
+  }
 
   return NextResponse.json({
     documents: docs.map((d) => ({

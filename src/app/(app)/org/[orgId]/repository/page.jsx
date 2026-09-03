@@ -25,6 +25,7 @@ const initialFilters = {
   fileType: "",
   dateFrom: "",
   dateTo: "",
+  search: "",
 };
 
 export default function RepositoryPage({ params }) {
@@ -141,6 +142,7 @@ export default function RepositoryPage({ params }) {
     filters.fileType,
     filters.dateFrom,
     filters.dateTo,
+    filters.search,
   ]);
 
   useEffect(() => {
