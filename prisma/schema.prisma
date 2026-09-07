@@ -35,6 +35,7 @@ model User {
   auditLogsAsTarget AuditLog[]           @relation("AuditLogTarget")
   orgMemberMemories OrgMemberMemory[]
   topicExpertise    TopicExpertise[]
+  documentInteractions DocumentInteraction[]
 }
 
 model OtpToken {
@@ -78,6 +79,7 @@ model Organization {
   knowledgeGaps     KnowledgeGap[]
   repositoryTopics  Topic[]
   integrations      OrgIntegration[]
+  documentInteractions DocumentInteraction[]
 
   @@index([name])
 }
@@ -312,6 +314,7 @@ model Document {
   relationshipsFrom DocumentRelationship[] @relation("DocumentRelationshipFrom")
   relationshipsTo   DocumentRelationship[] @relation("DocumentRelationshipTo")
   projectLinks      DocumentProjectLink[]
+  interactions      DocumentInteraction[]
 
   @@index([scope])
   @@index([orgId])
@@ -473,13 +476,16 @@ model DocumentProjectLink {
 }
 
 model TopicExpertise {
-  id        String   @id @default(cuid())
-  topicId   String
-  userId    String
-  score     Float
-  signals   Json?
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id           String    @id @default(cuid())
+  topicId      String
+  userId       String
+  score        Float
+  signals      Json?
+  source       String    @default("inferred")
+  confirmedBy  String?
+  lastSignalAt DateTime?
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
 
   topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -487,6 +493,24 @@ model TopicExpertise {
   @@unique([topicId, userId])
   @@index([topicId, score])
   @@index([userId])
+}
+
+
+model DocumentInteraction {
+  id         String   @id @default(cuid())
+  documentId String
+  userId     String
+  orgId      String
+  type       String   @default("view")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  document     Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, type])
+  @@index([userId, createdAt])
+  @@index([orgId, createdAt])
 }
 
 // Subscription Extension

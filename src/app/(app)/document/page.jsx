@@ -282,6 +282,12 @@ function DocumentContent() {
         }
 
         setDoc(data);
+        void fetch(`/api/documents/${id}/interactions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "view" }),
+          keepalive: true,
+        }).catch(() => {});
 
       } catch (error) {
         console.error("Error loading document:", error);
@@ -921,6 +927,19 @@ function DocumentContent() {
               </motion.div>
             )}
           </div>
+
+          {doc?.experts?.length > 0 && (
+            <div className="mb-3 rounded-lg border border-violet-100 bg-violet-50/60 p-3 text-xs dark:border-violet-900 dark:bg-violet-950/20">
+              <p className="font-semibold text-violet-900 dark:text-violet-200">People who know this</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {doc.experts.slice(0, 5).map((expert) => (
+                  <a key={`${expert.id}-${expert.topicId}`} href={`mailto:${expert.email}`} className="rounded border border-violet-200 bg-white px-2 py-1 text-violet-800 hover:bg-violet-100 dark:border-violet-800 dark:bg-gray-900 dark:text-violet-200">
+                    {expert.name || expert.email} · {Number(expert.score || 0).toFixed(1)}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           {(doc?.relatedDocuments?.length > 0 || doc?.projectLinks?.length > 0) && (
             <div className="mb-3 space-y-2 rounded-lg border border-cyan-100 bg-cyan-50/60 p-3 text-xs dark:border-cyan-900 dark:bg-cyan-950/20">

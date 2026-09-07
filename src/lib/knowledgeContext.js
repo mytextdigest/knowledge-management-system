@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getAccessibleExpertsWithPrisma } from "@/lib/expertDiscoveryQuery.mjs";
 
 export const RELATED_DOCUMENT_MIN_WEIGHT = 0.68;
 
@@ -44,24 +45,8 @@ export async function getAccessibleRelatedDocuments({ documentId, orgId, userId,
   `;
 }
 
-export async function getAccessibleExperts({ orgId, userId, query, isSuperAdmin = false, limit = 5 }) {
-  const access = accessSql({ userId, isSuperAdmin, alias: "d" });
-  const pattern = `%${String(query || "").trim()}%`;
-  return prisma.$queryRaw`
-    SELECT u.id, u.name, u.email, t.name AS topic, MAX(te.score)::float AS score,
-           COUNT(DISTINCT td."documentId")::int AS "documentCount"
-    FROM "TopicExpertise" te
-    JOIN "Topic" t ON t.id = te."topicId"
-    JOIN "User" u ON u.id = te."userId"
-    JOIN "TopicDocument" td ON td."topicId" = t.id
-    JOIN "Document" d ON d.id = td."documentId"
-    WHERE t."orgId" = ${orgId} AND t.scope = 'repository'
-      AND (t.name ILIKE ${pattern} OR d.filename ILIKE ${pattern} OR d.summary ILIKE ${pattern})
-      AND ${access}
-    GROUP BY u.id, u.name, u.email, t.name
-    ORDER BY score DESC, "documentCount" DESC
-    LIMIT ${Prisma.raw(String(Math.max(1, Math.min(20, limit))))}
-  `;
+export async function getAccessibleExperts(args) {
+  return getAccessibleExpertsWithPrisma(prisma, args);
 }
 
 export async function expandWithRelatedDocuments({ rows, orgId, userId, isSuperAdmin = false, limit = 8 }) {

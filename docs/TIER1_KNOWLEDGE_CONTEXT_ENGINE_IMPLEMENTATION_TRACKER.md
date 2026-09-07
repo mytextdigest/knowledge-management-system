@@ -35,7 +35,7 @@
 | `9-D` | Expertise Discovery | `TODO` | Sandeep | `9-B` | | |
 | `9-E` | Document-to-Project Linking | `TODO` | Sandeep | `9-A` | | |
 | `9-F` | Relationship-Aware Search & Chat | `TODO` | Sandeep | `9-C` | | |
-| `9-G` | Integration Testing + RBAC Regression Check | `TODO` | Sandeep | `9-D`, `9-E`, `9-F` | | |
+| `9-G` | Integration Testing + RBAC Regression Check | `IN_PROGRESS` | Sandeep | `9-D`, `9-E`, `9-F` | 2026-09-06 | |
 | `9-H` | PR + Cross-Review | `TODO` | Sandeep | `9-G` | | |
 
 ---
@@ -78,9 +78,10 @@
 - **Acceptance criteria:** a chat answer can reference a relationship-derived related document without ever surfacing one the asking user lacks access to.
 
 ### Task 9-G — Integration Testing + RBAC Regression Check
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** Full RBAC regression across `9-D` and `9-F` — the two highest-risk FRs in this feature. Confirm every new query path (topic model, relationship graph, expertise, project-linking) goes through SQL-`WHERE` RBAC filtering, never a post-filter. Confirm background jobs (`9-B`, `9-C`) add no latency to upload/search/chat.
 - **Notes:** dedicate real time here — this is the feature's highest-blast-radius task given the "leaks existence of a document/person association" failure mode called out at the top of this file.
+- **2026-09-06 update:** Tier 2 Expert Discovery adds a real DB-backed regression at `scripts/task-10/expert-rbac.integration.test.mjs`, including a mixed cross-department shared-topic leak case. Mark `9-G` DONE only after this test is executed successfully against PostgreSQL.
 
 ### Task 9-H — PR + Cross-Review
 - **Status:** `TODO`

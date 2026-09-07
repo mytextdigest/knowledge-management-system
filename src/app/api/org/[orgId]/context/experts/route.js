@@ -9,8 +9,10 @@ export async function GET(req, { params }) {
   const {orgId}=await params;
   const {user,role}=await resolveOrgRole(session.user.email,orgId);
   if(!user||!role) return NextResponse.json({error:'Forbidden'},{status:403});
-  const query=new URL(req.url).searchParams.get('q')||'';
-  if(query.trim().length<2) return NextResponse.json({experts:[]});
-  const experts=await getAccessibleExperts({orgId,userId:user.id,query,isSuperAdmin:isSuperAdmin(role)});
-  return NextResponse.json({experts});
+  const searchParams = new URL(req.url).searchParams;
+  const query=searchParams.get('q')||'';
+  const topicId=searchParams.get('topicId')||null;
+  const limit=searchParams.get('limit')||20;
+  const experts=await getAccessibleExperts({orgId,userId:user.id,query,topicId,isSuperAdmin:isSuperAdmin(role),limit});
+  return NextResponse.json({ experts, viewerUserId: user.id, canAdminConfirm: role === "dept_admin" || isSuperAdmin(role) });
 }
