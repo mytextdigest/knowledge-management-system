@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, Download, Info, Loader2, Check, X, AlertTriangle } from "lucide-react";
+import { Eye, Download, Info, Loader2, Check, X, AlertTriangle, FileText, FileSpreadsheet } from "lucide-react";
 import { Modal, ModalHeader, ModalTitle, ModalContent } from "@/components/ui/Modal";
 
 const CATEGORIES = [
@@ -37,12 +37,14 @@ const ALLOWED_TRANSITIONS = {
   retired: { published: ["super_admin"], draft: ["super_admin"] },
 };
 
-function getFileIcon(fileType = "", filename = "") {
+function getFileIconMeta(fileType = "", filename = "") {
   const value = `${fileType} ${filename}`.toLowerCase();
-  if (value.includes("pdf")) return "PDF";
-  if (value.includes("sheet") || value.includes("excel") || value.includes("csv") || value.includes("xlsx")) return "XLS";
-  if (value.includes("text") || value.includes("txt")) return "TXT";
-  return "DOC";
+  if (value.includes("pdf")) return { Icon: FileText, className: "text-red-500" };
+  if (value.includes("sheet") || value.includes("excel") || value.includes("csv") || value.includes("xlsx") || value.includes("xls")) {
+    return { Icon: FileSpreadsheet, className: "text-green-600" };
+  }
+  if (value.includes("text") || value.includes("txt")) return { Icon: FileText, className: "text-gray-500" };
+  return { Icon: FileText, className: "text-blue-600" };
 }
 
 function confidenceLabel(value) {
@@ -208,6 +210,7 @@ export default function RepositoryDocumentCard({
   }
 
   const uploadedAt = document?.createdAt ? new Date(document.createdAt).toLocaleDateString() : "Unknown date";
+  const { Icon: FileTypeIcon, className: fileIconClassName } = getFileIconMeta(document?.fileType, document?.filename);
 
   async function getFileUrls() {
     const res = await fetch(`/api/documents/${document.id}`);
@@ -245,7 +248,9 @@ export default function RepositoryDocumentCard({
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
       <div className="flex items-start gap-3">
-        <div className="text-3xl">{getFileIcon(document?.fileType, document?.filename)}</div>
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center ${fileIconClassName}`}>
+          <FileTypeIcon className="h-7 w-7" />
+        </div>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-gray-900 dark:text-white">{document?.filename || document?.title || "Untitled document"}</h3>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Uploaded {uploadedAt}</p>
