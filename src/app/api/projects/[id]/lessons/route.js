@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { resolveOrgRole, canContributeToDepartment } from "@/lib/orgGuard";
-import { canEditLesson } from "@/lib/lessonAccess";
+import { canEditLesson, canManageLesson } from "@/lib/lessonAccess";
 
 const MAX_TEXT_LENGTH = 4000;
 const MAX_TOPIC_LENGTH = 200;
 
-function serializeLesson(lesson, canEdit = false) {
+function serializeLesson(lesson, { canEdit = false, canPublish = false } = {}) {
   return {
     id: lesson.id,
     topic: lesson.topic,
@@ -24,6 +24,7 @@ function serializeLesson(lesson, canEdit = false) {
     createdAt: lesson.createdAt.toISOString(),
     updatedAt: lesson.updatedAt.toISOString(),
     canEdit,
+    canPublish,
   };
 }
 
@@ -56,19 +57,23 @@ export async function GET(req, { params }) {
 
   const serialized = await Promise.all(
     lessons.map(async (lesson) => {
-      const canEdit = await canEditLesson({
-        lesson,
-        userId: user.id,
-        role,
-        projectOwnerId: project.userId,
-      });
-      return serializeLesson(lesson, canEdit);
+      const [canEdit, canPublish] = await Promise.all([
+        canEditLesson({ lesson, userId: user.id, role, projectOwnerId: project.userId }),
+        canManageLesson({ lesson, userId: user.id, role, projectOwnerId: project.userId }),
+      ]);
+      return serializeLesson(lesson, { canEdit, canPublish });
     })
   );
 
   const canContribute = await canContributeToDepartment(role, project.departmentId, user.id);
+  const canPublish = await canManageLesson({
+    lesson: { departmentId: project.departmentId },
+    userId: user.id,
+    role,
+    projectOwnerId: project.userId,
+  });
 
-  return NextResponse.json({ lessons: serialized, canContribute });
+  return NextResponse.json({ lessons: serialized, canContribute, canPublish });
 }
 
 export async function POST(req, { params }) {
@@ -81,7 +86,7 @@ export async function POST(req, { params }) {
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, orgId: true, departmentId: true },
+    select: { id: true, orgId: true, userId: true, departmentId: true },
   });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -106,8 +111,14 @@ export async function POST(req, { params }) {
   const whatWorked = body.whatWorked ? String(body.whatWorked).trim().slice(0, MAX_TEXT_LENGTH) : null;
   const whatDidntWork = body.whatDidntWork ? String(body.whatDidntWork).trim().slice(0, MAX_TEXT_LENGTH) : null;
   const recommendation = body.recommendation ? String(body.recommendation).trim().slice(0, MAX_TEXT_LENGTH) : null;
-  const status = body.status === "published" ? "published" : "draft";
 
+  // Every lesson is created as a draft, full stop — publishing is a separate,
+  // reviewer-gated action (PATCH, see [lessonId]/route.js) regardless of who
+  // is creating it or what status they request. This is deliberate: any
+  // department member (including an org-wide "guest") can contribute a
+  // lesson, but nobody publishes their own unreviewed content straight into
+  // department/org-wide visibility and chat grounding. See FR-6 in
+  // docs/tier-2/REQUIREMENTS_LESSONS_LEARNED_INTELLIGENCE.md.
   const lesson = await prisma.lesson.create({
     data: {
       orgId: project.orgId,
@@ -120,10 +131,11 @@ export async function POST(req, { params }) {
       recommendation,
       authorUserId: user.id,
       source: "manual",
-      status,
+      status: "draft",
     },
     include: { author: { select: { name: true, email: true } } },
   });
 
-  return NextResponse.json(serializeLesson(lesson, true), { status: 201 });
+  const canPublish = await canManageLesson({ lesson, userId: user.id, role, projectOwnerId: project.userId });
+  return NextResponse.json(serializeLesson(lesson, { canEdit: true, canPublish }), { status: 201 });
 }

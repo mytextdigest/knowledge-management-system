@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getLessonEvidence, isLessonQuestion } from "../../src/lib/lessonsIntelligence.js";
-import { canEditLesson } from "../../src/lib/lessonAccess.js";
+import { canEditLesson, canManageLesson } from "../../src/lib/lessonAccess.js";
 import { isRetrospectiveShaped } from "../../worker/summarize.js";
 
 const RUN_DB_TESTS = process.env.TASK12_INTEGRATION_DB === "1";
@@ -98,13 +98,65 @@ test("getLessonEvidence enforces RBAC and published-only visibility", { skip: !R
     });
     assert.ok(!authorDraftResults.some((r) => r.id === draftLesson.id));
 
-    // canEditLesson: author, project owner, and department admin can edit;
-    // a regular non-author department member cannot.
-    assert.equal(await canEditLesson({ lesson: publishedLesson, userId: member.id, role: "member" }), true);
+    // canManageLesson (the "reviewer" set — who's allowed to publish, and who
+    // retains edit rights once something IS published): project owner and
+    // department admin, never plain authorship alone.
+    assert.equal(await canManageLesson({ lesson: publishedLesson, userId: admin.id, role: "dept_admin" }), true);
+    assert.equal(
+      await canManageLesson({ lesson: publishedLesson, userId: member.id, role: "member", projectOwnerId: member.id }),
+      true // member is this specific lesson's project owner
+    );
+    assert.equal(
+      await canManageLesson({ lesson: draftLesson, userId: member.id, role: "member" }),
+      false // member here is only the author, not an admin or (for this dept-only lesson) a project owner
+    );
+
+    // canEditLesson while still a draft: the author can fix their own typo
+    // before it's reviewed.
+    assert.equal(await canEditLesson({ lesson: draftLesson, userId: member.id, role: "member" }), true);
+
+    // The actual bug this test section exists to catch: once a lesson is
+    // PUBLISHED, plain authorship no longer grants edit rights — only a
+    // reviewer (department admin, or the project owner for a project-scoped
+    // lesson) can touch it. `member` authored `publishedLesson` but is not
+    // this department's admin, so member must now be refused.
+    assert.equal(
+      await canEditLesson({ lesson: publishedLesson, userId: member.id, role: "member" }),
+      false
+    );
     assert.equal(
       await canEditLesson({ lesson: publishedLesson, userId: admin.id, role: "dept_admin" }),
       true
     );
+
+    // The contamination scenario reported: an org-wide "guest" who is a
+    // *regular* (non-admin) member of the department must be able to author
+    // a lesson (canEditLesson on their own draft), but must NOT be treated as
+    // a reviewer — they can never publish or touch someone else's content.
+    const guest = await prisma.user.create({ data: { email: `task12-guest-${suffix}@example.test`, name: "Guest" } });
+    await prisma.organizationMember.create({ data: { orgId: org.id, userId: guest.id, role: "guest" } });
+    await prisma.departmentMember.create({ data: { departmentId: department.id, userId: guest.id, role: "member" } });
+    const guestDraft = await prisma.lesson.create({
+      data: {
+        orgId: org.id,
+        departmentId: department.id,
+        authorUserId: guest.id,
+        whatHappened: `Guest-authored note about ${keyword}.`,
+        status: "draft",
+        source: "manual",
+      },
+    });
+    assert.equal(await canEditLesson({ lesson: guestDraft, userId: guest.id, role: "guest" }), true);
+    assert.equal(await canManageLesson({ lesson: guestDraft, userId: guest.id, role: "guest" }), false);
+    assert.equal(
+      await canEditLesson({ lesson: publishedLesson, userId: guest.id, role: "guest" }),
+      false // a guest must never be able to edit someone else's published lesson either
+    );
+    await prisma.lesson.delete({ where: { id: guestDraft.id } });
+    await prisma.departmentMember.delete({ where: { departmentId_userId: { departmentId: department.id, userId: guest.id } } });
+    await prisma.organizationMember.delete({ where: { orgId_userId: { orgId: org.id, userId: guest.id } } });
+    await prisma.user.delete({ where: { id: guest.id } });
+
     const randomMember = await prisma.user.create({ data: { email: `task12-random-${suffix}@example.test`, name: "Random" } });
     await prisma.organizationMember.create({ data: { orgId: org.id, userId: randomMember.id, role: "member" } });
     await prisma.departmentMember.create({ data: { departmentId: department.id, userId: randomMember.id, role: "member" } });

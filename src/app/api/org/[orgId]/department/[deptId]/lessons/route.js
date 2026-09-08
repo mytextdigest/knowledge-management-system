@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { resolveOrgRole, canContributeToDepartment } from "@/lib/orgGuard";
-import { canEditLesson } from "@/lib/lessonAccess";
+import { canEditLesson, canManageLesson } from "@/lib/lessonAccess";
 
 const MAX_TEXT_LENGTH = 4000;
 const MAX_TOPIC_LENGTH = 200;
 
-function serializeLesson(lesson, canEdit = false) {
+function serializeLesson(lesson, { canEdit = false, canPublish = false } = {}) {
   return {
     id: lesson.id,
     topic: lesson.topic,
@@ -25,6 +25,7 @@ function serializeLesson(lesson, canEdit = false) {
     createdAt: lesson.createdAt.toISOString(),
     updatedAt: lesson.updatedAt.toISOString(),
     canEdit,
+    canPublish,
   };
 }
 
@@ -61,19 +62,19 @@ export async function GET(req, { params }) {
 
   const serialized = await Promise.all(
     lessons.map(async (lesson) => {
-      const canEdit = await canEditLesson({
-        lesson,
-        userId: user.id,
-        role,
-        projectOwnerId: lesson.project?.userId || null,
-      });
-      return serializeLesson(lesson, canEdit);
+      const projectOwnerId = lesson.project?.userId || null;
+      const [canEdit, canPublish] = await Promise.all([
+        canEditLesson({ lesson, userId: user.id, role, projectOwnerId }),
+        canManageLesson({ lesson, userId: user.id, role, projectOwnerId }),
+      ]);
+      return serializeLesson(lesson, { canEdit, canPublish });
     })
   );
 
   const canContribute = await canContributeToDepartment(role, deptId, user.id);
+  const canPublish = await canManageLesson({ lesson: { departmentId: deptId }, userId: user.id, role });
 
-  return NextResponse.json({ lessons: serialized, canContribute });
+  return NextResponse.json({ lessons: serialized, canContribute, canPublish });
 }
 
 export async function POST(req, { params }) {
@@ -111,8 +112,10 @@ export async function POST(req, { params }) {
   const whatWorked = body.whatWorked ? String(body.whatWorked).trim().slice(0, MAX_TEXT_LENGTH) : null;
   const whatDidntWork = body.whatDidntWork ? String(body.whatDidntWork).trim().slice(0, MAX_TEXT_LENGTH) : null;
   const recommendation = body.recommendation ? String(body.recommendation).trim().slice(0, MAX_TEXT_LENGTH) : null;
-  const status = body.status === "published" ? "published" : "draft";
 
+  // Every lesson is created as a draft — publishing is a separate,
+  // reviewer-only action (PATCH). See the matching comment in
+  // /api/projects/[id]/lessons/route.js.
   const lesson = await prisma.lesson.create({
     data: {
       orgId,
@@ -124,10 +127,11 @@ export async function POST(req, { params }) {
       recommendation,
       authorUserId: user.id,
       source: "manual",
-      status,
+      status: "draft",
     },
     include: { author: { select: { name: true, email: true } } },
   });
 
-  return NextResponse.json(serializeLesson(lesson, true), { status: 201 });
+  const canPublish = await canManageLesson({ lesson, userId: user.id, role });
+  return NextResponse.json(serializeLesson(lesson, { canEdit: true, canPublish }), { status: 201 });
 }

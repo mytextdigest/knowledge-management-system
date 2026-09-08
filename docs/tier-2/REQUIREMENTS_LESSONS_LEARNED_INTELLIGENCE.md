@@ -53,7 +53,8 @@ A `Lesson` may optionally reference the `Decision` it followed from and/or contr
 
 ### FR-2 — Manual Capture Flow
 - A form, reachable from a project page and a department page, to write a new lesson at any time — not gated on a project "ending," since `Project` has no status/closure concept today (see Open Questions on whether to add one).
-- Editable while in `draft` status; once `published`, edits should be tracked the same lightweight way `DocumentDuplicate`/`DocumentConflict` track state transitions (updatedAt is enough — no need for a full revision history for v1).
+- **Any department member — including an org-wide `guest` — can write a lesson**, but every lesson is created as `draft` regardless of who creates it or what they request; the API ignores any client-supplied status on create. Publishing is a separate action, gated by FR-6.
+- Editable by its author while still `draft` (self-correction before review). Once `published`, authorship alone no longer grants edit rights — only a reviewer (FR-6) can change it. This is deliberate: a reviewer already approved that content when they published it, and letting the original author silently rewrite it afterward would defeat the point of requiring review.
 
 ### FR-3 — LLM-Assisted Extraction (advisory only)
 - At ingestion (chained onto the existing summarization/decision-extraction stage in `worker/index.js`, not a new parallel job type — matching this project's established anti-pattern warning against "two parallel systems doing the same job"), detect documents that read as a retrospective/post-mortem/lessons-learned writeup (heuristic: title/heading patterns, or an LLM classification pass alongside the existing `extractDecisions()`/`extractEntities()` calls) and propose a draft `Lesson` from its content.
@@ -68,6 +69,7 @@ A `Lesson` may optionally reference the `Decision` it followed from and/or contr
 
 ### FR-6 — RBAC
 - A lesson's visibility follows its linked project/department's existing access rules exactly (same `DepartmentMember`/`Project.scope` checks already used everywhere else) — no separate permission model for lessons.
+- **Publishing authority is separate from visibility, and separate from authorship.** Any department member can see and author lessons for their department; only a department admin (or the project owner, for a project-scoped lesson) can transition a lesson from `draft` to `published`, and only that same set can edit or delete a lesson once it is `published`. Resolves Open Question 4 below: a plain member or guest can never publish their own (or anyone else's) content directly — doing so would let unreviewed content become department/org-wide visible knowledge and chat grounding with no review step, which is exactly the "contamination" failure mode this FR exists to prevent.
 
 ---
 
@@ -110,7 +112,7 @@ Owned entirely by this feature. If FR-2's Open Question below resolves to "yes, 
 1. Should `Project` gain a `status`/`completedAt` field to enable a "this project just wrapped — capture a retro?" prompt, or is on-demand capture (FR-2, no trigger) sufficient for v1? This is the single biggest scope decision in this doc — resolve before starting FR-2.
 2. Tag/topic taxonomy for `Lesson.topic` — reuse the existing `Topic` model (join to an actual topic row) or a free-text field like `Decision`/`TimelineEvent` use today? Free text is cheaper to ship; a real `Topic` join would make lessons discoverable alongside Expert Discovery's topic-scoped browsing ([[REQUIREMENTS_EXPERT_DISCOVERY]]) for a future Rank 15 (Project Intelligence) tie-in.
 3. Should FR-3's extraction heuristic be a cheap keyword/heading check before spending an LLM call, or run the classification LLM call on every ingested document? Given the cost constraint above, prefer a cheap pre-filter.
-4. Does a `published` lesson need any approval step beyond the author/extractor confirming it, or can any project member publish directly (consistent with how casually documents are uploaded today)?
+4. ~~Does a `published` lesson need any approval step beyond the author/extractor confirming it, or can any project member publish directly...?~~ **Resolved:** yes, an approval step is required. Publishing is restricted to a department admin or the project owner (`canManageLesson`, `src/lib/lessonAccess.js`) — a plain member or guest can author a lesson but never publish it themselves, since an unreviewed lesson becoming department/org-wide visible and eligible as chat grounding is a real contamination risk, not a hypothetical one. See FR-6.
 
 ---
 

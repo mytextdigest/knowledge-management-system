@@ -21,10 +21,11 @@ const emptyForm = {
 // wizard, so the activation energy for writing one down stays low. Shared by
 // both the project and department Lessons panels; also used to edit an
 // existing lesson (isEditing) rather than duplicating a second form.
-export default function LessonFormModal({ isOpen, onClose, onSave, lesson = null, isSaving = false }) {
+export default function LessonFormModal({ isOpen, onClose, onSave, lesson = null, canPublish = false, isSaving = false }) {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState('');
   const isEditing = Boolean(lesson);
+  const isPublished = lesson?.status === 'published';
 
   useEffect(() => {
     if (isOpen) {
@@ -49,8 +50,24 @@ export default function LessonFormModal({ isOpen, onClose, onSave, lesson = null
       setError('Describe what happened before saving.');
       return;
     }
-    onSave({ ...form, status });
+    onSave(status ? { ...form, status } : form);
   };
+
+  // Publishing/unpublishing is reviewer-only (canManageLesson) — a plain
+  // author only ever gets a single "save as draft" action, never a way to
+  // make their own unreviewed content published knowledge. See
+  // src/lib/lessonAccess.js.
+  const actions = isPublished
+    ? [
+        { label: 'Unpublish', status: 'draft', variant: 'outline' },
+        { label: 'Save Changes', status: undefined, variant: 'default' },
+      ]
+    : canPublish
+    ? [
+        { label: 'Save as Draft', status: 'draft', variant: 'outline' },
+        { label: 'Publish', status: 'published', variant: 'default' },
+      ]
+    : [{ label: isEditing ? 'Save Draft' : 'Save as Draft', status: 'draft', variant: 'default' }];
 
   const handleBackdropClick = (e) => {
     if (e.target === e.currentTarget && !isSaving) onClose();
@@ -171,13 +188,23 @@ export default function LessonFormModal({ isOpen, onClose, onSave, lesson = null
                 <Button type="button" variant="outline" onClick={onClose} disabled={isSaving}>
                   Cancel
                 </Button>
-                <Button type="button" variant="outline" onClick={handleSubmit('draft')} disabled={isSaving}>
-                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save as Draft'}
-                </Button>
-                <Button type="button" onClick={handleSubmit('published')} disabled={isSaving}>
-                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Publish'}
-                </Button>
+                {actions.map((action) => (
+                  <Button
+                    key={action.label}
+                    type="button"
+                    variant={action.variant}
+                    onClick={handleSubmit(action.status)}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : action.label}
+                  </Button>
+                ))}
               </div>
+              {!canPublish && !isPublished && (
+                <p className="text-xs text-gray-400 dark:text-gray-500 -mt-1">
+                  A department admin or project owner will need to review and publish this before it's visible department-wide.
+                </p>
+              )}
             </form>
           </div>
         </motion.div>

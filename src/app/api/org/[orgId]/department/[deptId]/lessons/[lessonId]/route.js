@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { resolveOrgRole } from "@/lib/orgGuard";
-import { canEditLesson } from "@/lib/lessonAccess";
+import { canEditLesson, canManageLesson } from "@/lib/lessonAccess";
 
 const MAX_TEXT_LENGTH = 4000;
 const MAX_TOPIC_LENGTH = 200;
 
-function serializeLesson(lesson, canEdit = false) {
+function serializeLesson(lesson, { canEdit = false, canPublish = false } = {}) {
   return {
     id: lesson.id,
     topic: lesson.topic,
@@ -24,6 +24,7 @@ function serializeLesson(lesson, canEdit = false) {
     createdAt: lesson.createdAt.toISOString(),
     updatedAt: lesson.updatedAt.toISOString(),
     canEdit,
+    canPublish,
   };
 }
 
@@ -36,14 +37,18 @@ export async function PATCH(req, { params }) {
   const { orgId, deptId, lessonId } = await params;
   const lesson = await prisma.lesson.findFirst({
     where: { id: lessonId, departmentId: deptId, orgId },
-    include: { author: { select: { name: true, email: true } } },
+    include: {
+      author: { select: { name: true, email: true } },
+      project: { select: { userId: true } },
+    },
   });
   if (!lesson) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const { user, role } = await resolveOrgRole(session.user.email, orgId);
   if (!user || !role) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (!(await canEditLesson({ lesson, userId: user.id, role }))) {
+  const projectOwnerId = lesson.project?.userId || null;
+  if (!(await canEditLesson({ lesson, userId: user.id, role, projectOwnerId }))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -63,6 +68,14 @@ export async function PATCH(req, { params }) {
     if (!["draft", "published"].includes(body.status)) {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 });
     }
+    if (body.status === "published" && lesson.status !== "published") {
+      if (!(await canManageLesson({ lesson, userId: user.id, role, projectOwnerId }))) {
+        return NextResponse.json(
+          { error: "Only a department admin or the project owner can publish a lesson" },
+          { status: 403 }
+        );
+      }
+    }
     data.status = body.status;
   }
 
@@ -72,7 +85,11 @@ export async function PATCH(req, { params }) {
     include: { author: { select: { name: true, email: true } } },
   });
 
-  return NextResponse.json(serializeLesson(updated, true));
+  const [canEdit, canPublish] = await Promise.all([
+    canEditLesson({ lesson: updated, userId: user.id, role, projectOwnerId }),
+    canManageLesson({ lesson: updated, userId: user.id, role, projectOwnerId }),
+  ]);
+  return NextResponse.json(serializeLesson(updated, { canEdit, canPublish }));
 }
 
 export async function DELETE(req, { params }) {
@@ -84,13 +101,14 @@ export async function DELETE(req, { params }) {
   const { orgId, deptId, lessonId } = await params;
   const lesson = await prisma.lesson.findFirst({
     where: { id: lessonId, departmentId: deptId, orgId },
+    include: { project: { select: { userId: true } } },
   });
   if (!lesson) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const { user, role } = await resolveOrgRole(session.user.email, orgId);
   if (!user || !role) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (!(await canEditLesson({ lesson, userId: user.id, role }))) {
+  if (!(await canEditLesson({ lesson, userId: user.id, role, projectOwnerId: lesson.project?.userId || null }))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

@@ -25,98 +25,106 @@ function StatusBadge({ status }) {
 function LessonCard({ lesson, onEdit, onDelete, onPublish, isBusy }) {
   const [expanded, setExpanded] = useState(false);
   const hasMore = lesson.whatWorked || lesson.whatDidntWork || lesson.recommendation;
+  const hasActions = lesson.canEdit || lesson.canPublish;
 
   return (
     <li className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-gray-900 dark:text-gray-100">
-              {lesson.topic || 'Untitled lesson'}
-            </span>
-            <StatusBadge status={lesson.status} />
-          </div>
-          <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">{lesson.whatHappened}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium text-gray-900 dark:text-gray-100">
+          {lesson.topic || 'Untitled lesson'}
+        </span>
+        <StatusBadge status={lesson.status} />
+      </div>
+      <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">{lesson.whatHappened}</p>
 
-          {expanded && (
-            <div className="mt-2 space-y-1.5 text-sm">
-              {lesson.whatWorked && (
-                <p className="text-gray-600 dark:text-gray-300">
-                  <span className="font-medium text-gray-700 dark:text-gray-200">What worked: </span>
-                  {lesson.whatWorked}
-                </p>
-              )}
-              {lesson.whatDidntWork && (
-                <p className="text-gray-600 dark:text-gray-300">
-                  <span className="font-medium text-gray-700 dark:text-gray-200">What didn't work: </span>
-                  {lesson.whatDidntWork}
-                </p>
-              )}
-              {lesson.recommendation && (
-                <p className="text-gray-600 dark:text-gray-300">
-                  <span className="font-medium text-gray-700 dark:text-gray-200">Recommendation: </span>
-                  {lesson.recommendation}
-                </p>
-              )}
-            </div>
+      {expanded && (
+        <div className="mt-2 space-y-1.5 text-sm">
+          {lesson.whatWorked && (
+            <p className="text-gray-600 dark:text-gray-300">
+              <span className="font-medium text-gray-700 dark:text-gray-200">What worked: </span>
+              {lesson.whatWorked}
+            </p>
           )}
-
-          <div className="mt-2 flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
-            <span>{lesson.authorName}</span>
-            <span>&middot;</span>
-            <span>{new Date(lesson.createdAt).toLocaleDateString()}</span>
-            {lesson.projectName && (
-              <>
-                <span>&middot;</span>
-                <span>{lesson.projectName}</span>
-              </>
-            )}
-            {hasMore && (
-              <button
-                type="button"
-                onClick={() => setExpanded((v) => !v)}
-                className="font-medium text-primary-600 hover:underline dark:text-primary-400"
-              >
-                {expanded ? 'Show less' : 'Show more'}
-              </button>
-            )}
-          </div>
+          {lesson.whatDidntWork && (
+            <p className="text-gray-600 dark:text-gray-300">
+              <span className="font-medium text-gray-700 dark:text-gray-200">What didn't work: </span>
+              {lesson.whatDidntWork}
+            </p>
+          )}
+          {lesson.recommendation && (
+            <p className="text-gray-600 dark:text-gray-300">
+              <span className="font-medium text-gray-700 dark:text-gray-200">Recommendation: </span>
+              {lesson.recommendation}
+            </p>
+          )}
         </div>
+      )}
 
-        {lesson.canEdit && (
-          <div className="flex shrink-0 items-center gap-1">
-            {lesson.status === 'draft' && (
-              <button
-                type="button"
-                onClick={() => onPublish(lesson)}
-                disabled={isBusy}
-                title="Publish"
-                className="rounded-md p-1.5 text-gray-400 hover:bg-green-50 hover:text-green-600 disabled:opacity-50 dark:hover:bg-green-900/20"
-              >
-                <CheckCircle2 className="h-4 w-4" />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => onEdit(lesson)}
-              disabled={isBusy}
-              title="Edit"
-              className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:hover:bg-gray-700"
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onDelete(lesson)}
-              disabled={isBusy}
-              title="Delete"
-              className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/20"
-            >
-              {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-            </button>
-          </div>
+      <div className="mt-2 flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
+        <span>{lesson.authorName}</span>
+        <span>&middot;</span>
+        <span>{new Date(lesson.createdAt).toLocaleDateString()}</span>
+        {lesson.projectName && (
+          <>
+            <span>&middot;</span>
+            <span>{lesson.projectName}</span>
+          </>
+        )}
+        {hasMore && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="font-medium text-primary-600 hover:underline dark:text-primary-400"
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
         )}
       </div>
+
+      {hasActions && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {lesson.status === 'draft' && lesson.canPublish && (
+            <Button
+              type="button"
+              size="sm"
+              variant="success"
+              onClick={() => onPublish(lesson)}
+              disabled={isBusy}
+              title="Publish — department admin / project owner only"
+              className="gap-1.5"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Publish
+            </Button>
+          )}
+          {lesson.canEdit && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => onEdit(lesson)}
+              disabled={isBusy}
+              className="gap-1.5"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </Button>
+          )}
+          {lesson.canEdit && (
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              onClick={() => onDelete(lesson)}
+              disabled={isBusy}
+              className="gap-1.5"
+            >
+              {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Delete
+            </Button>
+          )}
+        </div>
+      )}
     </li>
   );
 }
@@ -131,6 +139,7 @@ function LessonCard({ lesson, onEdit, onDelete, onPublish, isBusy }) {
 export default function LessonsPanel({ apiBase, embedded = false, defaultOpen = false }) {
   const [lessons, setLessons] = useState([]);
   const [canContribute, setCanContribute] = useState(false);
+  const [canPublish, setCanPublish] = useState(false);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(embedded || defaultOpen);
   const [formOpen, setFormOpen] = useState(false);
@@ -148,6 +157,7 @@ export default function LessonsPanel({ apiBase, embedded = false, defaultOpen = 
       const data = await res.json();
       setLessons(Array.isArray(data.lessons) ? data.lessons : []);
       setCanContribute(Boolean(data.canContribute));
+      setCanPublish(Boolean(data.canPublish));
     } catch (err) {
       console.error('Failed to load lessons:', err);
     } finally {
@@ -330,6 +340,7 @@ export default function LessonsPanel({ apiBase, embedded = false, defaultOpen = 
         }}
         onSave={handleSave}
         lesson={editingLesson}
+        canPublish={canPublish}
         isSaving={saving}
       />
 
