@@ -62,6 +62,8 @@ FRs audited and finalized 2026-07-25 — see `REQUIREMENTS_CONVERSATIONAL_ASSIST
 - Midpoint (~Aug 19): quick progress/blocker share between the three.
 - Wrap: each owner submits their own PR when their feature is ready; cross-review; merge to `dev`. RBAC regression check before merge, since all three features touch access-control-sensitive surfaces (queue reassignment, expertise discovery, connector setup).
 
+**Update 2026-08-10:** Sandeep's Rank 8 (Knowledge Context Engine) merged to `dev` via PR #20 and has been code-audited — see `TIER1_COMPLETION_PLAN.md` §1 row 8 and `docs/TIER1_KNOWLEDGE_CONTEXT_ENGINE_IMPLEMENTATION_TRACKER.md` for the full breakdown. One item (`9-G` RBAC integration testing) is still `IN_PROGRESS`, not done. Rank 4 (PR #22) is merged and audited, done. Rank 3 (PR #23, Johurul) is merged, code-audited, and now done too — the audit initially caught a real gap (the Needs-Review queue hadn't been updated to include Rank 4's classification signal after Rank 4 merged, so manually-uploaded flagged documents and SharePoint-synced documents lived in two separate UIs instead of one), which was fixed and re-verified against the dev DB the same day (`7-J`, `TIER1_INGESTION_PIPELINE_IMPLEMENTATION_TRACKER.md`). All three of Rank 3/4/8 are now `Done` in `TIER1_COMPLETION_PLAN.md` §1, Rank 8's `9-G` open item aside. "Tier 1 done" below still means Rank 1's Phase 2/3 as well, so it isn't fully reached yet, but all three of this sprint's owner-assigned features are closed.
+
 > **Milestone: Tier 1 done** once all three PRs are merged — except the 5 FRs deferred from Blocks A/B (`TIER1_COMPLETION_PLAN.md` §3), scheduled as a short follow-up once Rank 8's relationship graph is real.
 
 ---
