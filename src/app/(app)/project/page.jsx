@@ -13,6 +13,7 @@ import { motion } from 'framer-motion';
 import ChatInterface from "@/components/chat/ChatInterface";
 import TwoColumnLayout from "@/components/layout/TwoColumnLayout";
 import DeleteConfirmationModal from '@/components/modals/DeleteConfirmationModal';
+import LessonsPanel from '@/components/lessons/LessonsPanel';
 import EditDocumentModal from '@/components/modals/EditDocumentModal';
 import EditProjectModal from '@/components/modals/EditProjectModal';
 import { useSession } from "next-auth/react";
@@ -560,6 +561,8 @@ function ProjectPageInner() {
             )}
           </div>
         )}
+
+        {projectId && <LessonsPanel apiBase={`/api/projects/${projectId}/lessons`} />}
       </div>
     </motion.div>
   );

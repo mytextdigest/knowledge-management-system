@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  Bot, Check, FileText, History, Loader2, MessageSquarePlus, Pencil, Scale, Send, ThumbsDown, ThumbsUp, Trash2, User, Users, X,
+  Bot, Check, FileText, History, Lightbulb, Loader2, MessageSquarePlus, Pencil, Scale, Send, ThumbsDown, ThumbsUp, Trash2, User, Users, X,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
@@ -579,19 +579,24 @@ export default function OrgChatPage() {
                         <div className="flex flex-wrap gap-2">
                           {m.sources.map((s, i) => {
                             const isDecision = s.type === 'decision';
+                            const isLesson = s.type === 'lesson';
                             const label = isDecision
                               ? s.statement
+                              : isLesson
+                              ? (s.topic || s.whatHappened)
                               : [s.filename, s.department, s.project].filter(Boolean).join(' → ');
                             const className = cn(
                               'inline-flex max-w-[260px] items-center gap-1 rounded-full border px-2.5 py-1 text-xs',
                               isDecision
                                 ? 'border-purple-200 bg-purple-50 text-purple-700 hover:border-purple-400 dark:border-purple-800 dark:bg-purple-900/20 dark:text-purple-300 dark:hover:border-purple-600'
+                                : isLesson
+                                ? 'border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-400 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:border-amber-600'
                                 : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-blue-700 dark:hover:text-blue-400'
                             );
 
                             return (
                               <button
-                                key={`${s.documentId || s.filename || 'source'}-${i}`}
+                                key={`${s.documentId || s.lessonId || s.filename || 'source'}-${i}`}
                                 type="button"
                                 onClick={() => setSelectedSource(s)}
                                 title={label}
@@ -599,10 +604,14 @@ export default function OrgChatPage() {
                               >
                                 {isDecision ? (
                                   <Scale className="h-3 w-3 flex-shrink-0" />
+                                ) : isLesson ? (
+                                  <Lightbulb className="h-3 w-3 flex-shrink-0" />
                                 ) : (
                                   <FileText className="h-3 w-3 flex-shrink-0" />
                                 )}
-                                <span className="truncate">{label || (isDecision ? 'Decision' : 'Source document')}</span>
+                                <span className="truncate">
+                                  {label || (isDecision ? 'Decision' : isLesson ? 'Lesson' : 'Source document')}
+                                </span>
                               </button>
                             );
                           })}
@@ -696,10 +705,17 @@ export default function OrgChatPage() {
               <div>
                 <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
                   {selectedSource.type === 'decision' && <Scale className="h-4 w-4 text-purple-600 dark:text-purple-400" />}
-                  {selectedSource.type === 'decision' ? 'Decision Evidence' : 'Citation Preview'}
+                  {selectedSource.type === 'lesson' && <Lightbulb className="h-4 w-4 text-amber-600 dark:text-amber-400" />}
+                  {selectedSource.type === 'decision'
+                    ? 'Decision Evidence'
+                    : selectedSource.type === 'lesson'
+                    ? 'Lesson Learned'
+                    : 'Citation Preview'}
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {selectedSource.filename || 'Source document'}
+                  {selectedSource.type === 'lesson'
+                    ? (selectedSource.topic || 'Untitled lesson')
+                    : (selectedSource.filename || 'Source document')}
                 </p>
               </div>
 
@@ -722,6 +738,31 @@ export default function OrgChatPage() {
                   <div>
                     <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-300">Rationale</p>
                     <p>{selectedSource.rationale}</p>
+                  </div>
+                )}
+              </div>
+            ) : selectedSource.type === 'lesson' ? (
+              <div className="mb-4 max-h-72 space-y-3 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-gray-800 dark:border-amber-800 dark:bg-amber-900/10 dark:text-gray-100">
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">What happened</p>
+                  <p>{selectedSource.whatHappened}</p>
+                </div>
+                {selectedSource.whatWorked && (
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">What worked</p>
+                    <p>{selectedSource.whatWorked}</p>
+                  </div>
+                )}
+                {selectedSource.whatDidntWork && (
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">What didn't work</p>
+                    <p>{selectedSource.whatDidntWork}</p>
+                  </div>
+                )}
+                {selectedSource.recommendation && (
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">Recommendation</p>
+                    <p>{selectedSource.recommendation}</p>
                   </div>
                 )}
               </div>

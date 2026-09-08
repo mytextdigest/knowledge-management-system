@@ -11,6 +11,7 @@ import { getOrgOpenAIKey } from "@/utils/key_helper";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 import { classifyWorkflowRequest, formatWorkflowInstruction, getWorkflowSteps } from "@/lib/workflowAssistance";
 import { isDecisionQuestion, getDecisionEvidence, formatDecisionContext, DECISION_INSTRUCTION } from "@/lib/decisionIntelligence";
+import { isLessonQuestion, getLessonEvidence, formatLessonContext, LESSON_INSTRUCTION } from "@/lib/lessonsIntelligence";
 
 const SYSTEM_PROMPT = `
 You are an expert assistant that answers questions using only the
@@ -269,6 +270,20 @@ export async function POST(req, { params }) {
     : [];
   const decisionContext = formatDecisionContext(decisionEvidence);
 
+  // Rank 11 FR-4: lessons-oriented questions get past `Lesson` rows (status
+  // 'published' only) as grounding evidence, same RBAC-scoped pattern as the
+  // decision evidence above — independent detection so a question can match
+  // both (e.g. "should we do X again, what did we learn last time").
+  const lessonEvidence = isLessonQuestion(question)
+    ? await getLessonEvidence({
+        question,
+        orgId,
+        userId: user.id,
+        isSuperAdmin: isSuperAdmin(role),
+      })
+    : [];
+  const lessonContext = formatLessonContext(lessonEvidence);
+
   if (activeWorkflowDocumentId && workflowRequest.action !== "none") {
     const workflowDocument = await prisma.document.findFirst({
       where: {
@@ -424,13 +439,29 @@ export async function POST(req, { params }) {
     rationale: d.rationale || null,
   }));
 
-  const sources = [...decisionSources, ...documentSources];
+  // Rank 11 FR-4: surface lesson evidence as its own citation type, same
+  // reasoning as decisionSources above — a Lesson has no backing document, so
+  // it can't reuse documentSources' shape (no filePath to sign a URL for).
+  const lessonSources = lessonEvidence.map((l) => ({
+    type: "lesson",
+    lessonId: l.id,
+    department: l.departmentName || null,
+    project: l.projectName || null,
+    topic: l.topic || null,
+    whatHappened: l.whatHappened,
+    whatWorked: l.whatWorked || null,
+    whatDidntWork: l.whatDidntWork || null,
+    recommendation: l.recommendation || null,
+  }));
+
+  const sources = [...decisionSources, ...lessonSources, ...documentSources];
 
   const contextBlocks = Object.values(grouped).map(
     (g) => `Document: ${g.filename}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
   );
   const context = [
     ...(decisionContext ? [decisionContext] : []),
+    ...(lessonContext ? [lessonContext] : []),
     ...(contextBlocks.length > 0
       ? contextBlocks
       : ["No relevant organization documents were found for this question."]),
@@ -448,7 +479,7 @@ export async function POST(req, { params }) {
     ...prevMsgs.map((m) => ({ role: m.role, content: m.content })),
     {
       role: "user",
-      content: `${sessionContextNote}${workflowInstruction ? `${workflowInstruction}\n\n` : ""}${decisionContext ? `${DECISION_INSTRUCTION}\n\n` : ""}Question: ${question}\n\nContext:\n${context}`,
+      content: `${sessionContextNote}${workflowInstruction ? `${workflowInstruction}\n\n` : ""}${decisionContext ? `${DECISION_INSTRUCTION}\n\n` : ""}${lessonContext ? `${LESSON_INSTRUCTION}\n\n` : ""}Question: ${question}\n\nContext:\n${context}`,
     },
   ];
 

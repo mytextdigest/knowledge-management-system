@@ -228,6 +228,88 @@ ${joined.slice(0, 24000)}
   }, []);
 }
 
+// Rank 11 FR-3: cheap keyword pre-filter before spending an LLM call on
+// lesson extraction (Open Question 3 in
+// docs/tier-2/REQUIREMENTS_LESSONS_LEARNED_INTELLIGENCE.md — prefer a cheap
+// pre-filter over classifying every document). Checks the filename and the
+// first chunk summary only, not the whole document, since a retrospective's
+// nature is normally obvious from its title/opening.
+const RETROSPECTIVE_PATTERNS = [
+  /retro(spective)?/i,
+  /post[- ]?mortem/i,
+  /lessons?[ -]learned/i,
+  /after[ -]action review/i,
+  /\baar\b/i,
+  /project (review|wrap[ -]?up|debrief)/i,
+  /sprint review/i,
+];
+
+export function isRetrospectiveShaped(filename, chunkSummaries) {
+  const haystack = `${filename || ""} ${chunkSummaries?.[0] || ""}`;
+  return RETROSPECTIVE_PATTERNS.some((pattern) => pattern.test(haystack));
+}
+
+export async function extractLessons(openai, chunkSummaries, filename) {
+  const joined = chunkSummaries.filter(Boolean).join("\n\n");
+
+  if (!joined.trim()) {
+    return [];
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "You extract retrospective-style lessons learned from organizational documents. You must output only valid JSON. Do not include markdown or commentary.",
+      },
+      {
+        role: "user",
+        content: `
+The document "${filename}" reads like a retrospective, post-mortem, or lessons-learned writeup. Extract the lesson(s) it records from the summaries below.
+
+Return JSON with exactly:
+{
+  "lessons": [{
+    "topic": "short topic/tag for this lesson, or null",
+    "whatHappened": "what happened, required",
+    "whatWorked": "what worked well, or null if not stated",
+    "whatDidntWork": "what didn't work, or null if not stated",
+    "recommendation": "what to do differently next time, or null if not stated"
+  }]
+}
+
+Only include lessons clearly stated in the text as a reflection on an outcome — not general project facts or plans. If nothing in the text actually reflects on what happened/worked/didn't, return an empty "lessons" array. Omit anything speculative.
+
+Summaries:
+${joined.slice(0, 24000)}
+`,
+      },
+    ],
+    temperature: 0.1,
+    max_tokens: 900,
+  });
+
+  const raw = completion.choices?.[0]?.message?.content?.trim() || "";
+  const parsed = safeJsonParse(raw, { lessons: [] });
+  const lessons = Array.isArray(parsed.lessons) ? parsed.lessons : [];
+
+  return lessons.reduce((acc, l) => {
+    const whatHappened = String(l?.whatHappened || "").trim();
+    if (!whatHappened) return acc;
+    acc.push({
+      topic: l?.topic ? String(l.topic).trim() || null : null,
+      whatHappened,
+      whatWorked: l?.whatWorked ? String(l.whatWorked).trim() || null : null,
+      whatDidntWork: l?.whatDidntWork ? String(l.whatDidntWork).trim() || null : null,
+      recommendation: l?.recommendation ? String(l.recommendation).trim() || null : null,
+    });
+    return acc;
+  }, []);
+}
+
 export async function createPageInsight(openai, pageContent, pageNumber) {
   const content = (pageContent || "").trim();
 

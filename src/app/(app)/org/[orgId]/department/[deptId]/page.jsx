@@ -10,6 +10,7 @@ import CreateProjectModal from "@/components/modals/CreateProjectModal";
 import EditProjectModal from "@/components/modals/EditProjectModal";
 import DeleteProjectModal from "@/components/modals/DeleteProjectModal";
 import AddDepartmentMembersModal from "@/components/modals/AddDepartmentMembersModal";
+import LessonsPanel from "@/components/lessons/LessonsPanel";
 import Layout from "@/components/layout/Layout";
 import { useSession } from "next-auth/react";
 // import RelatedWorkPanel from "@/components/recommendations/RelatedWorkPanel";
@@ -422,6 +423,17 @@ export default function DepartmentPage({ params }) {
         >
           Timeline
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("lessons")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === "lessons"
+              ? "border-black dark:border-white text-gray-900 dark:text-gray-100"
+              : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          }`}
+        >
+          Lessons
+        </button>
       </div>
 
       {tab === "documents" ? (
@@ -700,7 +712,7 @@ export default function DepartmentPage({ params }) {
             </div>
           ) : null}
         </>
-      ) : (
+      ) : tab === "timeline" ? (
         // Timeline tab (FR-P2-7): simple ordered list of extracted decision
         // dates for this department's documents.
         <>
@@ -744,6 +756,11 @@ export default function DepartmentPage({ params }) {
             </ol>
           )}
         </>
+      ) : (
+        // Lessons tab (Rank 11 FR-2/FR-5): manual capture + browsable feed of
+        // this department's lessons, including lessons captured on any
+        // project that belongs to it.
+        <LessonsPanel apiBase={`/api/org/${orgId}/department/${deptId}/lessons`} embedded />
       )}
 
       <AddDepartmentMembersModal
