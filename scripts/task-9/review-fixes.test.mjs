@@ -57,10 +57,12 @@ test("repository topics reuse the established cluster implementation", async () 
 
 test("expertise combines upload, citation, and department signals", async () => {
   const worker = await read("worker/knowledgeContext.js");
+  const policy = await read("src/lib/expertiseScoringPolicy.mjs");
   assert.match(worker, /uploaderSignals/);
   assert.match(worker, /citerSignals/);
   assert.match(worker, /departmentSignals/);
-  assert.match(worker, /signals\.uploads/);
-  assert.match(worker, /signals\.citations/);
-  assert.match(worker, /signals\.departments/);
+  assert.match(worker, /computeExpertiseScore/);
+  assert.match(policy, /safe\.uploads/);
+  assert.match(policy, /safe\.citations/);
+  assert.match(policy, /safe\.departments/);
 });

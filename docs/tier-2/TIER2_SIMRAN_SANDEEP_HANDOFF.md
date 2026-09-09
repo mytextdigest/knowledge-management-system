@@ -5,7 +5,7 @@ This branch implements Sandeep's Expert Discovery (10-A–10-I) and Simran's Kno
 
 ## Key product/technical decisions
 - Expert Discovery: dedicated, sidebar-reachable **Experts** page.
-- Recommendations: dedicated, sidebar-reachable **Knowledge Recommendations** page; the old `RelatedWorkPanel` remains unmounted pending explicit team/product confirmation of the placement decision required by 11-A.
+- Recommendations: dedicated, sidebar-reachable **Knowledge Recommendations** page. The old `RelatedWorkPanel` placement decision required by 11-A is confirmed (2026-09-09, by Johurul): the panel is retired, not restored, and its component/dead references have been removed rather than left unmounted.
 - Shared interaction contract: `DocumentInteraction(documentId, userId, orgId, type, createdAt)`.
 - Expertise decay: fixed 90-day half-life.
 - Dismissed expertise: hidden from discovery and preserved across background refresh.
@@ -36,7 +36,7 @@ ZIP/package audit: pending final packaging step
 1. Run `npx prisma generate` and `npx prisma migrate status` against the developer environment.
 2. Run `RUN_TIER2_DB_TESTS=1 npm run task10:test:integration` against PostgreSQL. Do not mark 10-F / Rank 8 9-G DONE until it passes.
 3. Run ESLint and browser regression locally.
-4. Obtain and record explicit team/product sign-off for the dedicated Recommendations page decision required by 11-A.
+4. ~~Obtain and record explicit team/product sign-off for the dedicated Recommendations page decision required by 11-A.~~ Done 2026-09-09 — see `11-A`'s note in the Rank 10 tracker and the audit doc's 2026-09-09 update.
 5. PR + cross-review, with reviewer focus on Expert Discovery SQL RBAC and interaction-data privacy.
 
 See `TIER2_ACCEPTANCE_AUDIT.md` for the complete requirement-by-requirement matrix and manual QA checklist.

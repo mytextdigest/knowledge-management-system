@@ -6,7 +6,7 @@ const read = (p) => fs.readFileSync(p, "utf8");
 test("11-A recommendation surface is visibly reachable and placement is documented", () => {
   const page = read("src/app/(app)/org/[orgId]/recommendations/page.jsx");
   const sidebar = read("src/components/layout/AppSidebar.jsx");
-  const handoff = read("TIER2_SIMRAN_SANDEEP_HANDOFF.md");
+  const handoff = read("docs/tier-2/TIER2_SIMRAN_SANDEEP_HANDOFF.md");
   assert.match(page, /Knowledge Recommendations/);
   assert.match(sidebar, /\/recommendations/);
   assert.match(handoff, /dedicated, sidebar-reachable \*\*Knowledge Recommendations\*\* page/);

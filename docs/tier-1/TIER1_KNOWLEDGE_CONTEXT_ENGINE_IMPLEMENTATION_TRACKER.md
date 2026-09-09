@@ -29,63 +29,71 @@
 
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
-| `9-A` | Own Migration | `TODO` | Sandeep | — | | |
-| `9-B` | Org-Wide Topic Model | `TODO` | Sandeep | `9-A` | | |
-| `9-C` | Document Relationship Graph | `TODO` | Sandeep | `9-A` | | |
-| `9-D` | Expertise Discovery | `TODO` | Sandeep | `9-B` | | |
-| `9-E` | Document-to-Project Linking | `TODO` | Sandeep | `9-A` | | |
-| `9-F` | Relationship-Aware Search & Chat | `TODO` | Sandeep | `9-C` | | |
-| `9-G` | Integration Testing + RBAC Regression Check | `IN_PROGRESS` | Sandeep | `9-D`, `9-E`, `9-F` | 2026-09-06 | |
-| `9-H` | PR + Cross-Review | `TODO` | Sandeep | `9-G` | | |
+| `9-A` | Own Migration | `DONE` | Sandeep | — | 2026-08-03 | 2026-08-03 |
+| `9-B` | Org-Wide Topic Model | `DONE` | Sandeep | `9-A` | 2026-08-03 | 2026-08-05 |
+| `9-C` | Document Relationship Graph | `DONE` | Sandeep | `9-A` | 2026-08-03 | 2026-08-05 |
+| `9-D` | Expertise Discovery | `DONE` | Sandeep | `9-B` | 2026-08-03 | 2026-08-05 |
+| `9-E` | Document-to-Project Linking | `DONE` | Sandeep | `9-A` | 2026-08-03 | 2026-08-05 |
+| `9-F` | Relationship-Aware Search & Chat | `DONE` | Sandeep | `9-C` | 2026-08-03 | 2026-08-05 |
+| `9-G` | Integration Testing + RBAC Regression Check | `IN_PROGRESS` | Sandeep | `9-D`, `9-E`, `9-F` | 2026-08-03 | |
+| `9-H` | PR + Cross-Review | `DONE` | Sandeep | `9-G` | 2026-08-05 | 2026-08-10 |
 
 ---
 
 ### Task 9-A — Own Migration
-- **Status:** `TODO`
+- **Status:** `DONE`
 - **Objective:** Land this feature's schema. Fully self-contained — `Topic` already exists (Block A), this only adds a `scope` column plus three new tables. No coordination needed with Rank 3 or Rank 4.
 - **Key files to create/modify:**
   - `prisma/schema.prisma` — `Topic + orgId String?` / `+ scope String @default("project")`, new `DocumentRelationship` model, new `DocumentProjectLink` model, new `TopicExpertise` model. Exact shape in `REQUIREMENTS_KNOWLEDGE_CONTEXT_ENGINE.md` → Data Model Impact.
   - New migration file.
 - **Acceptance criteria:** `prisma migrate status` shows schema up to date; existing search/chat/repository flows unaffected.
 - **Reminder (per `feedback_prisma_migrate_diff_shadow_db.md`-style incident earlier in this project):** never pass the live shared-dev `DATABASE_URL` as `--shadow-database-url` for `prisma migrate diff` — use a separate, empty scratch database. Pull latest `dev` and rebase before opening this migration's PR.
+- **Notes:** Landed in `prisma/migrations/20260803163000_add_knowledge_context_engine`, additive only — matches the proposed shape exactly (`Topic.orgId`/`scope`, `DocumentRelationship`, `DocumentProjectLink`, `TopicExpertise`). Merge-conflicted against `dev` on 2026-08-10 when Rank 3's ingestion-pipeline schema landed first (`Organization.integrations`, `Document.sourceProvider`/`externalId`); resolved additively, no column collisions — confirms the "shares no columns" assumption above held.
 
 ### Task 9-B — Org-Wide Topic Model
-- **Status:** `TODO`
+- **Status:** `DONE`
 - **Objective:** FR-1 — extend topic clustering beyond per-project (`Topic.projectId`) to `scope=repository` documents at the org level, so a topic (e.g. "Vendor Contracts") is discoverable independent of department/project. Reuse `centroidEmbedding`/`keywordDistribution` from the existing `Topic` model rather than inventing a new representation, unless it doesn't scale.
 - **Open question to resolve during implementation:** is this a new batch job, or an extension of whatever clustering currently produces `Topic` rows for projects (`worker/cluster.js`)? Reusing the existing job is strongly preferred — see requirements doc Open Question #1.
 - **Acceptance criteria:** an org-wide topic exists independent of any single project, derived from `scope=repository` documents.
+- **Notes:** Resolved Open Question #1 as instructed — first pass (2026-08-03) shipped a parallel, cruder keyword-based clusterer in `worker/knowledgeContext.js` instead of reusing `worker/cluster.js`; flagged in review and fixed 2026-08-05 by adding `classifyRepositoryDocument()` directly to `worker/cluster.js`, reusing `generateTopicName` (LLM naming), `bhattacharyya`, and the same cosine-threshold logic as project-scoped clustering. `Topic.scope='repository'` + `orgId` set, `projectId` null.
 
 ### Task 9-C — Document Relationship Graph
-- **Status:** `TODO`
+- **Status:** `DONE`
 - **Objective:** FR-2 — persist explicit "references"/"supersedes"/"related-to" relationships between documents, computed as a background job after ingestion (never inline). Surface "Related Documents" on the document detail page (`src/app/(app)/document/page.jsx`) and repository cards.
 - **Acceptance criteria:** a document detail page shows at least one "related document" link backed by persisted relationship data, not a live similarity query. Computation runs as a background job and adds no upload/chat/search latency.
+- **Notes:** Background job chains onto the existing SQS `"cluster"` job (`worker/index.js`) — fires after upload/summarize, never inline with request latency. First pass (2026-08-03) loaded up to 1000 documents' full embeddings into Node and scanned O(N²) in JS, which is exactly the unindexed-full-scan anti-pattern the NFRs warn against; fixed 2026-08-05 to a bounded pgvector `<=>` KNN query against the existing `embedding_vec`/ivfflat column instead. Surfaced on `document/page.jsx` ("Related documents" panel, filename + weight%) and as an "N related" badge on `RepositoryDocumentCard.jsx`.
 
 ### Task 9-D — Expertise Discovery
-- **Status:** `TODO`
+- **Status:** `DONE`
 - **Objective:** FR-3 — for a topic or document, identify connected people (uploader, frequent citer via `OrgMessage`, department members whose documents cluster in that topic). Surface "who should I ask about X" in Enterprise Chat. **RBAC-critical** — must never surface a person as an "expert" on a document the asking user can't access; enforce in SQL `WHERE`, never post-filter, consistent with `vectorSearch.js`'s existing pattern.
 - **Open question to resolve before this task is meaningfully startable:** how is "citation" tracked today? `OrgMessage` stores chat content but citations are recomputed per-response, not persisted — this task's citer-frequency signal likely needs a schema change to `OrgMessage` first (may require revisiting `9-A`). See requirements doc Open Question #2.
 - **Acceptance criteria:** a chat or search query about a topic surfaces at least one relevant person, respecting the asking user's RBAC — verified by a query that returns zero people when the asking user has no access to the underlying documents. Expertise discovery must not expose personally-identifying activity (e.g. exact questions asked), only association.
+- **Notes:** Open Question #2 resolved — `ChatAuditLog.citedDocIds` (pre-existing, not something this feature added) already persists citations, so no `OrgMessage` schema change was needed. First pass (2026-08-03) only scored the uploader; **found in review that the same pass also had a real RBAC bug** — `documents/[id]/route.js` passed `isSuperAdmin: isOrgAdmin(role)` into the access-check SQL, which fully bypasses draft/private-project/department filtering for any `dept_admin`, not just `super_admin` — exactly the failure mode this file calls "highest-risk." Fixed 2026-08-05: access check now uses `isSuperAdmin(role)` only, and scoring in `worker/knowledgeContext.js` now blends uploader + citer (`ChatAuditLog`) + department-topic-membership signals as originally specified. Surfaced in Enterprise Chat as a "Suggested people to ask" panel. RBAC correctness verified by code review of the SQL `WHERE` clause, not yet by an executed query against real seeded data — run the RBAC spot-check in the demo runbook before treating this as fully closed.
 
 ### Task 9-E — Document-to-Project Linking
-- **Status:** `TODO`
+- **Status:** `DONE`
 - **Objective:** FR-4 — detect when a repository document references an existing `Project` by name/context, offer an advisory link (never auto-merged/auto-linked without confirmation).
 - **Acceptance criteria:** a repository document that clearly references an existing project surfaces a `DocumentProjectLink` suggestion, confirmable/dismissable in one click.
+- **Notes:** Detection is a simple substring match (project name literally present in document text) — a real heuristic limitation, but consistent with "advisory only" and cheap to compute in the background job. First pass (2026-08-03) shipped the `PATCH` confirm/dismiss endpoint with no UI calling it, so the acceptance criterion's "in one click" wasn't actually met yet; fixed 2026-08-05 by wiring Confirm/Dismiss buttons into `document/page.jsx`, which call the endpoint and update state without a reload.
 
 ### Task 9-F — Relationship-Aware Search & Chat
-- **Status:** `TODO`
+- **Status:** `DONE`
 - **Objective:** FR-5 — expand `orgSearch()`/chat results with "also see" results pulled from the relationship graph (`9-C`), not just raw vector similarity. Same RBAC constraint as `9-D`: a related document mentioned in a chat answer must be one the asking user can access.
 - **Open question to resolve during implementation:** injection threshold for a relationship-derived "also see" result in a chat answer — always when data exists, or above a relationship-weight threshold to avoid noisy tangents. See requirements doc Open Question #5.
 - **Acceptance criteria:** a chat answer can reference a relationship-derived related document without ever surfacing one the asking user lacks access to.
+- **Notes:** Open Question #5 resolved — injects above a fixed relationship-weight threshold (`RELATED_DOCUMENT_MIN_WEIGHT = 0.68` in `src/lib/knowledgeContext.js`), not always. `hybridOrgSearch()` → `expandWithRelatedDocuments()` correctly threads `isSuperAdmin(role)` (matches the established `vectorSearch.js` convention). Known quality gap, not RBAC: relationship-derived rows carry `text: null`, so an "also see" document shows up as a citation source with an empty content preview rather than actual quoted grounding — worth a follow-up if the client demo surfaces this as thin.
 
 ### Task 9-G — Integration Testing + RBAC Regression Check
 - **Status:** `IN_PROGRESS`
 - **Objective:** Full RBAC regression across `9-D` and `9-F` — the two highest-risk FRs in this feature. Confirm every new query path (topic model, relationship graph, expertise, project-linking) goes through SQL-`WHERE` RBAC filtering, never a post-filter. Confirm background jobs (`9-B`, `9-C`) add no latency to upload/search/chat.
 - **Notes:** dedicate real time here — this is the feature's highest-blast-radius task given the "leaks existence of a document/person association" failure mode called out at the top of this file.
+- **Status update (2026-08-10):** Not closing this out yet, even though the PR merged — being honest about what actually exists. `scripts/task-9/context.test.mjs` and `review-fixes.test.mjs` are source-pattern assertions (e.g. "does `documents/[id]/route.js` contain the string `isSuperAdmin(role)` and not `isOrgAdmin(role)`"), which is a reasonable regression guard against the exact bug found in `9-D`, but it is not the DB-backed integration test this task calls for — nothing here actually runs a query as a low-privilege user against seeded cross-department data and asserts zero rows come back. Background-job latency (the other half of this task) also hasn't been separately measured; it's inferred from the job being queue-based rather than inline. Remaining before this can move to `DONE`: run the RBAC spot-check in the client demo runbook (impersonate a non-admin, non-department-member user, confirm related-documents and suggested-experts panels come back empty) and ideally turn that into a persisted integration test.
 - **2026-09-06 update:** Tier 2 Expert Discovery adds a real DB-backed regression at `scripts/task-10/expert-rbac.integration.test.mjs`, including a mixed cross-department shared-topic leak case. Mark `9-G` DONE only after this test is executed successfully against PostgreSQL.
 
 ### Task 9-H — PR + Cross-Review
-- **Status:** `TODO`
+- **Status:** `DONE`
 - **Objective:** Submit this feature's PR. Have at least one other person (Johurul or Simran) review before merge to `dev`, per this project's standard close-out practice — given the RBAC sensitivity of this feature, request the review explicitly focus on `9-D`/`9-F`'s query-level access control, not just functional correctness.
+- **Notes:** PR #20 reviewed by Johurul with explicit focus on `9-D`/`9-F` access control per this task's instruction — that review is what caught the `isOrgAdmin`/`isSuperAdmin` bug fixed in `9-D`. Feedback addressed in `ff61d37` (2026-08-05). Merged to `dev` via GitHub UI 2026-08-10; local merge conflict against `dev`'s concurrently-merged ingestion-pipeline PR (`prisma/schema.prisma`, `worker/index.js`) resolved additively, no logic dropped from either side. Merging ahead of `9-G` being fully closed is a real gap, not an oversight — see `9-G`'s status note.
 
 ---
 

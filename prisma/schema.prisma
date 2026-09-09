@@ -36,6 +36,7 @@ model User {
   orgMemberMemories OrgMemberMemory[]
   topicExpertise    TopicExpertise[]
   documentInteractions DocumentInteraction[]
+  lessonsAuthored   Lesson[]
 }
 
 model OtpToken {
@@ -80,6 +81,7 @@ model Organization {
   repositoryTopics  Topic[]
   integrations      OrgIntegration[]
   documentInteractions DocumentInteraction[]
+  lessons           Lesson[]
 
   @@index([name])
 }
@@ -137,6 +139,7 @@ model Department {
   lastVisitedByMembers OrganizationMember[]
   timelineEvents       TimelineEvent[]
   suggestedDocuments   Document[] @relation("SuggestedDocumentDepartment")
+  lessons              Lesson[]
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -248,6 +251,7 @@ model Project {
   projectChats   ProjectConversation[]
   documentProjectLinks DocumentProjectLink[]
   timelineEvents TimelineEvent[]
+  lessons        Lesson[]
 
   @@unique([departmentId, name])
   @@index([scope])
@@ -315,6 +319,7 @@ model Document {
   relationshipsTo   DocumentRelationship[] @relation("DocumentRelationshipTo")
   projectLinks      DocumentProjectLink[]
   interactions      DocumentInteraction[]
+  lessons           Lesson[]
 
   @@index([scope])
   @@index([orgId])
@@ -580,6 +585,7 @@ model Decision {
 
   document       Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
   timelineEvents TimelineEvent[]
+  lessons        Lesson[]
 
   @@index([documentId])
 }
@@ -697,5 +703,43 @@ model SyncRun {
   integration OrgIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
 
   @@index([integrationId])
+  @@index([status])
+}
+
+// Rank 11 — Lessons Learned Intelligence (Task 12-B)
+// See docs/tier-2/REQUIREMENTS_LESSONS_LEARNED_INTELLIGENCE.md for FR text.
+// v1 ships on-demand manual capture only (Open Question 1 resolved: no
+// Project.status/completedAt lifecycle trigger — see Task 12-A note in
+// docs/tier-2/TIER2_LESSONS_LEARNED_INTELLIGENCE_IMPLEMENTATION_TRACKER.md).
+
+model Lesson {
+  id             String    @id @default(cuid())
+  orgId          String
+  projectId      String?
+  departmentId   String?
+  documentId     String?
+  decisionId     String?
+  topic          String?
+  whatHappened   String
+  whatWorked     String?
+  whatDidntWork  String?
+  recommendation String?
+  authorUserId   String
+  source         String    @default("manual") // "manual" | "extracted"
+  status         String    @default("draft")  // "draft" | "published"
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  department   Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  document     Document?    @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  decision     Decision?    @relation(fields: [decisionId], references: [id], onDelete: SetNull)
+  author       User         @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([projectId])
+  @@index([departmentId])
+  @@index([documentId])
   @@index([status])
 }

@@ -45,7 +45,7 @@ The DB integration test now seeds the exact mixed-topic leak case.
 
 | Task | Acceptance check | Implementation evidence | Audit status |
 |---|---|---|---|
-| 11-A | Visible recommendation surface + documented placement rationale | `/org/[orgId]/recommendations`; sidebar entry; tracker/handoff notes | Implemented; external placement sign-off still required |
+| 11-A | Visible recommendation surface + documented placement rationale | `/org/[orgId]/recommendations`; sidebar entry; tracker/handoff notes | Implemented; sign-off confirmed 2026-09-09 (see below) |
 | 11-B | `DocumentInteraction` model + required indexes | schema + shared Tier 2 migration | Implemented |
 | 11-C | Best-effort view write with no blocking view latency and RBAC | document page uses un-awaited `fetch(...keepalive)`; interaction POST independently checks access | Implemented + hardened |
 | 11-D | Helpful boosts / not-helpful suppresses | requesting-user `OrgMessage.feedback`; `recommendationRankingPolicy.mjs`; behavior test | Implemented + behavior-tested |
@@ -120,3 +120,7 @@ Record one explicit decision in the PR before merge, for example:
 > Confirmed: keep `RelatedWorkPanel` off the department/project listing pages to avoid duplicating the semantic-search experience introduced in `80d3657`. Use the dedicated, sidebar-reachable `/org/[orgId]/recommendations` page as the v1 recommendation surface.
 
 Until an authorized team/product owner confirms that decision, 11-A remains `BLOCKED` by the requirements even though the replacement UI is implemented.
+
+## Update — 2026-09-09
+
+Johurul confirmed the decision above: `/org/[orgId]/recommendations` is the v1 recommendation surface, `RelatedWorkPanel` stays off the department page. `11-A` is now `DONE` in the tracker. The now-dead `RelatedWorkPanel.jsx` component and its commented-out import/usage in `department/[deptId]/page.jsx` were removed rather than left unmounted, since the placement decision is final rather than provisional.

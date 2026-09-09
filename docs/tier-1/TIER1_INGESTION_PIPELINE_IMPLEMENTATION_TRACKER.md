@@ -37,7 +37,8 @@
 | `7-F` | Accept / Reassign / Create-Project Actions + RBAC | `DONE` | Johurul | `7-E` | 2026-08-06 | 2026-08-06 |
 | `7-G` | Email Digest Notification | `DONE` | Johurul | `7-C`, `7-F` | 2026-08-07 | 2026-08-07 |
 | `7-H` | Integration Testing + RBAC Regression Check | `DONE` | Johurul | `7-D`, `7-F`, `7-G` | 2026-08-07 | 2026-08-07 |
-| `7-I` | PR + Cross-Review | `TODO` | Johurul | `7-H` | | |
+| `7-I` | PR + Cross-Review | `DONE` | Johurul | `7-H` | 2026-08-09 | 2026-08-09 |
+| `7-J` | Reconcile Needs-Review Queue with Rank 4 Classification (post-merge follow-up from `7-H`) | `DONE` | Johurul | `7-I` | 2026-08-10 | 2026-08-10 |
 
 ---
 
@@ -173,8 +174,41 @@
 - **Acceptance criteria:** ✅ full flow verified end-to-end (connector-sourced half). ⏳ classification-sourced half — `BLOCKED` on Rank 4's merge, as anticipated. ✅ RBAC regression clean across every route. ✅ OAuth tokens confirmed encrypted at rest.
 
 ### Task 7-I — PR + Cross-Review
-- **Status:** `TODO`
+- **Status:** `DONE`
+- **Completed:** 2026-08-09
 - **Objective:** Submit this feature's PR. Have at least one other person (Simran or Sandeep) review before merge to `dev`, per this project's standard close-out practice.
+- **What happened:** PR #23 (`feature/task-7-sharepoint-ingestion-pipeline` → `dev`) opened and merged 2026-08-09T23:59 UTC.
+- **Post-merge code audit (2026-08-10), reading the actual code on `dev` and re-verifying against `REQUIREMENTS_INGESTION_PIPELINE.md`, not taken on the PR merge alone (this doc's own rule, `docs/TIER1_COMPLETION_PLAN.md` §1):**
+  - No unresolved merge-conflict markers anywhere in `src/`, `worker/`, `prisma/schema.prisma`.
+  - FR-1 (connector abstraction), FR-2 (two-phase auth, site picker, `Sites.Selected` app-only sync), FR-4 (source-level dedup + storage-delta accounting) — all intact post-merge, unchanged from `7-B`–`7-D`'s verified behavior.
+  - `sharepoint_sync` job dispatch in `worker/index.js` intact alongside the `classify`/context-engine job types that Rank 4 (PR #22) and Rank 8 (PR #20) added to the same file — no job-type collision or lost dispatch branch from the 3-way merge.
+  - NFR (encrypted credentials at rest): re-checked directly against the live `OrgIntegration` row on `dev`'s DB — `accessToken` is a base64 ciphertext blob, decrypts correctly via `src/lib/crypto.js`. Still real.
+  - RBAC: `isSuperAdmin` gate present on every route this feature added (`integrations`, `integrations/sharepoint/*`, `needs-review`, `needs-review/[docId]/confirm`) — no gaps.
+  - FR-7 (digest email): `sendSyncDigestEmail` still wired in `processSharePointSyncJob`, fires on `filesFound > 0`.
+  - UI changes from post-`7-H` review feedback (Integrations tab, status badges, the settings-page width fix) survived the merge unchanged.
+  - **Real finding — see `7-J`:** FR-5/FR-6's "single Needs-Review queue, source-agnostic" requirement is **not actually met** now that Rank 4 has merged. `7-H` correctly flagged this as `BLOCKED` pending Rank 4's merge and left an inline TODO comment in the route for whoever picks it up next; Rank 4 has since merged, but that follow-up was never done. Filed as its own task (`7-J`) rather than silently marking `7-I`/this feature's overall queue work "Done" — the connector/sync half is genuinely done and verified; the "one unified queue" half, which is this feature's own stated reason for existing (FR-5: "prevents the two-parallel-queues failure mode"), is not.
+
+### Task 7-J — Reconcile Needs-Review Queue with Rank 4 Classification (post-merge follow-up from `7-H`)
+- **Status:** `DONE`
+- **Found:** 2026-08-10, during the post-merge (`7-I`) code audit.
+- **Completed:** 2026-08-10
+- **Objective:** Make FR-5/FR-6 actually true now that Rank 4's classification fields exist on `dev` — `7-E`/`7-H` both anticipated this exact follow-up and left an inline comment marking what to change; it was never done after Rank 4's merge.
+- **Confirmed gap (before the fix), reading the code on `dev`:**
+  - `GET /api/org/[orgId]/needs-review` filtered solely on `lifecycle: "draft"` — the `7-E`-era stub. A manually-uploaded document `worker/classify.js` flags `classificationStatus: "needs_review"` kept `lifecycle: "published"` (the default) and so never appeared in this queue at all.
+  - `POST .../needs-review/[docId]/confirm` rejected (`409`) any document whose `lifecycle !== "draft"` — couldn't act on a classification-flagged manual document even if it had appeared.
+  - `suggestedCategory`/`duplicateFlag` were hardcoded stubs, never wired to the real `categoryConfidence`/`suggestedDepartmentId`/`DocumentDuplicate` fields.
+  - Rank 4 shipped its own separate review surface on `RepositoryDocumentCard.jsx` (inline panel on the repository page) — the exact "two-parallel-queues" failure mode FR-5 exists to prevent.
+- **Fix implemented, scoped deliberately to just closing this gap — `RepositoryDocumentCard.jsx` and its `isOrgAdmin` (super_admin + dept_admin) access model were left untouched, not retired, since collapsing them into the `super_admin`-only queue would be a separate, bigger product decision (Open Question #6, still genuinely open) and risks regressing a capability `dept_admin`s already rely on:**
+  - `GET /api/org/[orgId]/needs-review` — `WHERE` widened to `OR: [{ lifecycle: "draft" }, { classificationStatus: "needs_review" }]`. Response now returns real `classificationStatus`, `categoryConfidence`, `suggestedDepartment` (name), `departmentSuggestionConfidence`, and the first `pending` `DocumentDuplicate` row as `duplicateFlag` — no more stubs.
+  - `POST .../needs-review/[docId]/confirm` — guard widened to `lifecycle !== "draft" && classificationStatus !== "needs_review"` (409 only if neither is true). All three actions (Accept/Reassign/Create-Project) now set both `lifecycle: "published"` and `classificationStatus: "published"`, and clear `suggestedDepartmentId`/`departmentSuggestionConfidence` — so a document flagged by both signals at once is fully resolved in one action. **Accept-as-is** (`{}` body) now promotes `suggestedDepartmentId` into `departmentId` when there's no confirmed department yet (`targetDepartmentId = doc.departmentId || doc.suggestedDepartmentId || null`) — "accept" previously left a suggestion-only document with no department at all, which wasn't really "confirming the suggestion as-is."
+  - `src/app/(app)/org/[orgId]/needs-review/page.jsx` — Department/Suggested Category columns now show real confidence percentages and a purple "Suggested: X" state when a department suggestion exists but nothing's confirmed yet; a duplicate-flag row (reusing the existing `/api/documents/[id]/duplicates/[duplicateId]` route Rank 4 already built, not reinvented) with inline Confirm/Dismiss under the filename.
+- **End-to-end verification (2026-08-10), against the real dev DB, read-only-safe DB-dry-run style (no browser automation), on the mock "NGI" org, with cleanup after each check:**
+  - Created a real manual-upload `Document` (`sourceProvider: "manual"`, `lifecycle: "published"`, `classificationStatus: "needs_review"`, a `suggestedDepartmentId`) — ran the queue's exact new query: **1 document returned**, correctly including the manual doc that the old query would have missed entirely.
+  - Ran the confirm route's exact new guard + transaction logic (Accept-as-is) against it: `lifecycle → "published"`, `classificationStatus → "published"`, `departmentId` correctly promoted from `suggestedDepartmentId`, suggestion fields cleared. Re-ran the queue query afterward: **0 documents** (correctly gone).
+  - **Regression check — the original `7-E`/`7-F` SharePoint path:** created a `lifecycle: "draft"`, `sourceProvider: "sharepoint"` document with a connect-time `departmentId` already set (no suggestion). Confirmed it still appears in the widened query, and that Accept-as-is leaves its `departmentId` untouched (`doc.departmentId` wins over the `null` `suggestedDepartmentId` fallback) — exactly `7-F`'s original verified behavior, unchanged.
+  - **Negative guard check:** an already-published, non-flagged document (`lifecycle: "published"`, `classificationStatus: "published"`) correctly still fails the guard (would 409).
+  - All test documents deleted after verification — no leftover data.
+- **Acceptance criteria:** ✅ now met — a classification-flagged manual document and a SharePoint-synced document both appear in, and can be acted on through, the same Needs-Review queue, distinguishable by the existing source indicator.
 
 ---
 

@@ -7,7 +7,7 @@
 >
 > **Reference documents:** `REQUIREMENTS_KNOWLEDGE_RECOMMENDATION_ENGINE.md` for full FR text, data model, and acceptance criteria this tracker's tasks implement.
 >
-> **This is an extension of existing, merged code, not a fresh build.** `src/lib/recommendations.js`, `GET /api/org/[orgId]/recommendations`, and `RelatedWorkPanel.jsx` already exist, already work, and are currently just unmounted from the department page (commit `80d3657`). Read `11-A` before touching anything else — the very first step is getting an actual answer on why the panel was hidden, not assuming.
+> **This is an extension of existing, merged code, not a fresh build.** `src/lib/recommendations.js` and `GET /api/org/[orgId]/recommendations` already existed and already worked; `RelatedWorkPanel.jsx` had been unmounted from the department page (commit `80d3657`) with no reason recorded. Read `11-A` before touching anything else — the very first step is getting an actual answer on why the panel was hidden, not assuming. **Resolved 2026-09-09: see `11-A`'s decision note — `RelatedWorkPanel.jsx` is retired and removed, replaced by the dedicated `/org/[orgId]/recommendations` page.**
 
 ---
 
@@ -27,7 +27,7 @@
 
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
-| `11-A` | Resolve Panel-Hiding Decision + Re-Establish Surface (FR-1) | `BLOCKED` | Simran | — | 2026-09-06 | |
+| `11-A` | Resolve Panel-Hiding Decision + Re-Establish Surface (FR-1) | `DONE` | Simran | — | 2026-09-06 | 2026-09-09 |
 | `11-B` | Document Interaction Signal — Schema + Migration (FR-2) | `DONE` | Simran | — | 2026-09-06 | 2026-09-06 |
 | `11-C` | Interaction Write Path | `DONE` | Simran | `11-B` | 2026-09-06 | 2026-09-06 |
 | `11-D` | Feedback-Weighted Ranking (FR-3) | `DONE` | Simran | — | 2026-09-06 | 2026-09-06 |
@@ -40,10 +40,11 @@
 ---
 
 ### Task 11-A — Resolve Panel-Hiding Decision + Re-Establish Surface
-- **Status:** `BLOCKED`
+- **Status:** `DONE`
 - **Objective:** FR-1 — before any other work, confirm with whoever hid `RelatedWorkPanel` in commit `80d3657` why it was hidden (no reason is recorded in the commit message or any doc). Decide: restore as-is on the department page, redesign, relocate, or deliberately retire in favor of the new semantic search added in that same commit — and document whichever it is here.
-- **Key files:** `src/app/(app)/org/[orgId]/department/[deptId]/page.jsx` (currently has `RelatedWorkPanel` import and usage commented out), `src/components/recommendations/RelatedWorkPanel.jsx`.
+- **Key files:** `src/app/(app)/org/[orgId]/department/[deptId]/page.jsx` (previously had `RelatedWorkPanel` import and usage commented out), `src/components/recommendations/RelatedWorkPanel.jsx` (removed).
 - **Acceptance criteria:** at least one recommendation surface is visibly reachable in the product, with the placement decision explicitly recorded in this tracker's notes.
+- **Decision confirmed (2026-09-09, by Johurul):** retire `RelatedWorkPanel` — do not restore it on the department page. The dedicated, sidebar-reachable `/org/[orgId]/recommendations` page (built under `11-A`'s implementation) is the v1 recommendation surface going forward, kept separate from the semantic-search listing pages introduced in `80d3657` rather than duplicating that experience. Since this was the only thing keeping `11-A` open, the now-dead `RelatedWorkPanel.jsx` component and its commented-out import/usage in `department/[deptId]/page.jsx` were removed in the same change rather than left as unreachable code. This also retroactively satisfies `11-F`'s dependency on `11-A`.
 
 ### Task 11-B — Document Interaction Signal: Schema + Migration
 - **Status:** `DONE`

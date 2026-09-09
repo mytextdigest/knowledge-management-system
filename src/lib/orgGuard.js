@@ -35,3 +35,17 @@ export async function canManageDepartment(orgRole, departmentId, userId) {
   });
   return membership?.role === "admin";
 }
+
+// Any membership (not just "admin") in the department, or an org-wide admin
+// role. Used to gate contribution-type actions (e.g. adding a Lesson) that
+// should be open to regular department members, not just department admins.
+export async function canContributeToDepartment(orgRole, departmentId, userId) {
+  if (isOrgAdmin(orgRole)) return true;
+  if (!departmentId) return false;
+
+  const membership = await prisma.departmentMember.findUnique({
+    where: { departmentId_userId: { departmentId, userId } },
+    select: { role: true },
+  });
+  return Boolean(membership);
+}

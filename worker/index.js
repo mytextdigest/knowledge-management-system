@@ -8,7 +8,7 @@ import mammoth from "mammoth";
 import { PrismaClient } from "@prisma/client";
 import OpenAI from "openai";
 import nodemailer from "nodemailer";
-import { createStructuredSummary, summarizeChunks, extractEntities, extractDecisions } from "./summarize.js";
+import { createStructuredSummary, summarizeChunks, extractEntities, extractDecisions, isRetrospectiveShaped, extractLessons } from "./summarize.js";
 import { getOpenAIForDocument } from "./openai.js";
 import { detectConflictsForDocument } from "./detectConflicts.js";
 import { processClusterJobWorker } from "./cluster.js";
@@ -526,6 +526,51 @@ async function processSummarizationJob(job) {
           },
         });
       }
+    }
+  }
+
+  // Rank 11 FR-3: lesson extraction, advisory only — chained onto this same
+  // summarization stage rather than a new job type (per this project's
+  // "don't build two parallel systems" rule). Cheap keyword pre-filter first
+  // (isRetrospectiveShaped) so the extra LLM call only runs for documents
+  // that actually read like a retrospective/post-mortem, keeping the
+  // no-more-than-one-extra-call-per-document cost budget. Wrapped in
+  // try/catch and non-fatal, same reasoning as conflict detection below — an
+  // LLM hiccup here shouldn't sink the summary/decisions/entities already
+  // produced. Always lands as status "draft"/source "extracted": a human
+  // must review and publish before it's used as chat grounding or shown to
+  // anyone beyond this project/department's own feed (see FR-6).
+  await prisma.lesson.deleteMany({ where: { documentId: docId, source: "extracted", status: "draft" } });
+  if (isRetrospectiveShaped(filename, chunkSummaries)) {
+    try {
+      const docForLessons = await prisma.document.findUnique({
+        where: { id: docId },
+        select: { orgId: true, departmentId: true, userId: true },
+      });
+      if (docForLessons?.orgId) {
+        const lessons = await extractLessons(openai, chunkSummaries, filename);
+        for (const l of lessons) {
+          await prisma.lesson.create({
+            data: {
+              orgId: docForLessons.orgId,
+              projectId: projectId || null,
+              departmentId: docForLessons.departmentId || null,
+              documentId: docId,
+              topic: l.topic,
+              whatHappened: l.whatHappened,
+              whatWorked: l.whatWorked,
+              whatDidntWork: l.whatDidntWork,
+              recommendation: l.recommendation,
+              authorUserId: docForLessons.userId,
+              source: "extracted",
+              status: "draft",
+            },
+          });
+        }
+        if (lessons.length > 0) console.log(`💡 Extracted ${lessons.length} draft lesson(s) for ${docId}`);
+      }
+    } catch (err) {
+      console.error("⚠️ Lesson extraction failed (non-fatal):", err.message);
     }
   }
 
