@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { classifyRepositoryDocument } from "./cluster.js";
 import { getOpenAIForDocument } from "./openai.js";
+import { computeExpertiseScore } from "../src/lib/expertiseScoringPolicy.mjs";
 
 const prisma = new PrismaClient();
 const RELATED_THRESHOLD = 0.72;
@@ -56,7 +57,7 @@ async function findRelatedDocumentsWithPgvector(doc) {
 
 async function refreshTopicExpertise(topicId, orgId) {
   const uploaderSignals = await prisma.$queryRaw`
-    SELECT d."userId" AS "userId", COUNT(*)::int AS uploads
+    SELECT d."userId" AS "userId", COUNT(*)::int AS uploads, MAX(d."created_at") AS "lastSignalAt"
     FROM "TopicDocument" td
     JOIN "Document" d ON d.id = td."documentId"
     WHERE td."topicId" = ${topicId}
@@ -64,20 +65,19 @@ async function refreshTopicExpertise(topicId, orgId) {
   `;
 
   const citerSignals = await prisma.$queryRaw`
-    SELECT cal."userId" AS "userId", COUNT(*)::int AS citations
+    SELECT cal."userId" AS "userId", COUNT(*)::int AS citations, MAX(cal."created_at") AS "lastSignalAt"
     FROM "ChatAuditLog" cal
     WHERE cal."orgId" = ${orgId}
       AND EXISTS (
-        SELECT 1
-        FROM "TopicDocument" td
-        WHERE td."topicId" = ${topicId}
-          AND td."documentId" = ANY(cal."citedDocIds")
+        SELECT 1 FROM "TopicDocument" td
+        WHERE td."topicId" = ${topicId} AND td."documentId" = ANY(cal."citedDocIds")
       )
     GROUP BY cal."userId"
   `;
 
   const departmentSignals = await prisma.$queryRaw`
-    SELECT dm."userId" AS "userId", COUNT(DISTINCT d."departmentId")::int AS departments
+    SELECT dm."userId" AS "userId", COUNT(DISTINCT d."departmentId")::int AS departments,
+           MAX(td."assigned_at") AS "lastSignalAt"
     FROM "TopicDocument" td
     JOIN "Document" d ON d.id = td."documentId" AND d."departmentId" IS NOT NULL
     JOIN "DepartmentMember" dm ON dm."departmentId" = d."departmentId"
@@ -85,30 +85,57 @@ async function refreshTopicExpertise(topicId, orgId) {
     GROUP BY dm."userId"
   `;
 
+  const interactionSignals = await prisma.$queryRaw`
+    SELECT di."userId" AS "userId", COUNT(*)::int AS interactions, MAX(di."created_at") AS "lastSignalAt"
+    FROM "DocumentInteraction" di
+    JOIN "TopicDocument" td ON td."documentId" = di."documentId"
+    WHERE td."topicId" = ${topicId} AND di."orgId" = ${orgId}
+      AND di.type IN ('view', 'download')
+    GROUP BY di."userId"
+  `;
+
   const scores = new Map();
   const ensure = (userId) => {
-    if (!scores.has(userId)) scores.set(userId, { uploads: 0, citations: 0, departments: 0 });
+    if (!scores.has(userId)) scores.set(userId, { uploads: 0, citations: 0, departments: 0, interactions: 0, lastSignalAt: null });
     return scores.get(userId);
   };
-  for (const row of uploaderSignals) ensure(row.userId).uploads = Number(row.uploads || 0);
-  for (const row of citerSignals) ensure(row.userId).citations = Number(row.citations || 0);
-  for (const row of departmentSignals) ensure(row.userId).departments = Number(row.departments || 0);
+  const apply = (rows, field) => rows.forEach((row) => {
+    const target = ensure(row.userId);
+    target[field] = Number(row[field] || 0);
+    const timestamp = row.lastSignalAt ? new Date(row.lastSignalAt) : null;
+    if (timestamp && (!target.lastSignalAt || timestamp > target.lastSignalAt)) target.lastSignalAt = timestamp;
+  });
+  apply(uploaderSignals, 'uploads');
+  apply(citerSignals, 'citations');
+  apply(departmentSignals, 'departments');
+  apply(interactionSignals, 'interactions');
 
+  const existing = await prisma.topicExpertise.findMany({ where: { topicId } });
+  const existingByUser = new Map(existing.map((row) => [row.userId, row]));
   const activeUserIds = [];
+
   for (const [userId, signals] of scores) {
-    const score = signals.uploads * 1.0
-      + Math.min(3, signals.citations * 0.35)
-      + Math.min(1.5, signals.departments * 0.25);
+    const score = computeExpertiseScore(signals);
     if (score <= 0) continue;
     activeUserIds.push(userId);
+    const current = existingByUser.get(userId);
+    if (current?.source === 'dismissed') continue;
+    const protectedSource = current && current.source !== 'inferred';
     await prisma.topicExpertise.upsert({
       where: { topicId_userId: { topicId, userId } },
-      create: { topicId, userId, score, signals },
-      update: { score, signals },
+      create: { topicId, userId, score, signals, source: 'inferred', lastSignalAt: signals.lastSignalAt },
+      update: protectedSource
+        ? { score: Math.max(Number(current.score || 0), score), signals, lastSignalAt: signals.lastSignalAt }
+        : { score, signals, lastSignalAt: signals.lastSignalAt },
     });
   }
+
   await prisma.topicExpertise.deleteMany({
-    where: { topicId, ...(activeUserIds.length ? { userId: { notIn: activeUserIds } } : {}) },
+    where: {
+      topicId,
+      source: 'inferred',
+      ...(activeUserIds.length ? { userId: { notIn: activeUserIds } } : {}),
+    },
   });
 }
 
@@ -148,9 +175,18 @@ export async function processKnowledgeContext(docId) {
       filename: true,
       content: true,
       summary: true,
+      projectId: true,
+      topicDocument: { select: { topicId: true } },
     },
   });
-  if (!doc?.orgId || doc.scope !== "repository") return { skipped: true };
+  if (!doc?.orgId) return { skipped: true };
+  if (doc.scope !== "repository") {
+    if (doc.topicDocument?.topicId) {
+      await refreshTopicExpertise(doc.topicDocument.topicId, doc.orgId);
+      return { topicId: doc.topicDocument.topicId, relationships: 0 };
+    }
+    return { skipped: true };
+  }
 
   const related = await findRelatedDocumentsWithPgvector(doc);
   for (const other of related) {

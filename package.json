@@ -22,7 +22,10 @@
     "task9:rebuild": "node scripts/task-9/rebuild-context.mjs",
     "task9:test": "node --test scripts/task-9/*.test.mjs",
     "task12:test:integration": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/task-12/lessons.integration.test.mjs",
-    "alpha:combined-test": "node --test scripts/alpha-bugfix/combined-permissions.test.mjs"
+    "alpha:combined-test": "node --test scripts/alpha-bugfix/combined-permissions.test.mjs",
+    "task10:test": "node --test scripts/task-10/tier2-expert.static.test.mjs scripts/task-10/expertise-scoring.logic.test.mjs",
+    "task10:test:integration": "node --test scripts/task-10/expert-rbac.integration.test.mjs",
+    "task11:test": "node --test scripts/task-11/tier2-recommendations.static.test.mjs scripts/task-11/recommendation-ranking.logic.test.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

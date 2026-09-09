@@ -5,7 +5,7 @@ import { generateSignedUrl, generateSignedDownloadUrl } from "@/lib/s3SignedUrl"
 import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
 import { resolveOrgRole, isOrgAdmin, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
 import { filterAccessibleDocuments } from "@/lib/documentAccess";
-import { getAccessibleRelatedDocuments } from "@/lib/knowledgeContext";
+import { getAccessibleRelatedDocuments, getAccessibleExperts } from "@/lib/knowledgeContext";
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 
 export async function GET(req, { params }) {
@@ -21,6 +21,7 @@ export async function GET(req, { params }) {
     where: { id },
     include: {
       chunks: { orderBy: { chunkIndex: "asc" } },
+      topicDocument: { include: { topic: { select: { id: true, name: true, scope: true } } } },
       project: { select: { orgId: true, departmentId: true, scope: true } },
       decisions: { orderBy: { decidedAt: "desc" } },
       conflictsAsDocA: {
@@ -135,6 +136,16 @@ export async function GET(req, { params }) {
       })
     : [];
 
+  const experts = user && doc.topicDocument?.topic?.id
+    ? await getAccessibleExperts({
+        orgId: doc.orgId || doc.project?.orgId || "",
+        userId: user.id,
+        topicId: doc.topicDocument.topic.id,
+        isSuperAdmin: isSuperAdmin(role),
+        limit: 6,
+      })
+    : [];
+
   const effectiveDepartmentId = doc.departmentId ?? doc.project?.departmentId ?? null;
   const canManage =
     Boolean(isOwner) ||
@@ -150,6 +161,7 @@ export async function GET(req, { params }) {
     ...docWithoutRawConflicts,
     conflicts,
     relatedDocuments,
+    experts,
     fileUrl: signedUrl,
     fileDownloadUrl: downloadUrl,
     created_at: doc.createdAt.toISOString(),

@@ -134,6 +134,8 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
           ? [{ label: "Dashboard", href: `/org/${orgId}/dashboard`, icon: LayoutDashboard }]
           : []),
         { label: "Knowledge Repository", href: `/org/${orgId}/repository`, icon: Library },
+        { label: "Experts", href: `/org/${orgId}/experts`, icon: Users },
+        { label: "Recommendations", href: `/org/${orgId}/recommendations`, icon: Sparkles },
         ...(isSuperAdmin
           ? [{ label: "Needs Review", href: `/org/${orgId}/needs-review`, icon: ClipboardList }]
           : []),
