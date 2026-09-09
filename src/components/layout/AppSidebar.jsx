@@ -22,6 +22,8 @@ import {
   Loader2,
   Shield,
   X,
+  Users,
+  Sparkles,
 } from "lucide-react";
 import Image from "next/image";
 import CreateOrgModal from "@/components/org/CreateOrgModal";
