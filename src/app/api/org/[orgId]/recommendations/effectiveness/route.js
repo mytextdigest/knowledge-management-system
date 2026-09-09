@@ -65,9 +65,49 @@ export async function GET(req, { params }) {
     zeroClickThrough: Number(row.engagements || 0) === 0,
   }));
 
+  // Org-wide totals across every recommended document in the window, not just
+  // the top 10 shown above - the top-10 list is for "what's popular", these
+  // totals are for "how much recommendation activity happened overall".
+  const [totals] = await prisma.$queryRaw`
+    WITH impressions AS (
+      SELECT di."documentId",
+        COUNT(*)::int AS impressions,
+        MIN(di."created_at") AS "firstImpressionAt"
+      FROM "DocumentInteraction" di
+      JOIN "Document" d ON d.id = di."documentId"
+      LEFT JOIN "Project" p ON p.id = d."projectId"
+      WHERE di."orgId" = ${orgId}
+        AND di.type = 'recommendation_impression'
+        AND di."created_at" >= ${since}
+        AND (${departmentId}::text IS NULL OR COALESCE(d."departmentId", p."departmentId") = ${departmentId})
+        AND d.lifecycle = 'published'
+        AND (
+          d.scope = 'repository'
+          OR (d."projectId" IS NOT NULL AND p.scope = 'org' AND p."orgId" = ${orgId})
+        )
+      GROUP BY di."documentId"
+    ), engagements AS (
+      SELECT di."documentId", COUNT(*)::int AS engagements
+      FROM "DocumentInteraction" di
+      JOIN impressions i ON i."documentId" = di."documentId"
+      WHERE di."orgId" = ${orgId}
+        AND di.type IN ('view','download')
+        AND di."created_at" >= i."firstImpressionAt"
+      GROUP BY di."documentId"
+    )
+    SELECT
+      COALESCE(SUM(i.impressions), 0)::int AS "totalImpressions",
+      COUNT(*)::int AS "totalDocuments",
+      COUNT(*) FILTER (WHERE COALESCE(e.engagements, 0) = 0)::int AS "totalZeroClick"
+    FROM impressions i
+    LEFT JOIN engagements e ON e."documentId" = i."documentId"
+  `;
+
   return NextResponse.json({
     periodDays: 30,
     items,
-    zeroClickThroughCount: items.filter((item) => item.zeroClickThrough).length,
+    totalImpressions: Number(totals?.totalImpressions || 0),
+    totalDocumentsRecommended: Number(totals?.totalDocuments || 0),
+    zeroClickThroughCount: Number(totals?.totalZeroClick || 0),
   });
 }

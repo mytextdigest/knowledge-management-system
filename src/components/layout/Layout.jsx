@@ -10,7 +10,7 @@ import ApiKeyRequiredModal from '@/components/modals/ApiKeyRequiredModal';
 import { useApiKeyCheck } from '@/hooks/useApiKeyCheck';
 import { cn } from '@/lib/utils';
 
-const Layout = ({ children, className, orgId: orgIdProp, fullBleed = false }) => {
+const Layout = ({ children, className, orgId: orgIdProp, fullBleed = false, fixedHeight = false }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [resolvedOrgId, setResolvedOrgId] = useState(orgIdProp || null);
   const { hasApiKey, isLoading, refreshApiKeyStatus } = useApiKeyCheck();
@@ -66,12 +66,21 @@ const Layout = ({ children, className, orgId: orgIdProp, fullBleed = false }) =>
           initial={{ opacity: 0, x: 12 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.3 }}
-          className={cn("min-h-screen lg:pl-[268px]", className)}
+          className={cn(
+            "lg:pl-[268px]",
+            fixedHeight ? "h-screen flex flex-col overflow-hidden" : "min-h-screen",
+            className
+          )}
         >
           {fullBleed ? (
             children
           ) : (
-            <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+            <div
+              className={cn(
+                "mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8",
+                fixedHeight && "flex-1 min-h-0 flex flex-col overflow-hidden"
+              )}
+            >
               {children}
             </div>
           )}

@@ -1,8 +1,54 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { FileText, Sparkles, Search, TrendingUp } from "lucide-react";
+import Layout from "@/components/layout/Layout";
+
+function RecommendationCardsSkeleton() {
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {[1, 2, 3, 4].map((i) => (
+        <div key={i} className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 h-5 w-5 shrink-0 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="h-4 w-3/4 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+              <div className="h-3 w-full rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
+              <div className="h-3 w-2/3 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EffectivenessSkeleton() {
+  return (
+    <>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="rounded-xl border p-4">
+            <div className="h-3 w-28 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
+            <div className="mt-2 h-7 w-12 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+          </div>
+        ))}
+      </div>
+      <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+        <div className="h-4 w-56 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+        <div className="mt-3 space-y-3">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="flex items-center justify-between gap-3">
+              <div className="h-3 w-1/2 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
+              <div className="h-3 w-20 shrink-0 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
 
 export default function RecommendationsPage() {
   const { orgId } = useParams();
@@ -16,6 +62,7 @@ export default function RecommendationsPage() {
   const [departmentId, setDepartmentId] = useState("");
   const [orgRole, setOrgRole] = useState(null);
   const [effectiveness, setEffectiveness] = useState(null);
+  const [effectivenessLoading, setEffectivenessLoading] = useState(false);
 
   const canUseDepartmentMode = orgRole === "super_admin" || orgRole === "dept_admin";
 
@@ -86,16 +133,21 @@ export default function RecommendationsPage() {
   useEffect(() => { load("", mode); }, [orgId, mode, departmentId]);
 
   useEffect(() => {
-    if (!orgId || !departmentId || !canUseDepartmentMode) return;
+    if (!orgId || !departmentId || !canUseDepartmentMode || mode !== "department") {
+      setEffectiveness(null);
+      setEffectivenessLoading(false);
+      return;
+    }
+    setEffectivenessLoading(true);
     fetch(`/api/org/${orgId}/recommendations/effectiveness?departmentId=${departmentId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => setEffectiveness(data))
-      .catch(() => {});
-  }, [orgId, departmentId, canUseDepartmentMode]);
-
-  const impressionCount = useMemo(() => (effectiveness?.items || []).reduce((sum, item) => sum + Number(item.impressions || 0), 0), [effectiveness]);
+      .catch(() => {})
+      .finally(() => setEffectivenessLoading(false));
+  }, [orgId, departmentId, canUseDepartmentMode, mode]);
 
   return (
+    <Layout orgId={orgId}>
     <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><div className="flex items-center gap-2"><Sparkles className="h-6 w-6 text-primary-600" /><h1 className="text-2xl font-bold">Knowledge Recommendations</h1></div><p className="mt-1 text-sm text-gray-500">Proactive knowledge based on your work, feedback, views, and document relationships.</p></div>
@@ -118,32 +170,40 @@ export default function RecommendationsPage() {
         </select>
       )}
 
-      {canUseDepartmentMode && effectiveness && (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border p-4"><p className="text-xs text-gray-500">Recommendation impressions · 30d</p><p className="mt-1 text-2xl font-semibold">{impressionCount}</p></div>
-          <div className="rounded-xl border p-4"><p className="text-xs text-gray-500">Documents recommended</p><p className="mt-1 text-2xl font-semibold">{effectiveness.items?.length || 0}</p></div>
-          <div className="rounded-xl border p-4"><p className="text-xs text-gray-500">Zero-click documents</p><p className="mt-1 text-2xl font-semibold">{effectiveness.zeroClickThroughCount || 0}</p></div>
-        </div>
-      )}
-
-      {canUseDepartmentMode && effectiveness?.items?.length > 0 && (
-        <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <h2 className="font-semibold">Most recommended documents · 30d</h2>
-          <div className="mt-3 space-y-2">
-            {effectiveness.items.slice(0, 5).map((item) => (
-              <div key={item.documentId} className="flex items-center justify-between gap-3 text-sm">
-                <button onClick={() => router.push(`/document?id=${item.documentId}`)} className="min-w-0 truncate text-left font-medium text-primary-700 hover:underline dark:text-primary-300">
-                  {item.filename}
-                </button>
-                <span className="shrink-0 text-xs text-gray-500">{item.impressions} shown · {item.engagements} engaged</span>
+      {canUseDepartmentMode && mode === "department" && (
+        effectivenessLoading ? (
+          <EffectivenessSkeleton />
+        ) : (
+          <>
+            {effectiveness && (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border p-4"><p className="text-xs text-gray-500">Recommendation impressions · 30d</p><p className="mt-1 text-2xl font-semibold">{effectiveness.totalImpressions || 0}</p></div>
+                <div className="rounded-xl border p-4"><p className="text-xs text-gray-500">Documents recommended</p><p className="mt-1 text-2xl font-semibold">{effectiveness.totalDocumentsRecommended || 0}</p></div>
+                <div className="rounded-xl border p-4"><p className="text-xs text-gray-500">Zero-click documents</p><p className="mt-1 text-2xl font-semibold">{effectiveness.zeroClickThroughCount || 0}</p></div>
               </div>
-            ))}
-          </div>
-        </div>
+            )}
+
+            {effectiveness?.items?.length > 0 && (
+              <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+                <h2 className="font-semibold">Top 10 most recommended documents · 30d</h2>
+                <div className="mt-3 space-y-2">
+                  {effectiveness.items.slice(0, 5).map((item) => (
+                    <div key={item.documentId} className="flex items-center justify-between gap-3 text-sm">
+                      <button onClick={() => router.push(`/document?id=${item.documentId}`)} className="min-w-0 truncate text-left font-medium text-primary-700 hover:underline dark:text-primary-300">
+                        {item.filename}
+                      </button>
+                      <span className="shrink-0 text-xs text-gray-500">{item.impressions} shown · {item.engagements} engaged</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )
       )}
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-      {loading ? <p className="text-sm text-gray-500">Finding relevant knowledge...</p> : items.length === 0 ? <p className="text-sm text-gray-500">No recommendations surfaced yet.</p> : (
+      {loading ? <RecommendationCardsSkeleton /> : items.length === 0 ? <p className="text-sm text-gray-500">No recommendations surfaced yet.</p> : (
         <div className="grid gap-3 md:grid-cols-2">
           {items.map((item) => (
             <button key={item.documentId} onClick={() => router.push(`/document?id=${item.documentId}`)} className="rounded-xl border border-gray-200 bg-white p-4 text-left hover:border-primary-300 hover:shadow-sm dark:border-gray-700 dark:bg-gray-800">
@@ -153,5 +213,6 @@ export default function RecommendationsPage() {
         </div>
       )}
     </div>
+    </Layout>
   );
 }

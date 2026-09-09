@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Search, Mail, Users, CheckCircle2, XCircle } from "lucide-react";
+import Layout from "@/components/layout/Layout";
 
 export default function ExpertsPage() {
   const { orgId } = useParams();
@@ -46,9 +47,10 @@ export default function ExpertsPage() {
   }
 
   return (
+    <Layout orgId={orgId}>
     <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div>
-        <div className="flex items-center gap-2"><Users className="h-6 w-6 text-primary-600" /><h1 className="text-2xl font-bold">Expert Directory</h1></div>
+        <div className="flex items-center gap-2"><Users className="h-6 w-6 text-primary-600" /><h1 className="text-2xl font-bold">Experts</h1></div>
         <p className="mt-1 text-sm text-gray-500">Search who knows about a topic across the knowledge you can access.</p>
       </div>
 
@@ -82,5 +84,6 @@ export default function ExpertsPage() {
         </div>
       )}
     </div>
+    </Layout>
   );
 }

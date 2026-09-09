@@ -7,7 +7,7 @@ import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2 } from 'lucide-react';
+import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
@@ -36,7 +36,7 @@ function DocumentContent() {
   const [chat, setChat] = useState([]);
   const [question, setQuestion] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' or 'summary'
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'summary' | 'guide' | 'insights'
   const [summary, setSummary] = useState(null);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [summaryCopied, setSummaryCopied] = useState(false);
@@ -823,8 +823,8 @@ function DocumentContent() {
 
   if (docError) {
     return (
-      <Layout>
-        <div className="h-[calc(100vh-8rem)] flex items-center justify-center">
+      <Layout fixedHeight>
+        <div className="h-full flex items-center justify-center">
           <div className="text-center">
             <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
             <p className="text-gray-600 dark:text-gray-400 mb-4">{docError}</p>
@@ -837,8 +837,8 @@ function DocumentContent() {
 
   if (!doc) {
     return (
-      <Layout>
-        <div className="h-[calc(100vh-8rem)] flex items-center justify-center">
+      <Layout fixedHeight>
+        <div className="h-full flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
             <p className="text-gray-600 dark:text-gray-400">Loading document...</p>
@@ -902,6 +902,8 @@ function DocumentContent() {
     </motion.div>
   );
 
+  const insightsCount = (doc?.experts?.length || 0) + (doc?.relatedDocuments?.length || 0) + (doc?.projectLinks?.length || 0);
+
   // Chat Interface Panel (Right Column)
   const chatPanel = (
     <div className="chat-container">
@@ -927,57 +929,6 @@ function DocumentContent() {
               </motion.div>
             )}
           </div>
-
-          {doc?.experts?.length > 0 && (
-            <div className="mb-3 rounded-lg border border-violet-100 bg-violet-50/60 p-3 text-xs dark:border-violet-900 dark:bg-violet-950/20">
-              <p className="font-semibold text-violet-900 dark:text-violet-200">People who know this</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {doc.experts.slice(0, 5).map((expert) => (
-                  <a key={`${expert.id}-${expert.topicId}`} href={`mailto:${expert.email}`} className="rounded border border-violet-200 bg-white px-2 py-1 text-violet-800 hover:bg-violet-100 dark:border-violet-800 dark:bg-gray-900 dark:text-violet-200">
-                    {expert.name || expert.email} · {Number(expert.score || 0).toFixed(1)}
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {(doc?.relatedDocuments?.length > 0 || doc?.projectLinks?.length > 0) && (
-            <div className="mb-3 space-y-2 rounded-lg border border-cyan-100 bg-cyan-50/60 p-3 text-xs dark:border-cyan-900 dark:bg-cyan-950/20">
-              {doc.relatedDocuments?.length > 0 && (
-                <div>
-                  <p className="font-semibold text-cyan-900 dark:text-cyan-200">Related documents</p>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {doc.relatedDocuments.slice(0, 4).map((related) => (
-                      <button key={related.id} type="button" onClick={() => router.push(`/document?id=${related.id}`)} className="rounded border border-cyan-200 bg-white px-2 py-1 text-cyan-800 hover:bg-cyan-100 dark:border-cyan-800 dark:bg-gray-900 dark:text-cyan-200">
-                        {related.filename} · {Math.round(Number(related.weight || 0) * 100)}%
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {doc.projectLinks?.length > 0 && (
-                <div>
-                  <p className="font-semibold text-cyan-900 dark:text-cyan-200">Suggested project links</p>
-                  <div className="mt-1 space-y-1.5">
-                    {doc.projectLinks.map((link) => (
-                      <div key={link.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-cyan-200 bg-white px-2 py-1.5 dark:border-cyan-800 dark:bg-gray-900">
-                        <span className="text-cyan-800 dark:text-cyan-300">
-                          {link.project?.name}
-                          {link.status === "confirmed" && <span className="ml-1 text-green-600">Confirmed</span>}
-                        </span>
-                        {link.status === "suggested" && (
-                          <span className="flex gap-1">
-                            <button type="button" onClick={() => updateProjectLinkStatus(link.id, "confirmed")} className="rounded bg-green-600 px-2 py-1 text-white hover:bg-green-700">Confirm</button>
-                            <button type="button" onClick={() => updateProjectLinkStatus(link.id, "dismissed")} className="rounded border border-gray-300 px-2 py-1 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300">Dismiss</button>
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Tab Navigation */}
           <div className="flex space-x-1 mt-4">
@@ -1022,6 +973,30 @@ function DocumentContent() {
             >
               <BookOpen className="h-4 w-4" />
               <span>Pagewise Summary</span>
+            </Button>
+            <Button
+              variant={activeTab === 'insights' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveTab('insights')}
+              className={cn(
+                "flex items-center space-x-2",
+                activeTab === 'insights'
+                  ? "text-white dark:text-gray-200"
+                  : "text-gray-600 dark:text-gray-400"
+              )}
+            >
+              <Network className="h-4 w-4" />
+              <span>Insights</span>
+              {insightsCount > 0 && (
+                <span className={cn(
+                  "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+                  activeTab === 'insights'
+                    ? "bg-white/25 text-white"
+                    : "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                )}>
+                  {insightsCount}
+                </span>
+              )}
             </Button>
           </div>
         </CardHeader>
@@ -1300,6 +1275,64 @@ function DocumentContent() {
                   )}
                 </div>
               </form>
+            </div>
+          ) : activeTab === 'insights' ? (
+            /* Insights Area - people who know this, related documents, suggested project links */
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900/50 custom-scrollbar">
+              {doc?.experts?.length > 0 && (
+                <div className="rounded-lg border border-violet-100 bg-violet-50/60 p-3 text-xs dark:border-violet-900 dark:bg-violet-950/20">
+                  <p className="font-semibold text-violet-900 dark:text-violet-200">People who know this</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {doc.experts.map((expert) => (
+                      <a key={`${expert.id}-${expert.topicId}`} href={`mailto:${expert.email}`} className="rounded border border-violet-200 bg-white px-2 py-1 text-violet-800 hover:bg-violet-100 dark:border-violet-800 dark:bg-gray-900 dark:text-violet-200">
+                        {expert.name || expert.email} · {Number(expert.score || 0).toFixed(1)}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {doc?.relatedDocuments?.length > 0 && (
+                <div className="rounded-lg border border-cyan-100 bg-cyan-50/60 p-3 text-xs dark:border-cyan-900 dark:bg-cyan-950/20">
+                  <p className="font-semibold text-cyan-900 dark:text-cyan-200">Related documents</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {doc.relatedDocuments.map((related) => (
+                      <button key={related.id} type="button" onClick={() => router.push(`/document?id=${related.id}`)} className="rounded border border-cyan-200 bg-white px-2 py-1 text-cyan-800 hover:bg-cyan-100 dark:border-cyan-800 dark:bg-gray-900 dark:text-cyan-200">
+                        {related.filename} · {Math.round(Number(related.weight || 0) * 100)}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {doc?.projectLinks?.length > 0 && (
+                <div className="rounded-lg border border-cyan-100 bg-cyan-50/60 p-3 text-xs dark:border-cyan-900 dark:bg-cyan-950/20">
+                  <p className="font-semibold text-cyan-900 dark:text-cyan-200">Suggested project links</p>
+                  <div className="mt-2 space-y-1.5">
+                    {doc.projectLinks.map((link) => (
+                      <div key={link.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-cyan-200 bg-white px-2 py-1.5 dark:border-cyan-800 dark:bg-gray-900">
+                        <span className="text-cyan-800 dark:text-cyan-300">
+                          {link.project?.name}
+                          {link.status === "confirmed" && <span className="ml-1 text-green-600">Confirmed</span>}
+                        </span>
+                        {link.status === "suggested" && (
+                          <span className="flex gap-1">
+                            <button type="button" onClick={() => updateProjectLinkStatus(link.id, "confirmed")} className="rounded bg-green-600 px-2 py-1 text-white hover:bg-green-700">Confirm</button>
+                            <button type="button" onClick={() => updateProjectLinkStatus(link.id, "dismissed")} className="rounded border border-gray-300 px-2 py-1 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300">Dismiss</button>
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {insightsCount === 0 && (
+                <div className="flex flex-col items-center justify-center h-full text-center py-12 space-y-2">
+                  <Network className="h-8 w-8 text-gray-300 dark:text-gray-600" />
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No experts, related documents, or suggested links yet.</p>
+                </div>
+              )}
             </div>
           ) : (
             /* Summary Area */
@@ -1580,8 +1613,8 @@ function DocumentContent() {
   );
 
   return (
-    <Layout orgId={doc?.orgId}>
-      <div className="h-[calc(100vh-8rem)]">
+    <Layout orgId={doc?.orgId} fixedHeight>
+      <div className="h-full">
         <TwoColumnLayout
           leftColumn={documentPanel}
           rightColumn={chatPanel}
