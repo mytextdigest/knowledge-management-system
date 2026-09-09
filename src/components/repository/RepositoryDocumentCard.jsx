@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, Download, Info, Loader2, Check, X, AlertTriangle, FileText, FileSpreadsheet } from "lucide-react";
+import Image from "next/image";
+import { Eye, Download, Info, Loader2, Check, X, AlertTriangle } from "lucide-react";
 import { Modal, ModalHeader, ModalTitle, ModalContent } from "@/components/ui/Modal";
 
 const CATEGORIES = [
@@ -37,14 +38,23 @@ const ALLOWED_TRANSITIONS = {
   retired: { published: ["super_admin"], draft: ["super_admin"] },
 };
 
-function getFileIconMeta(fileType = "", filename = "") {
+const FILE_TYPE_ICONS = {
+  pdf: { src: "/icons/file-types/pdf.png", alt: "PDF file" },
+  word: { src: "/icons/file-types/word.png", alt: "Word document" },
+  excel: { src: "/icons/file-types/excel.png", alt: "Excel spreadsheet" },
+  csv: { src: "/icons/file-types/csv.png", alt: "CSV file" },
+  txt: { src: "/icons/file-types/txt.png", alt: "Text file" },
+  default: { src: "/icons/file-types/docs.png", alt: "Document" },
+};
+
+function getFileIcon(fileType = "", filename = "") {
   const value = `${fileType} ${filename}`.toLowerCase();
-  if (value.includes("pdf")) return { Icon: FileText, className: "text-red-500" };
-  if (value.includes("sheet") || value.includes("excel") || value.includes("csv") || value.includes("xlsx") || value.includes("xls")) {
-    return { Icon: FileSpreadsheet, className: "text-green-600" };
-  }
-  if (value.includes("text") || value.includes("txt")) return { Icon: FileText, className: "text-gray-500" };
-  return { Icon: FileText, className: "text-blue-600" };
+  if (value.includes("pdf")) return FILE_TYPE_ICONS.pdf;
+  if (value.includes("csv")) return FILE_TYPE_ICONS.csv;
+  if (value.includes("sheet") || value.includes("excel") || value.includes("xlsx") || value.includes("xls")) return FILE_TYPE_ICONS.excel;
+  if (value.includes("text") || value.includes("txt")) return FILE_TYPE_ICONS.txt;
+  if (value.includes("word") || value.includes("doc")) return FILE_TYPE_ICONS.word;
+  return FILE_TYPE_ICONS.default;
 }
 
 function confidenceLabel(value) {
@@ -210,7 +220,7 @@ export default function RepositoryDocumentCard({
   }
 
   const uploadedAt = document?.createdAt ? new Date(document.createdAt).toLocaleDateString() : "Unknown date";
-  const { Icon: FileTypeIcon, className: fileIconClassName } = getFileIconMeta(document?.fileType, document?.filename);
+  const fileIcon = getFileIcon(document?.fileType, document?.filename);
 
   async function getFileUrls() {
     const res = await fetch(`/api/documents/${document.id}`);
@@ -248,8 +258,8 @@ export default function RepositoryDocumentCard({
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
       <div className="flex items-start gap-3">
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center ${fileIconClassName}`}>
-          <FileTypeIcon className="h-7 w-7" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center">
+          <Image src={fileIcon.src} alt={fileIcon.alt} width={36} height={36} className="h-9 w-9 object-contain" />
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-gray-900 dark:text-white">{document?.filename || document?.title || "Untitled document"}</h3>
