@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { moveDocumentToTopic } from "@/lib/topicUtils";
+import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 
 export async function POST(req, { params }) {
   const session = await getServerSession();
@@ -11,12 +12,9 @@ export async function POST(req, { params }) {
 
   const { id: docId } = await params;
 
-  // Verify document belongs to user
-  const doc = await prisma.document.findFirst({
-    where: { id: docId, user: { email: session.user.email } },
-    select: { id: true },
-  });
-  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const access = await resolveDocumentManagementAccess(session.user.email, docId);
+  if (!access.document) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!access.canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   // moveDocumentToTopic with null newTopicId = unassign
   await moveDocumentToTopic(docId, null);

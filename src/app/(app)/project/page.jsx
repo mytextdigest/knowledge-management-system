@@ -1,4 +1,5 @@
 'use client'
+
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Layout from '@/components/layout/Layout';
@@ -6,46 +7,59 @@ import TopicsView from '@/components/topics/TopicsView';
 import FileUpload from '@/components/documents/FileUpload';
 import { Modal, ModalHeader, ModalTitle, ModalContent } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Pencil } from 'lucide-react';
+import { Pencil, Clock, ChevronDown, ChevronUp } from 'lucide-react';
+import BackButton from '@/components/ui/BackButton';
 import { motion } from 'framer-motion';
 import ChatInterface from "@/components/chat/ChatInterface";
 import TwoColumnLayout from "@/components/layout/TwoColumnLayout";
 import DeleteConfirmationModal from '@/components/modals/DeleteConfirmationModal';
+import LessonsPanel from '@/components/lessons/LessonsPanel';
 import EditDocumentModal from '@/components/modals/EditDocumentModal';
 import EditProjectModal from '@/components/modals/EditProjectModal';
 import { useSession } from "next-auth/react";
+import { useToast, ToastProvider } from "@/components/ui/Toast";
 
 const PROCESSING_STATUSES = new Set([
-  'queued', 'extracting', 'running_ocr', 'chunked', 'embedding', 'embedded', 'summarizing', 'clustering',
+  'queued',
+  'extracting',
+  'running_ocr',
+  'chunked',
+  'embedding',
+  'embedded',
+  'summarizing',
+  'clustering',
 ]);
 
-
 function ProjectPageInner() {
-  const [docs, setDocs]       = useState([]);
-  const [topics, setTopics]   = useState([]);
+  const [docs, setDocs] = useState([]);
+  const [topics, setTopics] = useState([]);
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
-  const [activeFilter, setActiveFilter]       = useState('all');
+  const [activeFilter, setActiveFilter] = useState('all');
+
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [documentToDelete, setDocumentToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const [showRenameModal, setShowRenameModal]   = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
   const [documentToRename, setDocumentToRename] = useState(null);
-  const [isRenaming, setIsRenaming]             = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
 
   const [showEditProjectModal, setShowEditProjectModal] = useState(false);
-  const [isEditingProject, setIsEditingProject]         = useState(false);
+  const [isEditingProject, setIsEditingProject] = useState(false);
 
-  const router       = useRouter();
+  const [timeline, setTimeline] = useState([]);
+  const [timelineOpen, setTimelineOpen] = useState(false);
+
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const projectId    = searchParams.get("id");
+  const projectId = searchParams.get("id");
 
   const { data: session } = useSession();
+  const toast = useToast();
   const userId = session?.user?.id;
 
-  // Polling ref — holds the setInterval id
   const pollRef = useRef(null);
 
   const stopPolling = () => {
@@ -60,32 +74,46 @@ function ProjectPageInner() {
     setTopics([]);
     setProject(null);
     stopPolling();
+
     if (projectId) {
       loadProject();
       loadDocuments();
       loadTopics();
+      loadTimeline();
     }
+
     return () => stopPolling();
   }, [projectId]);
+
+  const loadTimeline = async () => {
+    if (!projectId) return;
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/timeline`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      setTimeline(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to load timeline:', err);
+    }
+  };
 
   const loadProject = async () => {
     try {
       setLoading(true);
-  
+
       const res = await fetch(`/api/projects/${projectId}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
 
-      console.log("fetch project: ", res)
-  
       if (!res.ok) {
         console.error('Failed to fetch project:', res.status);
         return;
       }
-  
+
       const projectData = await res.json();
-      console.log("Project Data: ", projectData)
       setProject(projectData);
     } catch (err) {
       console.error('Failed to load project:', err);
@@ -93,7 +121,6 @@ function ProjectPageInner() {
       setLoading(false);
     }
   };
-  
 
   const loadDocuments = async () => {
     try {
@@ -110,30 +137,47 @@ function ProjectPageInner() {
       }
 
       const data = await res.json();
-      setDocs(prev => {
-        // Detect newly-ready documents (were processing, now ready) → reload topics
-        const prevIds = new Set(prev.filter(d => PROCESSING_STATUSES.has(d.status)).map(d => d.id));
-        const newlyReady = data.filter(d => d.status === 'ready' && prevIds.has(d.id));
+
+      setDocs((prev) => {
+        const prevIds = new Set(
+          prev.filter((d) => PROCESSING_STATUSES.has(d.status)).map((d) => d.id)
+        );
+
+        const newlyReady = data.filter(
+          (d) => d.status === 'ready' && prevIds.has(d.id)
+        );
+
         if (newlyReady.length > 0) {
           loadTopics();
         }
+
         return data;
       });
 
-      // Start polling if any documents are still processing; stop if all done
-      const anyProcessing = data.some(d => PROCESSING_STATUSES.has(d.status));
+      const anyProcessing = data.some((d) => PROCESSING_STATUSES.has(d.status));
+
       if (anyProcessing && !pollRef.current) {
         pollRef.current = setInterval(async () => {
           const r = await fetch(`/api/documents?projectId=${projectId}`);
           if (!r.ok) return;
+
           const fresh = await r.json();
-          setDocs(prev => {
-            const prevProcessing = new Set(prev.filter(d => PROCESSING_STATUSES.has(d.status)).map(d => d.id));
-            const newlyReadyNow = fresh.filter(d => d.status === 'ready' && prevProcessing.has(d.id));
+
+          setDocs((prev) => {
+            const prevProcessing = new Set(
+              prev.filter((d) => PROCESSING_STATUSES.has(d.status)).map((d) => d.id)
+            );
+
+            const newlyReadyNow = fresh.filter(
+              (d) => d.status === 'ready' && prevProcessing.has(d.id)
+            );
+
             if (newlyReadyNow.length > 0) loadTopics();
+
             return fresh;
           });
-          const stillProcessing = fresh.some(d => PROCESSING_STATUSES.has(d.status));
+
+          const stillProcessing = fresh.some((d) => PROCESSING_STATUSES.has(d.status));
           if (!stillProcessing) stopPolling();
         }, 3000);
       } else if (!anyProcessing) {
@@ -148,9 +192,11 @@ function ProjectPageInner() {
 
   const loadTopics = async () => {
     if (!projectId) return;
+
     try {
       const res = await fetch(`/api/projects/${projectId}/topics`);
       if (!res.ok) return;
+
       const data = await res.json();
       setTopics(data);
     } catch (err) {
@@ -158,7 +204,7 @@ function ProjectPageInner() {
     }
   };
 
-  async function handleFileUpload(file, userId, projectId, visibility) {
+  async function handleFileUpload(file, userId, projectId, visibility, category) {
     const presignRes = await fetch("/api/s3/upload", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -169,79 +215,80 @@ function ProjectPageInner() {
         projectId,
       }),
     });
-  
+
     const presignData = await presignRes.json();
-  
-    // 🔴 Handle early rejection
+
     if (!presignRes.ok) {
       if (presignData?.error === "DUPLICATE_FILENAME") {
         throw new Error(presignData.message || "Duplicate filename");
       }
-  
+
       throw new Error("Failed to prepare upload");
     }
-  
+
     const { url, fields, key } = presignData;
-  
-    // ✅ Safe now
+
     const formData = new FormData();
     Object.entries(fields).forEach(([k, v]) => formData.append(k, v));
     formData.append("file", file);
-  
+
     const upload = await fetch(url, { method: "POST", body: formData });
+
     if (!upload.ok) {
       throw new Error("S3 upload failed");
     }
-  
+
     const ingestForm = new FormData();
     ingestForm.append("s3Key", key);
     ingestForm.append("projectId", projectId);
     ingestForm.append("visibility", visibility);
-  
+    if (category) ingestForm.append("category", category);
+
     const ingestRes = await fetch("/api/documents/ingest", {
       method: "POST",
       body: ingestForm,
     });
-  
+
     if (!ingestRes.ok) {
       throw new Error("Ingestion failed");
     }
-  
+
     await loadDocuments();
   }
-  
 
   const handleDelete = async (id) => {
-    const docToDelete = docs.find(doc => doc.id === id);
+    const docToDelete = docs.find((doc) => doc.id === id);
     setDocumentToDelete(docToDelete);
     setShowDeleteModal(true);
   };
 
   const handleConfirmDelete = async () => {
     if (!documentToDelete) return;
+
     setIsDeleting(true);
-  
+
     try {
-      console.log("Document id: ", documentToDelete.id)
       const res = await fetch(`/api/documents/${documentToDelete.id}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
       });
-  
+
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         console.error("Failed to delete document:", res.status);
+        toast.error(data.error || "Unable to delete this document.");
         return;
       }
-  
+
       await loadDocuments();
       setShowDeleteModal(false);
     } catch (err) {
       console.error("Error deleting document:", err);
+      toast.error("Unable to delete this document. Please try again.");
     } finally {
       setIsDeleting(false);
     }
   };
-  
 
   const handleCancelDelete = () => {
     setShowDeleteModal(false);
@@ -254,15 +301,16 @@ function ProjectPageInner() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
       });
-  
+
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         console.error("Failed to toggle star:", res.status);
+        toast.error(data.error || "Unable to update the document star.");
         return;
       }
-  
+
       const { starred } = await res.json();
-  
-      // update locally without re-fetching everything
+
       setDocs((prev) =>
         prev.map((doc) =>
           doc.id === id ? { ...doc, starred } : doc
@@ -270,35 +318,23 @@ function ProjectPageInner() {
       );
     } catch (err) {
       console.error("Failed to toggle star:", err);
+      toast.error("Unable to update the document star. Please try again.");
     }
   };
 
   const handleToggleSelect = async (id) => {
     try {
-      // If running inside Electron, use the API instead of IPC
-      // if (typeof window !== "undefined" && !window.api) {
-      //   // Browser dev fallback (same as before)
-      //   setDocuments((docs) =>
-      //     docs.map((doc) =>
-      //       doc.id === id ? { ...doc, selected: !doc.selected } : doc
-      //     )
-      //   );
-      //   return;
-      // }
-  
-      // --- API CALL (replacing the IPC handler) ---
       const res = await fetch(`/api/documents/${id}/toggle-selection`, {
         method: "POST",
       });
-  
+
       const data = await res.json();
-  
+
       if (!data.success) {
         console.error("Toggle selection API error:", data.error);
         return;
       }
-  
-      // Reload documents from server
+
       await loadDocuments();
     } catch (err) {
       console.error("Toggle selection failed:", err);
@@ -312,25 +348,34 @@ function ProjectPageInner() {
 
   const handleSaveRename = async (newFilename) => {
     if (!documentToRename) return;
+
     setIsRenaming(true);
+
     try {
       const res = await fetch(`/api/documents/${documentToRename.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename: newFilename }),
       });
+
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         console.error('Rename failed:', data.error);
+        toast.error(data.error || 'Unable to rename this document.');
         return;
       }
+
       setDocs((prev) =>
-        prev.map((d) => d.id === documentToRename.id ? { ...d, filename: newFilename } : d)
+        prev.map((d) =>
+          d.id === documentToRename.id ? { ...d, filename: newFilename } : d
+        )
       );
+
       setShowRenameModal(false);
       setDocumentToRename(null);
     } catch (err) {
       console.error('Rename error:', err);
+      toast.error('Unable to rename this document. Please try again.');
     } finally {
       setIsRenaming(false);
     }
@@ -339,20 +384,34 @@ function ProjectPageInner() {
   const handleRecluster = async () => {
     try {
       await fetch(`/api/projects/${projectId}/recluster`, { method: 'POST' });
-      // Start polling to pick up clustering status updates
+
       if (!pollRef.current) {
         pollRef.current = setInterval(async () => {
           const r = await fetch(`/api/documents?projectId=${projectId}`);
           if (!r.ok) return;
+
           const fresh = await r.json();
-          setDocs(prev => {
-            const prevProcessing = new Set(prev.filter(d => PROCESSING_STATUSES.has(d.status)).map(d => d.id));
-            const newlyReadyNow = fresh.filter(d => d.status === 'ready' && prevProcessing.has(d.id));
+
+          setDocs((prev) => {
+            const prevProcessing = new Set(
+              prev.filter((d) => PROCESSING_STATUSES.has(d.status)).map((d) => d.id)
+            );
+
+            const newlyReadyNow = fresh.filter(
+              (d) => d.status === 'ready' && prevProcessing.has(d.id)
+            );
+
             if (newlyReadyNow.length > 0) loadTopics();
+
             return fresh;
           });
-          const stillProcessing = fresh.some(d => PROCESSING_STATUSES.has(d.status));
-          if (!stillProcessing) { stopPolling(); loadTopics(); }
+
+          const stillProcessing = fresh.some((d) => PROCESSING_STATUSES.has(d.status));
+
+          if (!stillProcessing) {
+            stopPolling();
+            loadTopics();
+          }
         }, 3000);
       }
     } catch (err) {
@@ -364,18 +423,22 @@ function ProjectPageInner() {
 
   const handleSaveProject = async (name, description) => {
     if (!projectId) return;
+
     setIsEditingProject(true);
+
     try {
       const res = await fetch(`/api/projects/${projectId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, description }),
       });
+
       if (!res.ok) {
         const data = await res.json();
         console.error('Project update failed:', data.error);
         return;
       }
+
       const updated = await res.json();
       setProject(updated);
       setShowEditProjectModal(false);
@@ -393,25 +456,15 @@ function ProjectPageInner() {
       transition={{ duration: 0.5 }}
       className="h-full flex flex-col space-y-6 pt-2.5"
     >
-      {/* Page Header */}
       <div className="flex items-center justify-between mb-4">
-        <Button
-          variant="ghost"
-          onClick={() => router.push('/dashboard/')}
-          className="flex items-center space-x-2 text-gray-600 dark:text-gray-400"
-          style={{
-            '--hover-text-color': '#000000',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = '#000000';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = '';
-          }}
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span>Back to Projects</span>
-        </Button>
+        <BackButton
+          href={
+            project?.orgId && project?.departmentId
+              ? `/org/${project.orgId}/department/${project.departmentId}`
+              : '/welcome-back'
+          }
+          label={project?.department?.name ? `Back to ${project.department.name}` : 'Back'}
+        />
       </div>
 
       <div className="text-center">
@@ -419,6 +472,7 @@ function ProjectPageInner() {
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
             {project ? project.name : `Project ${projectId}`}
           </h1>
+
           {project && (
             <button
               onClick={handleEditProject}
@@ -429,15 +483,18 @@ function ProjectPageInner() {
             </button>
           )}
         </div>
+
         <p className="text-gray-600 dark:text-gray-400 mt-2">
-          {project?.description
-            ? <span>{project.description}</span>
-            : <span>Manage and organize project files</span>
-          }
+          {project?.description ? (
+            <span>{project.description}</span>
+          ) : (
+            <span>Manage and organize project files</span>
+          )}
         </p>
+
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
         <TopicsView
           topics={topics}
           documents={docs}
@@ -449,24 +506,76 @@ function ProjectPageInner() {
           onToggleStar={handleToggleStar}
           onToggleSelect={handleToggleSelect}
           onRename={handleRename}
-          onTopicsChange={async () => { await loadDocuments(); await loadTopics(); }}
+          onTopicsChange={async () => {
+            await loadDocuments();
+            await loadTopics();
+          }}
           onReclusterUnassigned={handleRecluster}
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
         />
+
+        {/* FR-P2-7: simple ordered timeline of extracted decision dates */}
+        {timeline.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={() => setTimelineOpen((prev) => !prev)}
+              className="w-full flex items-center justify-between px-4 py-3 text-left"
+            >
+              <span className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                <Clock className="h-4 w-4 text-gray-500" />
+                Timeline ({timeline.length})
+              </span>
+              {timelineOpen ? (
+                <ChevronUp className="h-4 w-4 text-gray-400" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-gray-400" />
+              )}
+            </button>
+
+            {timelineOpen && (
+              <ol className="px-4 pb-4 space-y-3 border-t border-gray-100 dark:border-gray-700 pt-3">
+                {timeline.map((event) => (
+                  <li key={event.id} className="flex gap-3">
+                    <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap pt-0.5">
+                      {new Date(event.occurredAt).toLocaleDateString()}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm text-gray-800 dark:text-gray-200">{event.description}</p>
+                      {event.rationale && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          <span className="font-medium">Why: </span>
+                          {event.rationale}
+                        </p>
+                      )}
+                      {event.documentFilename && (
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                          From: {event.documentFilename}
+                        </p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
+
+        {projectId && <LessonsPanel apiBase={`/api/projects/${projectId}/lessons`} />}
       </div>
     </motion.div>
   );
 
   const chatPanel = (
     <div className="h-full">
-      <ChatInterface className="h-full" projectId={projectId} />
+      <ChatInterface className="h-full" projectId={projectId} canManage={!!project?.canManage} />
     </div>
   );
 
   return (
-    <Layout>
-      <div className="h-[calc(100vh-8rem)]"> 
+    <Layout orgId={project?.orgId} fullBleed>
+      <div className="h-[calc(100vh-8rem)] px-4 py-8 sm:px-6 lg:px-8">
         <TwoColumnLayout
           leftColumn={documentPanel}
           rightColumn={chatPanel}
@@ -483,15 +592,17 @@ function ProjectPageInner() {
         <ModalHeader>
           <ModalTitle>Upload Documents</ModalTitle>
         </ModalHeader>
+
         <ModalContent className="flex flex-col max-h-[calc(100vh-8rem)] overflow-hidden">
           <FileUpload
-            onUpload={(file, visibility) => handleFileUpload(file, userId, projectId, visibility)}
+            onUpload={(file, visibility, category) =>
+              handleFileUpload(file, userId, projectId, visibility, category)
+            }
             onClose={() => setUploadModalOpen(false)}
           />
         </ModalContent>
       </Modal>
 
-      {/* Delete Confirmation Modal */}
       <DeleteConfirmationModal
         isOpen={showDeleteModal}
         onClose={handleCancelDelete}
@@ -503,16 +614,17 @@ function ProjectPageInner() {
         isLoading={isDeleting}
       />
 
-      {/* Rename Document Modal */}
       <EditDocumentModal
         isOpen={showRenameModal}
-        onClose={() => { setShowRenameModal(false); setDocumentToRename(null); }}
+        onClose={() => {
+          setShowRenameModal(false);
+          setDocumentToRename(null);
+        }}
         onSave={handleSaveRename}
         document={documentToRename}
         isLoading={isRenaming}
       />
 
-      {/* Edit Project Modal */}
       <EditProjectModal
         isOpen={showEditProjectModal}
         onClose={() => setShowEditProjectModal(false)}
@@ -520,12 +632,10 @@ function ProjectPageInner() {
         project={project}
         isLoading={isEditingProject}
       />
-
     </Layout>
   );
 }
 
-// Loading component for Suspense fallback
 function ProjectLoading() {
   return (
     <Layout>
@@ -539,11 +649,12 @@ function ProjectLoading() {
   );
 }
 
-// Main component with Suspense boundary
 export default function ProjectPage() {
   return (
-    <Suspense fallback={<ProjectLoading />}>
-      <ProjectPageInner />
-    </Suspense>
+    <ToastProvider>
+      <Suspense fallback={<ProjectLoading />}>
+        <ProjectPageInner />
+      </Suspense>
+    </ToastProvider>
   );
 }

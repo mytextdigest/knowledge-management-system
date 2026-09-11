@@ -10,3 +10,14 @@ export async function generateSignedUrl(key) {
 
   return getSignedUrl(s3Client, command, { expiresIn: 3600 }); // 1 hour
 }
+
+export async function generateSignedDownloadUrl(key, filename = "document") {
+  const safeFilename = String(filename || "document").replace(/[\r\n\"]/g, "_");
+  const command = new GetObjectCommand({
+    Bucket: process.env.S3_BUCKET,
+    Key: key,
+    ResponseContentDisposition: `attachment; filename="${safeFilename}"`,
+  });
+
+  return getSignedUrl(s3Client, command, { expiresIn: 3600 });
+}

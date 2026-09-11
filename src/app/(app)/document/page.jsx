@@ -7,14 +7,18 @@ import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { ArrowLeft, Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet } from 'lucide-react';
+import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network } from 'lucide-react';
+import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
 import PdfViewer from "@/components/documents/PdfViewer";
+import DocumentFullscreenModal from "@/components/documents/DocumentFullscreenModal";
 import { cn } from '@/lib/utils';
+import { copySummary, printSummary } from '@/lib/summaryActions';
 import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
 import MessageActions from "@/components/chat/MessageActions";
 import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
+import { useToast, ToastProvider } from "@/components/ui/Toast";
 
 
 
@@ -28,12 +32,14 @@ function DocumentContent() {
 
 
   const [doc, setDoc] = useState(null);
+  const [docError, setDocError] = useState(null);
   const [chat, setChat] = useState([]);
   const [question, setQuestion] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' or 'summary'
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'summary' | 'guide' | 'insights'
   const [summary, setSummary] = useState(null);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [summaryCopied, setSummaryCopied] = useState(false);
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -47,11 +53,13 @@ function DocumentContent() {
   const [copiedId, setCopiedId] = useState(null);
 
   const [expandedMessage, setExpandedMessage] = useState(null);
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
 
   // Reading Guide state
   const [pagesRead, setPagesRead] = useState(0);
   const [readingInsights, setReadingInsights] = useState([]);
   const [isLoadingPageInsight, setIsLoadingPageInsight] = useState(false);
+  const [pageInsightError, setPageInsightError] = useState(null);
   const [expandedInsightIndex, setExpandedInsightIndex] = useState(null);
   const [detectedPage, setDetectedPage] = useState(0);
   const [pdfTotalPages, setPdfTotalPages] = useState(0);
@@ -59,8 +67,34 @@ function DocumentContent() {
   const docScrollRef = useRef(null);
   const scrollDebounceRef = useRef(null);
 
+  const toast = useToast();
+
   const ext = doc?.filename?.split('.').pop().toLowerCase() ?? '';
   const isSpreadsheet = ['csv', 'xlsx', 'xls'].includes(ext);
+  const canRegenerateSummary = doc?.permissions?.canRegenerate !== false;
+  const canAskDocument = doc?.permissions?.canAsk !== false;
+  const canClearDocumentChat = doc?.permissions?.canClearChat !== false;
+
+  const updateProjectLinkStatus = async (linkId, status) => {
+    try {
+      const res = await fetch(`/api/documents/${id}/project-links/${linkId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Unable to update project suggestion");
+      setDoc((current) => ({
+        ...current,
+        projectLinks: status === "dismissed"
+          ? (current.projectLinks || []).filter((link) => link.id !== linkId)
+          : (current.projectLinks || []).map((link) => link.id === linkId ? data.link : link),
+      }));
+      toast.success(status === "confirmed" ? "Project link confirmed" : "Project suggestion dismissed");
+    } catch (error) {
+      toast.error(error.message || "Unable to update project suggestion");
+    }
+  };
 
   // Derive a per-sheet breakdown from chunk metadata stored during ingestion
   // (workbookName, sheetName, rowRange, columnHeaders — see worker/extractSpreadsheet.js)
@@ -78,9 +112,22 @@ function DocumentContent() {
           sheetName: meta.sheetName,
           columnHeaders: meta.columnHeaders || [],
           rowRanges: meta.rowRange ? [meta.rowRange] : [],
+          previewRows: [],
         });
       } else if (meta.rowRange) {
         existing.rowRanges.push(meta.rowRange);
+      }
+
+      const target = bySheet.get(meta.sheetName);
+      const headers = target.columnHeaders || [];
+      const lines = String(chunk?.text || "").split("\n").filter((line) => line.includes(":") && line.includes(" | "));
+      for (const line of lines) {
+        if (target.previewRows.length >= 50) break;
+        const cells = line.split(" | ").map((part) => {
+          const idx = part.indexOf(":");
+          return idx >= 0 ? part.slice(idx + 1).trim() : part.trim();
+        });
+        if (cells.length) target.previewRows.push(cells.slice(0, Math.max(headers.length, cells.length)));
       }
     }
 
@@ -122,27 +169,52 @@ function DocumentContent() {
 
   const handleMarkPageRead = useCallback(async () => {
     if (isLoadingPageInsight || pagesRead >= totalPages) return;
+
     const nextPage = pagesRead + 1;
+    const content = getContentUpToPage(nextPage);
+
+    if (!content?.trim()) {
+      setPageInsightError('Page-wise summaries are not available because this document does not have readable text yet.');
+      return;
+    }
+
+    setPageInsightError(null);
     setIsLoadingPageInsight(true);
+
     try {
-      const content = getContentUpToPage(nextPage);
-      const res = await fetch('/api/page-insight', {
+      const response = await fetch('/api/page-insight', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageContent: content, pageNumber: nextPage }),
-      }).then(r => r.json());
+        body: JSON.stringify({ pageContent: content, pageNumber: nextPage, documentId: doc?.id }),
+      });
 
-      if (res?.success) {
-        setReadingInsights(prev => [...prev, { page: nextPage, keyPoints: res.keyPoints, questions: res.questions }]);
-        setExpandedInsightIndex(nextPage - 1);
-        setPagesRead(nextPage);
+      const res = await response.json().catch(() => null);
+
+      if (!response.ok || !res?.success) {
+        throw new Error(res?.error || res?.message || 'The page insight request failed.');
       }
+
+      const keyPoints = Array.isArray(res.keyPoints) ? res.keyPoints : [];
+      const questions = Array.isArray(res.questions) ? res.questions : [];
+
+      if (keyPoints.length === 0 && questions.length === 0) {
+        setPageInsightError('No page-wise summary was generated for this page. Please try again after the document finishes processing.');
+        return;
+      }
+
+      setReadingInsights(prev => [
+        ...prev,
+        { page: nextPage, keyPoints, questions },
+      ]);
+      setExpandedInsightIndex(nextPage - 1);
+      setPagesRead(nextPage);
     } catch (err) {
       console.error('Failed to get page insight:', err);
+      setPageInsightError('Could not generate page-wise insights right now. Please try again.');
     } finally {
       setIsLoadingPageInsight(false);
     }
-  }, [isLoadingPageInsight, pagesRead, totalPages, getContentUpToPage]);
+  }, [isLoadingPageInsight, pagesRead, totalPages, getContentUpToPage, doc?.id]);
 
   // Auto-trigger chain when reading guide tab is active
   useEffect(() => {
@@ -183,34 +255,100 @@ function DocumentContent() {
     return `${process.env.NEXT_PUBLIC_S3_PUBLIC_URL}/${filePath}`;
   };
 
-
+  // Fetches a document and normalizes non-document responses (401/403/404 error
+  // shapes, or null) to `null` so callers never store an error object in `doc`
+  // state and crash on unguarded `doc.filename.split(...)` calls downstream.
+  const fetchDocument = useCallback(async (docId) => {
+    const response = await fetch(`/api/documents/${docId}`, {
+      method: "GET",
+      credentials: "include",
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.id) return null;
+    return data;
+  }, []);
 
   // Load document
   useEffect(() => {
     if (!id) return;
-  
+
     const loadDoc = async () => {
       try {
-        const data = await fetch(`/api/documents/${id}`, {
-          method: "GET",
-          credentials: "include",
-        }).then(r => r.json());
-  
-        console.log("📄 Loaded document:", data);
-  
-        // // Attach S3 URL so UI can load file
-        // if (data?.filePath) {
-        //   data.fileUrl = getS3Url(data.filePath);
-        // }
-  
+        const data = await fetchDocument(id);
+
+        if (!data) {
+          setDocError("This document could not be found, or you don't have access to it.");
+          return;
+        }
+
         setDoc(data);
-  
+        void fetch(`/api/documents/${id}/interactions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "view" }),
+          keepalive: true,
+        }).catch(() => {});
+
       } catch (error) {
         console.error("Error loading document:", error);
+        setDocError("Something went wrong while loading this document. Please try again.");
       }
     };
-  
+
     loadDoc();
+  }, [id, fetchDocument]);
+
+  // Track genuine reading time (dwell time) as an expertise signal - only
+  // counts time the tab is actually visible/focused, so an idle open tab
+  // doesn't count, and only reports sessions >= 15s (the server also enforces
+  // this floor, plus a 20-minute-per-report ceiling, since the client can't
+  // be fully trusted). Uses sendBeacon so the report survives tab close.
+  useEffect(() => {
+    if (!id) return;
+
+    let accumulatedMs = 0;
+    let segmentStart = document.visibilityState === "visible" ? performance.now() : null;
+
+    function flush(isFinal = false) {
+      if (segmentStart !== null) {
+        accumulatedMs += performance.now() - segmentStart;
+        segmentStart = document.visibilityState === "visible" ? performance.now() : null;
+      }
+      const seconds = Math.floor(accumulatedMs / 1000);
+      if (seconds < 15) {
+        if (isFinal) accumulatedMs = 0;
+        return;
+      }
+      const payload = JSON.stringify({ type: "study_duration", durationSeconds: seconds });
+      const url = `/api/documents/${id}/interactions`;
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
+      } else {
+        fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
+      }
+      accumulatedMs = 0;
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        flush();
+      } else {
+        segmentStart = performance.now();
+      }
+    }
+
+    function handlePageHide() {
+      flush(true);
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      flush(true);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
   }, [id]);
 
   // Extract DOCX -> HTML
@@ -263,13 +401,14 @@ function DocumentContent() {
   
     const pollSummary = async () => {
       try {
-        const data = await fetch(`/api/documents/${id}`, {
-          method: "GET",
-          credentials: "include"
-        }).then(r => r.json());
-  
+        const data = await fetchDocument(id);
+        if (!data) {
+          clearInterval(interval);
+          return;
+        }
+
         setDoc(data);
-  
+
         if (data?.summary) {
           let parsed;
           try {
@@ -300,7 +439,7 @@ function DocumentContent() {
     }
   
     return () => clearInterval(interval);
-  }, [id, doc]);
+  }, [id, doc, fetchDocument]);
 
 
   useEffect(() => {
@@ -353,28 +492,37 @@ function DocumentContent() {
   const generateSummary = async () => {
     if (!doc) return;
 
+    if (!canRegenerateSummary) {
+      toast.warning("Summary regeneration is unavailable while the document is being processed. Try again once processing is complete.");
+      return;
+    }
+
     setIsGeneratingSummary(true);
 
     try {
-
-      const docId = doc.id 
-      const res = await fetch(`/api/documents/${docId}/regenerate`, {
+      const docId = doc.id;
+      const response = await fetch(`/api/documents/${docId}/regenerate`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" }
-      }).then(r => r.json());
+        headers: { "Content-Type": "application/json" },
+      });
+      const res = await response.json().catch(() => null);
 
-      if (!res?.success) {
-        throw new Error(res?.error || "Failed to queue regenerate summary");
+      if (!response.ok || !res?.success) {
+        const message = res?.error || "Failed to queue summary regeneration.";
+        toast.warning(message);
+        setIsGeneratingSummary(false);
+        return;
       }
 
       // Immediately re-fetch the doc once to get updated status
-      const fresh = await fetch(`/api/documents/${doc.id}`, {
-        method: "GET",
-        credentials: "include"
-      }).then(r => r.json());
+      const fresh = await fetchDocument(doc.id);
+      if (!fresh) {
+        toast.error("Could not refresh the document after regenerating.");
+        setIsGeneratingSummary(false);
+        return;
+      }
 
-      // if (fresh?.filePath) fresh.fileUrl = getS3Url(fresh.filePath);
       setDoc(fresh);
 
       // If summary already present (rare), update UI immediately
@@ -409,12 +557,9 @@ function DocumentContent() {
       while ((Date.now() - start) / 1000 < maxPollSeconds) {
         await new Promise((r) => setTimeout(r, pollIntervalMs));
 
-        const polled = await fetch(`/api/documents/${doc.id}`, {
-          method: "GET",
-          credentials: "include"
-        }).then(r => r.json());
+        const polled = await fetchDocument(doc.id);
+        if (!polled) continue;
 
-        // if (polled?.filePath) polled.fileUrl = getS3Url(polled.filePath);
         setDoc(polled);
 
         if (polled?.summary) {
@@ -454,6 +599,7 @@ function DocumentContent() {
       }
     } catch (error) {
       console.error("Error generating summary:", error);
+      toast.error("Could not regenerate summary. Please try again.");
       setSummary({
         title: doc.filename,
         overview: "Unable to regenerate summary at this time. Please try again later.",
@@ -478,22 +624,20 @@ function DocumentContent() {
       doc.status === "ready" &&
       !isGeneratingSummary
     ) {
-      fetch(`/api/documents/${id}`, {
-        method: "GET",
-        credentials: "include"
-      })
-        .then(r => r.json())
-        .then(data => {
-          // if (data?.filePath) data.fileUrl = getS3Url(data.filePath);
-          setDoc(data);
-        });
+      fetchDocument(id).then((data) => {
+        if (data) setDoc(data);
+      });
     }
-  }, [activeTab, doc, summary, isGeneratingSummary, id]);
+  }, [activeTab, doc, summary, isGeneratingSummary, id, fetchDocument]);
 
 
   //  --- Asking document queries ----
   const handleAsk = async (e) => {
     e.preventDefault();
+    if (!canAskDocument) {
+      toast.warning("You do not have permission to chat with this document.");
+      return;
+    }
     if (!question.trim()) return;
   
     const userMessage = {
@@ -687,6 +831,38 @@ function DocumentContent() {
       );
     }
 
+    if (["xlsx", "xls", "csv"].includes(ext)) {
+      return (
+        <div className="w-full h-full overflow-auto bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-5">
+          {sheets.length === 0 ? (
+            <div className="text-sm text-gray-500 dark:text-gray-400">Spreadsheet data is still being processed. You can download the original file in the meantime.</div>
+          ) : sheets.map((sheet) => (
+            <div key={sheet.sheetName} className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 px-3 py-2">
+                <span className="font-semibold text-sm">{sheet.sheetName}</span>
+                {sheet.rowSpan ? <span className="text-xs text-gray-500">Rows {sheet.rowSpan}</span> : null}
+              </div>
+              <div className="overflow-auto max-h-[360px]">
+                <table className="min-w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800">
+                    <tr>{(sheet.columnHeaders || []).map((header, index) => <th key={`${header}-${index}`} className="border-b border-r border-gray-200 dark:border-gray-700 px-3 py-2 text-left font-semibold whitespace-nowrap">{header || `Column ${index + 1}`}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {(sheet.previewRows || []).map((row, rowIndex) => (
+                      <tr key={rowIndex} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-900 dark:even:bg-gray-800/60">
+                        {Array.from({ length: Math.max(sheet.columnHeaders?.length || 0, row.length) }).map((_, colIndex) => <td key={colIndex} className="border-b border-r border-gray-100 dark:border-gray-800 px-3 py-2 align-top whitespace-nowrap">{row[colIndex] ?? ""}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {(sheet.previewRows || []).length === 0 ? <p className="p-3 text-xs text-gray-500">No data rows extracted for this sheet.</p> : null}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
     return (
       <div className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center">
         <p className="text-gray-500 dark:text-gray-400">Unsupported file type: {ext}</p>
@@ -698,10 +874,24 @@ function DocumentContent() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
 
+  if (docError) {
+    return (
+      <Layout fixedHeight>
+        <div className="h-full flex items-center justify-center">
+          <div className="text-center">
+            <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+            <p className="text-gray-600 dark:text-gray-400 mb-4">{docError}</p>
+            <BackButton href="/welcome-back" label="Back" />
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
   if (!doc) {
     return (
-      <Layout>
-        <div className="h-[calc(100vh-8rem)] flex items-center justify-center">
+      <Layout fixedHeight>
+        <div className="h-full flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
             <p className="text-gray-600 dark:text-gray-400">Loading document...</p>
@@ -721,29 +911,16 @@ function DocumentContent() {
     >
       {/* Header with Back Button */}
       <div className="flex items-center justify-between">
-        <Button
-          variant="ghost"
-          onClick={() => {
-            if (doc?.projectId) {
-              router.push(`/project?id=${doc.projectId}`);
-            } else {
-              router.push("/dashboard/");
-            }
-          }}
-          className="flex items-center space-x-2 text-gray-600 dark:text-gray-400"
-          style={{
-            '--hover-text-color': '#000000',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = '#000000';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = '';
-          }}
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span>Back to Documents</span>
-        </Button>
+        <BackButton
+          href={
+            doc?.projectId
+              ? `/project?id=${doc.projectId}`
+              : doc?.orgId
+                ? `/org/${doc.orgId}/repository`
+                : '/welcome-back'
+          }
+          label={doc?.projectId ? 'Back to Project' : 'Back to Repository'}
+        />
       </div>
 
       {/* Document Info */}
@@ -758,7 +935,16 @@ function DocumentContent() {
 
       {/* Document Content */}
       <div className="flex-1 min-h-0">
-        <Card className="h-full">
+        <Card className="h-full relative">
+          <button
+            type="button"
+            onClick={() => setIsFullscreenOpen(true)}
+            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-900/80 hover:bg-gray-900 text-white text-xs font-medium shadow-md backdrop-blur transition"
+            aria-label="Open document in fullscreen"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+            <span>Fullscreen</span>
+          </button>
           <CardContent className="p-0 h-full">
             <div className="h-full overflow-hidden">
               {renderDocument()}
@@ -768,6 +954,8 @@ function DocumentContent() {
       </div>
     </motion.div>
   );
+
+  const insightsCount = (doc?.experts?.length || 0) + (doc?.relatedDocuments?.length || 0) + (doc?.projectLinks?.length || 0);
 
   // Chat Interface Panel (Right Column)
   const chatPanel = (
@@ -781,7 +969,7 @@ function DocumentContent() {
             </CardTitle>
             
             {/* Clear Chat Button - Only show when chat has messages */}
-            {chat.some(msg => msg.role !== "system") && (
+            {canClearDocumentChat && chat.some(msg => msg.role !== "system") && (
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Button
                   variant="ghost"
@@ -839,6 +1027,30 @@ function DocumentContent() {
               <BookOpen className="h-4 w-4" />
               <span>Pagewise Summary</span>
             </Button>
+            <Button
+              variant={activeTab === 'insights' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveTab('insights')}
+              className={cn(
+                "flex items-center space-x-2",
+                activeTab === 'insights'
+                  ? "text-white dark:text-gray-200"
+                  : "text-gray-600 dark:text-gray-400"
+              )}
+            >
+              <Network className="h-4 w-4" />
+              <span>Insights</span>
+              {insightsCount > 0 && (
+                <span className={cn(
+                  "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+                  activeTab === 'insights'
+                    ? "bg-white/25 text-white"
+                    : "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                )}>
+                  {insightsCount}
+                </span>
+              )}
+            </Button>
           </div>
         </CardHeader>
 
@@ -864,13 +1076,28 @@ function DocumentContent() {
 
               {/* Scrollable insight cards */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900/50">
-                {readingInsights.length === 0 && !isLoadingPageInsight && (
+                {readingInsights.length === 0 && !isLoadingPageInsight && !pageInsightError && (
                   <div className="flex flex-col items-center justify-center h-full text-center py-12 space-y-3">
                     <BookOpen className="h-10 w-10 text-gray-300 dark:text-gray-600" />
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Progressive reading mode</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 max-w-[220px]">
-                      Start reading the document. Insights and reflection questions unlock automatically as you scroll through each page.
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Page-wise summary mode</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 max-w-[260px]">
+                      Start reading or scroll through the document. Key points and reflection questions will appear automatically for each page.
                     </p>
+                    {totalPages === 0 && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 max-w-[260px]">
+                        Page-wise summaries will appear after readable document text is available.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {pageInsightError && (
+                  <div className="bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800 px-4 py-4 flex items-start space-x-3">
+                    <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-red-700 dark:text-red-300">Page-wise summary unavailable</p>
+                      <p className="text-xs text-red-600 dark:text-red-400">{pageInsightError}</p>
+                    </div>
                   </div>
                 )}
 
@@ -926,9 +1153,12 @@ function DocumentContent() {
                 })}
 
                 {isLoadingPageInsight && (
-                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-4 flex items-center space-x-3">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600 shrink-0" />
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Generating insights for page {pagesRead + 1}…</span>
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-4 flex items-start space-x-3">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Analyzing page {pagesRead + 1}…</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Extracting key points and generating reflection questions.</p>
+                    </div>
                   </div>
                 )}
 
@@ -940,12 +1170,16 @@ function DocumentContent() {
                 {isLoadingPageInsight ? (
                   <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
                     <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-primary-600" />
-                    <span>Generating insights for page {pagesRead + 1}…</span>
+                    <span>Analyzing page {pagesRead + 1}…</span>
                   </div>
-                ) : pagesRead > 0 && pagesRead >= totalPages ? (
+                ) : pageInsightError ? (
+                  <p className="text-xs text-red-500 dark:text-red-400">Resolve the issue above, then scroll again to retry.</p>
+                ) : pagesRead > 0 && totalPages > 0 && pagesRead >= totalPages ? (
                   <p className="text-sm text-gray-500">You&apos;ve finished the document.</p>
                 ) : detectedPage > 0 ? (
                   <p className="text-xs text-gray-400">On page {detectedPage}{totalPages > 0 ? ` of ${totalPages}` : ''}</p>
+                ) : totalPages === 0 ? (
+                  <p className="text-xs text-gray-400">Waiting for readable document text before page-wise summaries can start.</p>
                 ) : (
                   <p className="text-xs text-gray-400">Scroll through the document — insights appear automatically.</p>
                 )}
@@ -1071,7 +1305,7 @@ function DocumentContent() {
                     onChange={(e) => setQuestion(e.target.value)}
                     placeholder="Ask about this document..."
                     className="flex-1"
-                    disabled={isTyping}
+                    disabled={isTyping || !canAskDocument}
                   />
                   {isTyping ? (
                     <Button
@@ -1086,7 +1320,7 @@ function DocumentContent() {
                     <Button
                       type="submit"
                       size="icon"
-                      disabled={!question.trim()}
+                      disabled={!question.trim() || !canAskDocument}
                       className="flex-shrink-0"
                     >
                       <Send className="h-4 w-4" />
@@ -1094,6 +1328,64 @@ function DocumentContent() {
                   )}
                 </div>
               </form>
+            </div>
+          ) : activeTab === 'insights' ? (
+            /* Insights Area - people who know this, related documents, suggested project links */
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900/50 custom-scrollbar">
+              {doc?.experts?.length > 0 && (
+                <div className="rounded-lg border border-violet-100 bg-violet-50/60 p-3 text-xs dark:border-violet-900 dark:bg-violet-950/20">
+                  <p className="font-semibold text-violet-900 dark:text-violet-200">People who know this</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {doc.experts.map((expert) => (
+                      <a key={`${expert.id}-${expert.topicId}`} href={`mailto:${expert.email}`} className="rounded border border-violet-200 bg-white px-2 py-1 text-violet-800 hover:bg-violet-100 dark:border-violet-800 dark:bg-gray-900 dark:text-violet-200">
+                        {expert.name || expert.email} · {Number(expert.score || 0).toFixed(1)}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {doc?.relatedDocuments?.length > 0 && (
+                <div className="rounded-lg border border-cyan-100 bg-cyan-50/60 p-3 text-xs dark:border-cyan-900 dark:bg-cyan-950/20">
+                  <p className="font-semibold text-cyan-900 dark:text-cyan-200">Related documents</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {doc.relatedDocuments.map((related) => (
+                      <button key={related.id} type="button" onClick={() => router.push(`/document?id=${related.id}`)} className="rounded border border-cyan-200 bg-white px-2 py-1 text-cyan-800 hover:bg-cyan-100 dark:border-cyan-800 dark:bg-gray-900 dark:text-cyan-200">
+                        {related.filename} · {Math.round(Number(related.weight || 0) * 100)}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {doc?.projectLinks?.length > 0 && (
+                <div className="rounded-lg border border-cyan-100 bg-cyan-50/60 p-3 text-xs dark:border-cyan-900 dark:bg-cyan-950/20">
+                  <p className="font-semibold text-cyan-900 dark:text-cyan-200">Suggested project links</p>
+                  <div className="mt-2 space-y-1.5">
+                    {doc.projectLinks.map((link) => (
+                      <div key={link.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-cyan-200 bg-white px-2 py-1.5 dark:border-cyan-800 dark:bg-gray-900">
+                        <span className="text-cyan-800 dark:text-cyan-300">
+                          {link.project?.name}
+                          {link.status === "confirmed" && <span className="ml-1 text-green-600">Confirmed</span>}
+                        </span>
+                        {link.status === "suggested" && (
+                          <span className="flex gap-1">
+                            <button type="button" onClick={() => updateProjectLinkStatus(link.id, "confirmed")} className="rounded bg-green-600 px-2 py-1 text-white hover:bg-green-700">Confirm</button>
+                            <button type="button" onClick={() => updateProjectLinkStatus(link.id, "dismissed")} className="rounded border border-gray-300 px-2 py-1 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300">Dismiss</button>
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {insightsCount === 0 && (
+                <div className="flex flex-col items-center justify-center h-full text-center py-12 space-y-2">
+                  <Network className="h-8 w-8 text-gray-300 dark:text-gray-600" />
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No experts, related documents, or suggested links yet.</p>
+                </div>
+              )}
             </div>
           ) : (
             /* Summary Area */
@@ -1225,15 +1517,108 @@ function DocumentContent() {
                     </div>
                   )}
 
-                  {/* Regenerate Button */}
-                  <div className="text-center">
+                  {/* Tracked Decisions (FR-P2-6) */}
+                  {doc?.decisions?.length > 0 && (
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                      <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center space-x-2">
+                        <Gavel className="h-4 w-4 text-gray-500" />
+                        <span>Decisions</span>
+                      </h3>
+                      <div className="space-y-3">
+                        {doc.decisions.map((decision) => (
+                          <div
+                            key={decision.id}
+                            className="rounded-md border border-gray-200 dark:border-gray-700 p-3"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {decision.statement}
+                              </p>
+                              {decision.decidedAt && (
+                                <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                  {new Date(decision.decidedAt).toLocaleDateString()}
+                                </span>
+                              )}
+                            </div>
+                            {decision.rationale && (
+                              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1.5">
+                                <span className="font-medium">Why: </span>
+                                {decision.rationale}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Detected Conflicts (FR-P2-10) */}
+                  {doc?.conflicts?.length > 0 && (
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                      <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center space-x-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                        <span>Conflicts</span>
+                      </h3>
+                      <div className="space-y-3">
+                        {doc.conflicts.map((conflict) => (
+                          <div
+                            key={conflict.id}
+                            className="rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 p-3"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                Conflicts with{" "}
+                                <span className="font-semibold">
+                                  {conflict.otherDocument?.filename || "another document"}
+                                </span>
+                              </p>
+                              <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap capitalize">
+                                {conflict.status}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1.5">
+                              {conflict.summary}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Regenerate / Copy / Print */}
+                  <div className="flex items-center justify-center gap-2">
                     <Button
                       variant="outline"
                       onClick={generateSummary}
+                      disabled={!canRegenerateSummary || isGeneratingSummary}
                       className="flex items-center space-x-2"
                     >
                       <BarChart3 className="h-4 w-4" />
                       <span>Regenerate Summary</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={async () => {
+                        await copySummary(summary, { sheets, isSpreadsheet });
+                        setSummaryCopied(true);
+                        setTimeout(() => setSummaryCopied(false), 2000);
+                      }}
+                      className="flex items-center space-x-2"
+                    >
+                      {summaryCopied ? (
+                        <Check className="h-4 w-4" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                      <span>{summaryCopied ? "Copied" : "Copy"}</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => printSummary(summary, { sheets, isSpreadsheet })}
+                      className="flex items-center space-x-2"
+                    >
+                      <Printer className="h-4 w-4" />
+                      <span>Print</span>
                     </Button>
                   </div>
                 </motion.div>
@@ -1246,6 +1631,7 @@ function DocumentContent() {
                     </p>
                     <Button
                       onClick={generateSummary}
+                      disabled={!canRegenerateSummary || isGeneratingSummary}
                       className="flex items-center space-x-2"
                     >
                       <BarChart3 className="h-4 w-4" />
@@ -1263,6 +1649,7 @@ function DocumentContent() {
                     </p>
                     <Button
                       onClick={generateSummary}
+                      disabled={!canRegenerateSummary || isGeneratingSummary}
                       className="flex items-center space-x-2"
                     >
                       <BarChart3 className="h-4 w-4" />
@@ -1279,8 +1666,8 @@ function DocumentContent() {
   );
 
   return (
-    <Layout>
-      <div className="h-[calc(100vh-8rem)]">
+    <Layout orgId={doc?.orgId} fixedHeight>
+      <div className="h-full">
         <TwoColumnLayout
           leftColumn={documentPanel}
           rightColumn={chatPanel}
@@ -1303,6 +1690,14 @@ function DocumentContent() {
         message={expandedMessage}
         onClose={closeExpanded}
       />
+
+      <DocumentFullscreenModal
+        open={isFullscreenOpen}
+        onClose={() => setIsFullscreenOpen(false)}
+        doc={doc}
+        ext={ext}
+        docxHtml={docxHtml}
+      />
     </Layout>
   );
 }
@@ -1310,8 +1705,12 @@ function DocumentContent() {
 
 export default function DocumentPage() {
   return (
-    <Suspense fallback={<div>Loading document...</div>}>
-      <DocumentContent />
-    </Suspense>
+    <ToastProvider>
+      <Suspense fallback={<div>Loading document...</div>}>
+        <DocumentContent />
+      </Suspense>
+    </ToastProvider>
   );
 }
+
+

@@ -1,8 +1,8 @@
 import prisma from "@/lib/prisma";
 
 export async function requireActiveSubscriptionApi(userId) {
-  const subscription = await prisma.subscription.findUnique({
-    where: { userId }
+  const subscription = await prisma.subscription.findFirst({
+    where: { managedByUserId: userId }
   });
 
   if (!subscription) {
