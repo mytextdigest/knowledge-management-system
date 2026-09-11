@@ -68,6 +68,7 @@
 - **Status:** `DONE`
 - **Objective:** FR-4 — decay factor on `TopicExpertise.score` using `lastSignalAt`. Resolve Open Question 3 (fixed vs. configurable half-life) before implementation; default to a fixed constant if no strong reason to make it configurable.
 - **Acceptance criteria:** a stale-but-heavy historical contributor no longer permanently outranks recent activity.
+- **Revision (2026-09-12, demo feedback from Johurul):** uploads was the only uncapped signal in the formula, letting bulk-uploading alone dominate a score regardless of engagement. Rebalanced all weights/caps, and added two previously-unused signals (document-chat questions, published Lessons Learned authorship) plus a new dwell-time signal (visibility-aware reading time, reported via `sendBeacon`, new `DocumentInteraction.durationSeconds` column). See `EXPERT_SCORING_REDESIGN_PROPOSAL.md` for the full design and rollout verification.
 
 ### Task 10-F — RBAC Integration Test (closes Rank 8 Task 9-G)
 - **Status:** `IN_PROGRESS`

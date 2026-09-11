@@ -298,6 +298,59 @@ function DocumentContent() {
     loadDoc();
   }, [id, fetchDocument]);
 
+  // Track genuine reading time (dwell time) as an expertise signal - only
+  // counts time the tab is actually visible/focused, so an idle open tab
+  // doesn't count, and only reports sessions >= 15s (the server also enforces
+  // this floor, plus a 20-minute-per-report ceiling, since the client can't
+  // be fully trusted). Uses sendBeacon so the report survives tab close.
+  useEffect(() => {
+    if (!id) return;
+
+    let accumulatedMs = 0;
+    let segmentStart = document.visibilityState === "visible" ? performance.now() : null;
+
+    function flush(isFinal = false) {
+      if (segmentStart !== null) {
+        accumulatedMs += performance.now() - segmentStart;
+        segmentStart = document.visibilityState === "visible" ? performance.now() : null;
+      }
+      const seconds = Math.floor(accumulatedMs / 1000);
+      if (seconds < 15) {
+        if (isFinal) accumulatedMs = 0;
+        return;
+      }
+      const payload = JSON.stringify({ type: "study_duration", durationSeconds: seconds });
+      const url = `/api/documents/${id}/interactions`;
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
+      } else {
+        fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
+      }
+      accumulatedMs = 0;
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        flush();
+      } else {
+        segmentStart = performance.now();
+      }
+    }
+
+    function handlePageHide() {
+      flush(true);
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      flush(true);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [id]);
+
   // Extract DOCX -> HTML
   useEffect(() => {
     if (doc?.filename?.endsWith(".docx") && doc?.fileUrl) {

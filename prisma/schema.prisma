@@ -502,12 +502,13 @@ model TopicExpertise {
 
 
 model DocumentInteraction {
-  id         String   @id @default(cuid())
-  documentId String
-  userId     String
-  orgId      String
-  type       String   @default("view")
-  createdAt  DateTime @default(now()) @map("created_at")
+  id             String   @id @default(cuid())
+  documentId     String
+  userId         String
+  orgId          String
+  type           String   @default("view")
+  durationSeconds Int?
+  createdAt      DateTime @default(now()) @map("created_at")
 
   document     Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)

@@ -54,7 +54,7 @@ test("11-G effectiveness is aggregate-only, project-aware, and visible to admins
   assert.doesNotMatch(route, /userId.*SELECT/i);
   assert.match(page, /Recommendation impressions/);
   assert.match(page, /Zero-click documents/);
-  assert.match(page, /Most recommended documents/);
+  assert.match(page, /most recommended documents/i);
   assert.match(page, /\?mine=1/);
 });
 

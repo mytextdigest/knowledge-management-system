@@ -94,9 +94,49 @@ async function refreshTopicExpertise(topicId, orgId) {
     GROUP BY di."userId"
   `;
 
+  // Asking real questions about a document is active engagement, not a
+  // click - the length filter discourages one-word/junk messages from
+  // counting as "study".
+  const documentQuestionSignals = await prisma.$queryRaw`
+    SELECT c."userId" AS "userId", COUNT(*)::int AS "documentQuestions", MAX(m."created_at") AS "lastSignalAt"
+    FROM "Message" m
+    JOIN "Conversation" c ON c.id = m."conversation_id"
+    JOIN "TopicDocument" td ON td."documentId" = c."document_id"
+    WHERE td."topicId" = ${topicId}
+      AND m.role = 'user'
+      AND LENGTH(TRIM(COALESCE(m.content, ''))) > 10
+    GROUP BY c."userId"
+  `;
+
+  // Authoring a published Lesson Learned tied to a document is the strongest
+  // "studied and synthesized this" signal available - drafts don't count,
+  // since they haven't been reviewed yet.
+  const lessonAuthorSignals = await prisma.$queryRaw`
+    SELECT l."authorUserId" AS "userId", COUNT(*)::int AS "lessonsAuthored", MAX(l."created_at") AS "lastSignalAt"
+    FROM "Lesson" l
+    JOIN "TopicDocument" td ON td."documentId" = l."documentId"
+    WHERE td."topicId" = ${topicId}
+      AND l.status = 'published'
+    GROUP BY l."authorUserId"
+  `;
+
+  // Genuine reading time, reported by the document page's dwell-time timer
+  // (visibility-aware, 15s-1200s per report - see the interactions route).
+  const dwellSignals = await prisma.$queryRaw`
+    SELECT di."userId" AS "userId", (SUM(di."durationSeconds")::float / 60) AS "dwellMinutes", MAX(di."created_at") AS "lastSignalAt"
+    FROM "DocumentInteraction" di
+    JOIN "TopicDocument" td ON td."documentId" = di."documentId"
+    WHERE td."topicId" = ${topicId} AND di."orgId" = ${orgId}
+      AND di.type = 'study_duration' AND di."durationSeconds" IS NOT NULL
+    GROUP BY di."userId"
+  `;
+
   const scores = new Map();
   const ensure = (userId) => {
-    if (!scores.has(userId)) scores.set(userId, { uploads: 0, citations: 0, departments: 0, interactions: 0, lastSignalAt: null });
+    if (!scores.has(userId)) scores.set(userId, {
+      uploads: 0, citations: 0, departments: 0, interactions: 0,
+      documentQuestions: 0, lessonsAuthored: 0, dwellMinutes: 0, lastSignalAt: null,
+    });
     return scores.get(userId);
   };
   const apply = (rows, field) => rows.forEach((row) => {
@@ -109,6 +149,9 @@ async function refreshTopicExpertise(topicId, orgId) {
   apply(citerSignals, 'citations');
   apply(departmentSignals, 'departments');
   apply(interactionSignals, 'interactions');
+  apply(documentQuestionSignals, 'documentQuestions');
+  apply(lessonAuthorSignals, 'lessonsAuthored');
+  apply(dwellSignals, 'dwellMinutes');
 
   const existing = await prisma.topicExpertise.findMany({ where: { topicId } });
   const existingByUser = new Map(existing.map((row) => [row.userId, row]));

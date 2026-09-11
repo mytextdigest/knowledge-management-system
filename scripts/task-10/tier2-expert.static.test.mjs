@@ -53,7 +53,7 @@ test("10-F includes real DB-backed RBAC regression test", () => {
 test("10-B/10-G standalone directory and document expert surfaces remain reachable", () => {
   const expertsPage = read("src/app/(app)/org/[orgId]/experts/page.jsx");
   const sidebar = read("src/components/layout/AppSidebar.jsx");
-  assert.match(expertsPage, /Expert Directory/);
+  assert.match(expertsPage, />Experts<\/h1>/);
   assert.match(expertsPage, /mailto:/);
   assert.match(sidebar, /\/experts/);
   assert.match(read("src/app/(app)/document/page.jsx"), /People who know this/);

@@ -18,7 +18,20 @@ export async function POST(req, { params }) {
 
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
-  const type = body.type === "download" ? "download" : "view";
+  const type = ["download", "study_duration"].includes(body.type) ? body.type : "view";
+
+  // Only meaningful for study_duration; clamped defensively server-side too,
+  // not just in the client timer, since the client can't be fully trusted -
+  // floor of 15s filters bounces, ceiling of 20 minutes stops a single
+  // idle-open tab from dominating the expertise signal.
+  let durationSeconds = null;
+  if (type === "study_duration") {
+    const raw = Number(body.durationSeconds);
+    if (!Number.isFinite(raw) || raw < 15) {
+      return NextResponse.json({ success: true, ignored: true }, { status: 200 });
+    }
+    durationSeconds = Math.min(1200, Math.round(raw));
+  }
 
   const user = await prisma.user.findUnique({
     where: { email: session.user.email },
@@ -62,7 +75,7 @@ export async function POST(req, { params }) {
   if (!canAccess) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   await prisma.documentInteraction.create({
-    data: { documentId: id, userId: user.id, orgId, type },
+    data: { documentId: id, userId: user.id, orgId, type, durationSeconds },
   });
   return NextResponse.json({ success: true }, { status: 201 });
 }
