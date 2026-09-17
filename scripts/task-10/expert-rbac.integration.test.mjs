@@ -8,7 +8,7 @@ const enabled = process.env.RUN_TIER2_DB_TESTS === "1" && process.env.DATABASE_U
 test("Expert Discovery RBAC blocks cross-department expertise, including a shared topic", { skip: !enabled }, async () => {
   const prisma = new PrismaClient();
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const ids = {};
+  const ids = { documentIds: [] };
   try {
     const org = await prisma.organization.create({ data: { name: `tier2-rbac-${suffix}` } });
     ids.orgId = org.id;
@@ -42,6 +42,7 @@ test("Expert Discovery RBAC blocks cross-department expertise, including a share
         orgId: org.id, departmentId: deptB.id, scope: "repository", lifecycle: "published",
       } }),
     ]);
+    ids.documentIds = [visibleDoc.id, hiddenDoc.id];
 
     // Both departments contribute to the same repository topic. This is the
     // important leak case: access to dept A's document must not reveal the
@@ -69,6 +70,11 @@ test("Expert Discovery RBAC blocks cross-department expertise, including a share
     assert.equal(results.some((row) => row.id === hiddenExpert.id), false, "hidden department expert leaked");
     assert.equal(results.some((row) => row.id === visibleExpert.id), true, "accessible department expert missing");
   } finally {
+    // Document.organization is onDelete: SetNull, not Cascade - deleting the
+    // org first leaves these rows behind (still pointing at the userId FK),
+    // which then makes the user.delete() calls below fail silently. Documents
+    // must go first.
+    if (ids.documentIds.length) await prisma.document.deleteMany({ where: { id: { in: ids.documentIds } } });
     if (ids.orgId) await prisma.organization.delete({ where: { id: ids.orgId } }).catch(() => {});
     for (const id of ids.userIds || []) await prisma.user.delete({ where: { id } }).catch(() => {});
     await prisma.$disconnect();
