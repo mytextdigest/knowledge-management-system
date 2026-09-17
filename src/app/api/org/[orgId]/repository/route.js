@@ -201,6 +201,7 @@ export async function GET(req, { params }) {
     department: { select: { id: true, name: true } },
     project:    { select: { id: true, name: true, scope: true } },
     suggestedDepartment: { select: { id: true, name: true } },
+    topicDocument: { select: { topic: { select: { id: true, name: true, scope: true } } } },
     projectLinks: {
       where: { status: "suggested" },
       select: {
@@ -251,6 +252,8 @@ export async function GET(req, { params }) {
       ...d,
       relatedDocumentCount: (d._count?.relationshipsFrom || 0) + (d._count?.relationshipsTo || 0),
       _count: undefined,
+      topic: d.topicDocument?.topic || null,
+      topicDocument: undefined,
       createdAt: d.createdAt.toISOString(),
     })),
     total,

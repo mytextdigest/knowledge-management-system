@@ -281,6 +281,12 @@ export default function RepositoryDocumentCard({
           Classification: {(document?.classificationStatus || "pending_classification").replaceAll("_", " ")}{categoryConfidence ? ` · ${categoryConfidence}` : ""}
         </span>
 
+        {document?.topic?.name ? (
+          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 dark:border-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300">
+            Topic: {document.topic.name}
+          </span>
+        ) : null}
+
         {document?.relatedDocumentCount > 0 ? (
           <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-xs font-medium text-cyan-700 dark:border-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300">
             {document.relatedDocumentCount} related
