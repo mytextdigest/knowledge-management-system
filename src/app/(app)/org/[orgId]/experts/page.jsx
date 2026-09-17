@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { Search, Mail, Users, CheckCircle2, XCircle } from "lucide-react";
+import { Search, Mail, Users, CheckCircle2, XCircle, Info } from "lucide-react";
 import Layout from "@/components/layout/Layout";
+import ExpertScoreModal from "@/components/experts/ExpertScoreModal";
 
 export default function ExpertsPage() {
   const { orgId } = useParams();
@@ -13,6 +14,7 @@ export default function ExpertsPage() {
   const [error, setError] = useState("");
   const [viewerUserId, setViewerUserId] = useState(null);
   const [canAdminConfirm, setCanAdminConfirm] = useState(false);
+  const [detailExpert, setDetailExpert] = useState(null);
 
   async function load(q = "") {
     if (!orgId) return;
@@ -72,9 +74,17 @@ export default function ExpertsPage() {
                     {expert.projectName ? `${expert.projectName} project` : expert.departmentName ? expert.departmentName : expert.topicScope}
                   </p>
                 </div>
-                <span className="rounded-full bg-primary-50 px-2 py-1 text-xs font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">{Number(expert.score || 0).toFixed(2)}</span>
+                <button
+                  type="button"
+                  onClick={() => setDetailExpert(expert)}
+                  title="See why this score"
+                  className="rounded-full bg-primary-50 px-2 py-1 text-xs font-semibold text-primary-700 hover:bg-primary-100 dark:bg-primary-950/40 dark:text-primary-300 dark:hover:bg-primary-900/60"
+                >
+                  {Number(expert.score || 0).toFixed(2)}
+                </button>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                <button onClick={() => setDetailExpert(expert)} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700"><Info className="h-3.5 w-3.5" />Why this score?</button>
                 <a href={`mailto:${expert.email}`} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700"><Mail className="h-3.5 w-3.5" />Email</a>
                 {expert.id === viewerUserId && (<>
                   <button onClick={() => updateExpertise(expert.topicId, "self_confirmed", expert.id)} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700"><CheckCircle2 className="h-3.5 w-3.5" />Confirm</button>
@@ -89,6 +99,8 @@ export default function ExpertsPage() {
           ))}
         </div>
       )}
+
+      <ExpertScoreModal expert={detailExpert} onClose={() => setDetailExpert(null)} />
     </div>
     </Layout>
   );

@@ -196,7 +196,7 @@ export async function getAccessibleExpertsWithPrisma(prisma, { orgId, userId, qu
   // MAX() picks one deterministically rather than trying to list them all.
   return prisma.$queryRaw`
     SELECT u.id, u.name, u.email, t.id AS "topicId", t.name AS topic, t.scope AS "topicScope",
-           MAX(te.score)::float AS score, te.source, te."lastSignalAt",
+           MAX(te.score)::float AS score, te.source, te."lastSignalAt", te.signals,
            COUNT(DISTINCT td."documentId")::int AS "documentCount",
            MAX(p.name) AS "projectName", MAX(dept.name) AS "departmentName"
     FROM "TopicExpertise" te
@@ -211,7 +211,7 @@ export async function getAccessibleExpertsWithPrisma(prisma, { orgId, userId, qu
       AND (${topicId}::text IS NULL OR t.id = ${topicId})
       AND ${searchFilter}
       AND ${access}
-    GROUP BY u.id, u.name, u.email, t.id, t.name, t.scope, te.source, te."lastSignalAt"
+    GROUP BY u.id, u.name, u.email, t.id, t.name, t.scope, te.source, te."lastSignalAt", te.signals
     ORDER BY score DESC, "documentCount" DESC
     LIMIT ${Prisma.raw(String(safeLimit))}
   `;
