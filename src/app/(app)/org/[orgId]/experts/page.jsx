@@ -65,7 +65,13 @@ export default function ExpertsPage() {
           {experts.map((expert) => (
             <div key={`${expert.id}-${expert.topicId}`} className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
               <div className="flex items-start justify-between gap-3">
-                <div><h2 className="font-semibold">{expert.name || expert.email}</h2><p className="text-sm text-gray-500">{expert.topic} · {expert.topicScope}</p></div>
+                <div>
+                  <h2 className="font-semibold">{expert.name || expert.email}</h2>
+                  <p className="text-sm text-gray-500">
+                    {expert.topic} ·{" "}
+                    {expert.projectName ? `${expert.projectName} project` : expert.departmentName ? expert.departmentName : expert.topicScope}
+                  </p>
+                </div>
                 <span className="rounded-full bg-primary-50 px-2 py-1 text-xs font-semibold text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">{Number(expert.score || 0).toFixed(2)}</span>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">

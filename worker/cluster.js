@@ -106,14 +106,20 @@ async function generateTopicName(documentContent, openai) {
         {
           role: "system",
           content:
-            "You are a document categorization assistant. " +
-            "Given a document excerpt, return ONLY a concise 2-3 word category name. " +
-            "Examples: Financial Reports, Meeting Notes, Research Papers, Investor Decks, " +
-            "Legal Contracts, Product Roadmaps. No explanation, no punctuation, just the name.",
+            "You are a topic-naming assistant for a company knowledge base. " +
+            "Given a document excerpt, identify the specific subject, feature, product, or " +
+            "project it is actually about, and return ONLY a concise 2-5 word topic name for " +
+            "that subject. Never return a generic document-type label on its own (e.g. " +
+            "\"Status Report\", \"Meeting Notes\", \"Implementation Tracker\", \"Project Plan\") " +
+            "- always name what the document is about, not what kind of document it is. " +
+            "Good: \"Customer Onboarding Workflow\", \"Q3 Vendor Contract Renewal\", " +
+            "\"Expert Discovery Scoring\", \"Kubernetes Cluster Migration\". " +
+            "Bad: \"Status Report\", \"Meeting Notes\", \"Implementation Tracker\", \"Project Update\". " +
+            "No explanation, no punctuation, just the name.",
         },
         { role: "user", content: `Document excerpt:\n${sample}` },
       ],
-      max_tokens: 20,
+      max_tokens: 24,
       temperature: 0.3,
     });
     const name = res?.choices?.[0]?.message?.content?.trim();
@@ -349,7 +355,7 @@ export async function processClusterJobWorker(docId, projectId, recluster = fals
   }
 }
 
-export { computeDocumentEmbedding, extractKeywordDistribution };
+export { computeDocumentEmbedding, extractKeywordDistribution, generateTopicName };
 
 // Repository-scoped variant used by the Knowledge Context Engine. It deliberately
 // reuses the same embedding, keyword distribution, LLM naming, Bhattacharyya

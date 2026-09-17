@@ -119,15 +119,23 @@ export async function getAccessibleExpertsWithPrisma(prisma, { orgId, userId, qu
   const pattern = `%${trimmed}%`;
   const safeLimit = Math.max(1, Math.min(50, Number(limit) || 20));
 
+  // A topic name alone (e.g. "Implementation Tracker") is often ambiguous -
+  // the same generic name can exist under unrelated projects. project/dept
+  // disambiguates it. For a project-scope topic this is exact (one project
+  // per topic); for a repository-scope topic spanning multiple departments,
+  // MAX() picks one deterministically rather than trying to list them all.
   return prisma.$queryRaw`
     SELECT u.id, u.name, u.email, t.id AS "topicId", t.name AS topic, t.scope AS "topicScope",
            MAX(te.score)::float AS score, te.source, te."lastSignalAt",
-           COUNT(DISTINCT td."documentId")::int AS "documentCount"
+           COUNT(DISTINCT td."documentId")::int AS "documentCount",
+           MAX(p.name) AS "projectName", MAX(dept.name) AS "departmentName"
     FROM "TopicExpertise" te
     JOIN "Topic" t ON t.id = te."topicId"
     JOIN "User" u ON u.id = te."userId"
     JOIN "TopicDocument" td ON td."topicId" = t.id
     JOIN "Document" d ON d.id = td."documentId"
+    LEFT JOIN "Project" p ON p.id = t."projectId"
+    LEFT JOIN "Department" dept ON dept.id = COALESCE(p."departmentId", d."departmentId")
     WHERE COALESCE(t."orgId", d."orgId") = ${orgId}
       AND te.source <> 'dismissed'
       AND (${topicId}::text IS NULL OR t.id = ${topicId})
