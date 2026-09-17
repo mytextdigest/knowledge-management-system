@@ -1,5 +1,44 @@
 import { Prisma } from "@prisma/client";
 
+const SEMANTIC_TOPIC_THRESHOLD = 0.3;
+const SEMANTIC_TOPIC_CANDIDATES = 25;
+
+function cosineSimilarity(a, b) {
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/**
+ * Ranks this org's topics (repository- and project-scoped) by embedding
+ * similarity to a pre-computed query embedding. Topics without a usable
+ * centroid (never classified, or a dimension mismatch from an older model)
+ * are skipped rather than erroring. Returns null if there's nothing to
+ * compute against; the caller falls back to text matching in that case.
+ */
+async function rankTopicsBySemanticSimilarity(prisma, { orgId, queryEmbedding }) {
+  if (!Array.isArray(queryEmbedding) || queryEmbedding.length !== 1536) return null;
+  const topics = await prisma.topic.findMany({
+    where: { OR: [{ orgId }, { project: { orgId } }] },
+    select: { id: true, centroidEmbedding: true },
+  });
+  const scored = topics
+    .map((t) => {
+      const centroid = t.centroidEmbedding;
+      if (!Array.isArray(centroid) || centroid.length !== 1536) return null;
+      return { id: t.id, sim: cosineSimilarity(queryEmbedding, centroid) };
+    })
+    .filter((t) => t && t.sim >= SEMANTIC_TOPIC_THRESHOLD)
+    .sort((a, b) => b.sim - a.sim)
+    .slice(0, SEMANTIC_TOPIC_CANDIDATES);
+  return scored.map((t) => t.id);
+}
+
 /**
  * SQL-level access rule for expertise/topic discovery.
  *
@@ -113,11 +152,42 @@ export async function isExpertTopicAccessibleWithPrisma(prisma, { orgId, userId,
   return rows.length > 0;
 }
 
-export async function getAccessibleExpertsWithPrisma(prisma, { orgId, userId, query = "", topicId = null, isSuperAdmin = false, limit = 20 }) {
+export async function getAccessibleExpertsWithPrisma(prisma, { orgId, userId, query = "", topicId = null, isSuperAdmin = false, limit = 20, queryEmbedding = null }) {
   const access = expertTopicAccessSql({ userId, isSuperAdmin });
   const trimmed = String(query || "").trim();
-  const pattern = `%${trimmed}%`;
   const safeLimit = Math.max(1, Math.min(50, Number(limit) || 20));
+
+  // Word-based fallback: every typed word must appear *somewhere* relevant
+  // (topic name, document filename/summary, or project name), rather than
+  // requiring the whole phrase to appear verbatim as one substring - that
+  // old behavior broke on word reordering (e.g. "assistant knowledge") and
+  // never searched the project name at all (e.g. "kms" matching nothing
+  // relevant). It still has no typo tolerance, which is why semantic
+  // ranking is tried first below.
+  const words = trimmed ? trimmed.split(/\s+/).filter(Boolean) : [];
+  const wordConditions = words.map((w) => {
+    const wp = `%${w}%`;
+    return Prisma.sql`(t.name ILIKE ${wp} OR d.filename ILIKE ${wp} OR d.summary ILIKE ${wp} OR p.name ILIKE ${wp})`;
+  });
+
+  // Semantic ranking: rank topics by embedding similarity to the query so a
+  // typo, a rephrasing, or a related-but-not-identical term (e.g. "knowledge
+  // assistant" for a topic literally named "Conversational Knowledge
+  // Assistant Implementation") still surfaces the right experts. Combined
+  // with the word-based filter (OR, not instead-of) because a literal term
+  // like a project's exact name/acronym can be a better match than anything
+  // embedding similarity finds, and neither approach alone should be able to
+  // hide a match the other one found.
+  const semanticTopicIds = await rankTopicsBySemanticSimilarity(prisma, { orgId, queryEmbedding });
+  let searchFilter;
+  if (!wordConditions.length) {
+    searchFilter = Prisma.sql`TRUE`;
+  } else {
+    const wordFilter = Prisma.join(wordConditions, " AND ");
+    searchFilter = (semanticTopicIds && semanticTopicIds.length)
+      ? Prisma.sql`(${wordFilter} OR t.id IN (${Prisma.join(semanticTopicIds)}))`
+      : wordFilter;
+  }
 
   // A topic name alone (e.g. "Implementation Tracker") is often ambiguous -
   // the same generic name can exist under unrelated projects. project/dept
@@ -139,7 +209,7 @@ export async function getAccessibleExpertsWithPrisma(prisma, { orgId, userId, qu
     WHERE COALESCE(t."orgId", d."orgId") = ${orgId}
       AND te.source <> 'dismissed'
       AND (${topicId}::text IS NULL OR t.id = ${topicId})
-      AND (${trimmed} = '' OR t.name ILIKE ${pattern} OR d.filename ILIKE ${pattern} OR d.summary ILIKE ${pattern})
+      AND ${searchFilter}
       AND ${access}
     GROUP BY u.id, u.name, u.email, t.id, t.name, t.scope, te.source, te."lastSignalAt"
     ORDER BY score DESC, "documentCount" DESC
