@@ -22,7 +22,7 @@ export default function Navbar() {
             
             {/* Logo */}
             <motion.div
-              onClick={() => router.push(isAuthenticated ? "/dashboard" : "/")}
+              onClick={() => router.push(isAuthenticated ? "/welcome-back" : "/")}
               className="flex cursor-pointer items-center gap-2.5"
               whileHover={{ opacity: 0.85 }}
             >
@@ -59,7 +59,7 @@ export default function Navbar() {
             <div className="flex items-center gap-3">
               {isAuthenticated ? (
                 <Button
-                  onClick={() => router.push("/dashboard")}
+                  onClick={() => router.push("/welcome-back")}
                   className="rounded-full px-6"
                 >
                   Dashboard

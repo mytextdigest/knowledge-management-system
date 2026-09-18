@@ -17,7 +17,11 @@ export default withAuth({
 
 export const config = {
   matcher: [
-    "/dashboard/:path*",
+    "/welcome-back/:path*",
+    "/onboarding/:path*",
+    // Deliberately NOT "/org/:path*" — /org/invite/[token] must stay
+    // reachable while logged out (it's the invite-acceptance landing page).
+    // (app)/org/[orgId]/layout.jsx already enforces its own session check.
     "/project/:path*",
     "/document/:path*",
 

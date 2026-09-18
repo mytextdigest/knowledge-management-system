@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, SendMessageCommand } from "@aws-sdk/client-sqs";
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { extractPdfText } from "./extractPdf.js";
 import { extractSpreadsheetChunks } from "./extractSpreadsheet.js";
 import { runOCR } from "./runOcr.js";
@@ -8,9 +8,16 @@ import mammoth from "mammoth";
 import { PrismaClient } from "@prisma/client";
 import OpenAI from "openai";
 import nodemailer from "nodemailer";
-import { createStructuredSummary, summarizeChunks } from "./summarize.js";
+import { createStructuredSummary, summarizeChunks, extractEntities, extractDecisions, isRetrospectiveShaped, extractLessons } from "./summarize.js";
 import { getOpenAIForDocument } from "./openai.js";
+import { detectConflictsForDocument } from "./detectConflicts.js";
 import { processClusterJobWorker } from "./cluster.js";
+import { classifyDocument, computeContentHash, detectDocumentDuplicates } from "./classify.js";
+import { processKnowledgeContext } from "./knowledgeContext.js";
+import { decrypt, encrypt } from "../src/lib/crypto.js";
+import { getAppOnlyToken } from "../src/lib/msGraph.js";
+import { getConnector } from "../src/lib/connectors/index.js";
+import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
 const S3_BUCKET = process.env.S3_BUCKET;
@@ -35,10 +42,21 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-function chunkText(text, size = 2000) {
+const CHUNK_OVERLAP_RATIO = 0.15;
+
+// text-embedding-3-small's real limit is 8191 tokens (~30k+ chars) — this is
+// just a defensive cap, not a tuning knob. Actual chunk sizes (see
+// processChunkJob) are far below it, so it should never actually truncate.
+const MAX_EMBEDDING_INPUT_CHARS = 30000;
+
+function chunkText(text, size = 2000, overlap = 0) {
   const chunks = [];
-  for (let i = 0; i < text.length; i += size)
+  const step = Math.max(1, size - overlap);
+
+  for (let i = 0; i < text.length; i += step) {
     chunks.push(text.slice(i, i + size));
+    if (i + size >= text.length) break;
+  }
 
   return chunks;
 }
@@ -80,7 +98,8 @@ async function processChunkJob(job) {
   const endTotal = startTimer("CHUNK JOB TOTAL", { docId });
 
 
-  const chunkSize = visibility === "public" ? 12000 : 10000;
+  const chunkSize = visibility === "public" ? 2500 : 2000;
+  const chunkOverlap = Math.round(chunkSize * CHUNK_OVERLAP_RATIO);
   const BATCH_SIZE = 20; // SAFE for Prisma + Postgres
 
   // -----------------------------
@@ -96,7 +115,7 @@ async function processChunkJob(job) {
 
   await prisma.document.update({
     where: { id: docId },
-    data: { status: "extracting" },
+    data: { status: "extracting", classificationStatus: "pending_classification" },
   });
 
   // -----------------------------
@@ -199,7 +218,7 @@ async function processChunkJob(job) {
           metadata: c.metadata,
         }))
         .filter(c => c.text.length > 0)
-    : chunkText(text, chunkSize)
+    : chunkText(text, chunkSize, chunkOverlap)
         .map(c => forceValidUTF8(sanitizeText(c)))
         .filter(c => c.length > 0)
         .map(c => ({ text: c, metadata: null }));
@@ -327,7 +346,7 @@ async function processEmbeddingJob(job) {
 
     const emb = await openai.embeddings.create({
       model: "text-embedding-3-small",
-      input: chunk.text.slice(0, 8000),
+      input: chunk.text.slice(0, MAX_EMBEDDING_INPUT_CHARS),
     });
 
     const embVec = emb.data[0].embedding;
@@ -340,11 +359,27 @@ async function processEmbeddingJob(job) {
     await prisma.$executeRaw`UPDATE "Chunk" SET "embedding_vec" = ${embStr}::vector WHERE id = ${chunk.id}`;
   }
 
-  // Mark as embedded
+  // Mark as embedded and persist a normalized content hash for exact duplicate checks.
+  const embeddedDoc = await prisma.document.findUnique({
+    where: { id: docId },
+    select: { content: true },
+  });
   await prisma.document.update({
     where: { id: docId },
-    data: { status: "embedded" },
+    data: {
+      status: "embedded",
+      contentHash: computeContentHash(embeddedDoc?.content),
+    },
   });
+
+  // Duplicate detection is advisory and non-blocking. It uses existing embeddings,
+  // so it adds no LLM call and cannot reject the upload.
+  try {
+    const matches = await detectDocumentDuplicates({ prisma, documentId: docId });
+    console.log(`🟨 Duplicate scan for ${docId}: ${matches.length} possible match(es)`);
+  } catch (err) {
+    console.error("⚠️ Duplicate detection failed (non-fatal):", err.message);
+  }
 
   // Enqueue summarization (pass projectId forward for cluster job)
   await sqs.send(
@@ -413,6 +448,149 @@ async function processSummarizationJob(job) {
   // Final structured summary
   const structured = await createStructuredSummary(openai, chunkSummaries, filename);
 
+  // Rank 4 FR-1/FR-2: one combined LLM call produces category and optional
+  // department suggestion. This is advisory and never overwrites an explicitly
+  // selected department. Classification failure must not block summarization.
+  try {
+    const docForClassification = await prisma.document.findUnique({
+      where: { id: docId },
+      select: { content: true },
+    });
+    const classification = await classifyDocument({
+      prisma,
+      openai,
+      documentId: docId,
+      filename,
+      text: docForClassification?.content || chunkTexts.join("\n"),
+      summary: JSON.stringify(structured),
+    });
+    console.log(`🏷️ Classification for ${docId}:`, classification);
+  } catch (err) {
+    console.error("⚠️ Automatic classification failed (non-fatal):", err.message);
+    await prisma.document.update({
+      where: { id: docId },
+      data: { classificationStatus: "needs_review" },
+    });
+  }
+
+  // FR-P2-2: entity extraction (people/projects/departments/systems named in
+  // the document), alongside the summary calls above. Re-run on regenerate
+  // too — deleteMany + createMany keeps this idempotent either way.
+  const entities = await extractEntities(openai, chunkSummaries, filename);
+  await prisma.entity.deleteMany({ where: { documentId: docId } });
+  if (entities.length > 0) {
+    await prisma.entity.createMany({
+      data: entities.map((e) => ({ documentId: docId, name: e.name, type: e.type })),
+    });
+  }
+
+  // FR-P2-6 / FR-P2-7: decision + rationale extraction, alongside FR-P2-2's
+  // entity extraction above — same chunk-summary input, same idempotent
+  // deleteMany + createMany pattern so `regenerate` mode stays safe. Decision
+  // dates (when stated) get mirrored into TimelineEvent so a project/department
+  // page can show a chronological view without manual entry.
+  const decisions = await extractDecisions(openai, chunkSummaries, filename);
+
+  // TimelineEvent.decisionId is onDelete: SetNull, so timeline rows tied to
+  // this document must be cleared before the decisions they point to —
+  // otherwise a regenerate run would leave stale timeline entries behind
+  // with a null decisionId instead of being replaced.
+  await prisma.timelineEvent.deleteMany({ where: { documentId: docId } });
+  await prisma.decision.deleteMany({ where: { documentId: docId } });
+
+  if (decisions.length > 0) {
+    const docForTimeline = await prisma.document.findUnique({
+      where: { id: docId },
+      select: { departmentId: true },
+    });
+
+    for (const d of decisions) {
+      const decision = await prisma.decision.create({
+        data: {
+          documentId: docId,
+          statement: d.statement,
+          rationale: d.rationale,
+          decidedAt: d.decidedAt,
+        },
+      });
+
+      if (d.decidedAt) {
+        await prisma.timelineEvent.create({
+          data: {
+            documentId: docId,
+            projectId: projectId || null,
+            departmentId: docForTimeline?.departmentId || null,
+            decisionId: decision.id,
+            occurredAt: d.decidedAt,
+            description: d.statement,
+          },
+        });
+      }
+    }
+  }
+
+  // Rank 11 FR-3: lesson extraction, advisory only — chained onto this same
+  // summarization stage rather than a new job type (per this project's
+  // "don't build two parallel systems" rule). Cheap keyword pre-filter first
+  // (isRetrospectiveShaped) so the extra LLM call only runs for documents
+  // that actually read like a retrospective/post-mortem, keeping the
+  // no-more-than-one-extra-call-per-document cost budget. Wrapped in
+  // try/catch and non-fatal, same reasoning as conflict detection below — an
+  // LLM hiccup here shouldn't sink the summary/decisions/entities already
+  // produced. Always lands as status "draft"/source "extracted": a human
+  // must review and publish before it's used as chat grounding or shown to
+  // anyone beyond this project/department's own feed (see FR-6).
+  await prisma.lesson.deleteMany({ where: { documentId: docId, source: "extracted", status: "draft" } });
+  if (isRetrospectiveShaped(filename, chunkSummaries)) {
+    try {
+      const docForLessons = await prisma.document.findUnique({
+        where: { id: docId },
+        select: { orgId: true, departmentId: true, userId: true },
+      });
+      if (docForLessons?.orgId) {
+        const lessons = await extractLessons(openai, chunkSummaries, filename);
+        for (const l of lessons) {
+          await prisma.lesson.create({
+            data: {
+              orgId: docForLessons.orgId,
+              projectId: projectId || null,
+              departmentId: docForLessons.departmentId || null,
+              documentId: docId,
+              topic: l.topic,
+              whatHappened: l.whatHappened,
+              whatWorked: l.whatWorked,
+              whatDidntWork: l.whatDidntWork,
+              recommendation: l.recommendation,
+              authorUserId: docForLessons.userId,
+              source: "extracted",
+              status: "draft",
+            },
+          });
+        }
+        if (lessons.length > 0) console.log(`💡 Extracted ${lessons.length} draft lesson(s) for ${docId}`);
+      }
+    } catch (err) {
+      console.error("⚠️ Lesson extraction failed (non-fatal):", err.message);
+    }
+  }
+
+  // FR-P2-10: conflict detection, scoped to this document vs. others sharing
+  // its department/project (chunks are already embedded by this point in the
+  // pipeline — embed runs before summarize). Clear this doc's stale conflicts
+  // first so a regenerate that changes the content doesn't leave a flag that
+  // no longer applies. Wrapped in try/catch and non-fatal: an LLM hiccup here
+  // shouldn't block the summary/decisions/entities this job already produced,
+  // unlike the earlier extraction calls which are allowed to fail the job.
+  await prisma.documentConflict.deleteMany({
+    where: { OR: [{ documentAId: docId }, { documentBId: docId }] },
+  });
+  try {
+    const { reviewed, flagged } = await detectConflictsForDocument(prisma, openai, docId);
+    console.log(`🔺 Conflict scan for ${docId}: reviewed ${reviewed}, flagged ${flagged}`);
+  } catch (err) {
+    console.error("⚠️ Conflict detection failed (non-fatal):", err.message);
+  }
+
   // Save document summary.
   // For first-time processing: set status to "clustering" (cluster job will set "ready").
   // For regeneration: set status to "ready" immediately (no re-clustering needed).
@@ -423,6 +601,17 @@ async function processSummarizationJob(job) {
       status: regenerate ? "ready" : "clustering",
     },
   });
+
+  // Re-run the advisory duplicate scan after summarization. Two identical
+  // uploads can enter embedding in parallel; the first scan may occur before
+  // the other candidate has finished persisting embeddings/hash. This second,
+  // still non-blocking pass closes that race without delaying ingestion.
+  try {
+    const matches = await detectDocumentDuplicates({ prisma, documentId: docId });
+    console.log(`🟨 Final duplicate scan for ${docId}: ${matches.length} possible match(es)`);
+  } catch (err) {
+    console.error("⚠️ Final duplicate detection failed (non-fatal):", err.message);
+  }
 
   // Load user details
   const doc = await prisma.document.findUnique({
@@ -493,11 +682,248 @@ async function processSummarizationJob(job) {
 }
 
 
+// -----------------------------------------------------------------------
+// Rank 3 — SharePoint sync (Task 7-C). FR-3's MVP slice: a manual "Sync Now"
+// trigger only (the API route enqueues this job and returns immediately,
+// per the NFR that sync work never runs inline with the request).
+// -----------------------------------------------------------------------
+
+// Re-mints the app-only token if it's expiring soon — client-credentials
+// tokens have no refresh token, they're just re-requested with the same
+// client_id/secret against the org's tenant.
+async function ensureFreshAppOnlyToken(integration) {
+  const REFRESH_BUFFER_MS = 2 * 60 * 1000;
+  if (new Date(integration.tokenExpiry).getTime() - Date.now() > REFRESH_BUFFER_MS) {
+    return decrypt(integration.accessToken);
+  }
+  const tenantId = integration.scopeConfig?.tenantId;
+  const { accessToken, expiresIn } = await getAppOnlyToken(tenantId);
+  await prisma.orgIntegration.update({
+    where: { id: integration.id },
+    data: { accessToken: encrypt(accessToken), tokenExpiry: new Date(Date.now() + expiresIn * 1000) },
+  });
+  return accessToken;
+}
+
+// Pulls one changed file into the existing pipeline exactly as a manual
+// upload would (same S3 + Document + SQS "chunk" entrypoint), with
+// sourceProvider/externalId/externalModifiedAt set.
+//
+// FR-4 (Task 7-D) — source-level dedup: a file already ingested from this
+// (sourceProvider, externalId) is skipped entirely if its content hasn't
+// actually changed (compared on Graph's lastModifiedDateTime), and updated
+// in place — not re-created as a duplicate row — if it has. Returns
+// { skipped } so the caller can report an accurate filesFound count.
+async function syncOneFile({ change, integration, site, connectedByUserId, accessToken }) {
+  const orgId = integration.orgId;
+
+  const existing = await prisma.document.findFirst({
+    where: { orgId, sourceProvider: "sharepoint", externalId: change.externalId },
+    select: { id: true, externalModifiedAt: true },
+  });
+  if (existing?.externalModifiedAt && existing.externalModifiedAt.getTime() === new Date(change.modifiedAt).getTime()) {
+    return { skipped: true };
+  }
+
+  const dbUser = await prisma.user.findUnique({ where: { id: connectedByUserId } });
+  if (!dbUser) throw new Error("Connecting user no longer exists");
+
+  const orgSubscription = await prisma.subscription.findUnique({ where: { orgId }, include: { plan: true } });
+  if (!orgSubscription?.plan || !["active", "trialing"].includes(orgSubscription.status)) {
+    throw new Error("No active subscription for org");
+  }
+  const planLimitBytes = BigInt(orgSubscription.plan.storageLimitGb) * 1024n * 1024n * 1024n;
+
+  const s3Key = `uploads/${connectedByUserId}/org/${orgId}/sharepoint/${change.externalId}/${change.name}`;
+
+  // Re-syncing a changed file overwrites the same deterministic S3 key —
+  // account for the storage *delta* (new size minus old), not the full new
+  // size again, or a repeatedly-edited SharePoint file would inflate a
+  // user's usage forever.
+  let oldSizeBytes = 0n;
+  if (existing) {
+    try {
+      const head = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
+      oldSizeBytes = BigInt(head.ContentLength || 0);
+    } catch {
+      oldSizeBytes = 0n; // nothing there to subtract (shouldn't normally happen)
+    }
+  }
+  const storageDelta = BigInt(change.size || 0) - oldSizeBytes;
+  const projectedUsage = BigInt(dbUser.storageUsedBytes) + storageDelta;
+  if (projectedUsage > planLimitBytes) {
+    throw new Error("Storage limit exceeded");
+  }
+
+  const connector = getConnector("sharepoint", { accessToken, siteId: site.siteId });
+  const buffer = await connector.downloadFile(change.externalId);
+  await s3.send(new PutObjectCommand({ Bucket: S3_BUCKET, Key: s3Key, Body: buffer }));
+
+  const [doc] = await prisma.$transaction([
+    existing
+      ? prisma.document.update({
+          where: { id: existing.id },
+          data: { filePath: s3Key, status: "queued", externalModifiedAt: new Date(change.modifiedAt) },
+        })
+      : prisma.document.create({
+          data: {
+            filename: change.name,
+            filePath: s3Key,
+            status: "queued",
+            visibility: "private",
+            scope: "repository",
+            // FR-5/FR-6: a newly-synced file isn't canonical yet — it sits out
+            // of the regular repository/search (existing `lifecycle: "draft"`
+            // filtering already excludes drafts by default) until a super
+            // admin confirms it via the Needs-Review queue (7-E/7-F), which
+            // transitions it to "published". Only new rows start this way —
+            // an update to an already-published document (re-sync of an
+            // edited file) intentionally leaves lifecycle alone, so a minor
+            // content edit doesn't force a previously-approved doc back
+            // through review.
+            lifecycle: "draft",
+            sourceProvider: "sharepoint",
+            externalId: change.externalId,
+            externalModifiedAt: new Date(change.modifiedAt),
+            organization: { connect: { id: orgId } },
+            department: { connect: { id: site.departmentId } },
+            user: { connect: { id: connectedByUserId } },
+          },
+        }),
+    prisma.user.update({
+      where: { id: connectedByUserId },
+      data: { storageUsedBytes: { increment: storageDelta } },
+    }),
+  ]);
+
+  await sqs.send(
+    new SendMessageCommand({
+      QueueUrl: QUEUE_URL,
+      MessageBody: JSON.stringify({
+        type: "chunk",
+        docId: doc.id,
+        s3Key,
+        filename: change.name,
+        projectId: null,
+        userId: connectedByUserId,
+        orgId,
+        visibility: "private",
+        regenerate: false,
+      }),
+    })
+  );
+
+  return { skipped: false };
+}
+
+async function processSharePointSyncJob(job) {
+  const { integrationId, syncRunId } = job;
+  console.log(`🔷 SHAREPOINT SYNC JOB: integration=${integrationId} run=${syncRunId}`);
+
+  const integration = await prisma.orgIntegration.findUnique({ where: { id: integrationId } });
+  if (!integration) throw new Error(`OrgIntegration ${integrationId} not found`);
+
+  const connectedByUserId = integration.scopeConfig?.connectedByUserId;
+  let filesFound = 0;
+  let filesFailed = 0;
+  let runError = null;
+  let scopeConfig = integration.scopeConfig;
+
+  try {
+    if (!connectedByUserId) throw new Error("scopeConfig.connectedByUserId is missing");
+
+    const accessToken = await ensureFreshAppOnlyToken(integration);
+    const sites = scopeConfig.sites || [];
+
+    for (const site of sites) {
+      const connector = getConnector("sharepoint", { accessToken, siteId: site.siteId });
+      let changes = [];
+      let cursor = site.lastSyncCursor;
+      try {
+        ({ changes, cursor } = await connector.listChanges(site.lastSyncCursor));
+      } catch (err) {
+        console.error(`❌ Delta query failed for site ${site.siteId}:`, err.message);
+        filesFailed++;
+        continue; // keep going with the next site rather than aborting the whole run
+      }
+
+      for (const change of changes) {
+        if (change.deleted) continue; // FR-2 MVP: no orphan/archive handling yet (Open Question #4)
+        try {
+          const result = await syncOneFile({ change, integration, site, connectedByUserId, accessToken });
+          if (!result.skipped) filesFound++;
+        } catch (err) {
+          console.error(`❌ Failed to sync file "${change.name}" (${change.externalId}):`, err.message);
+          filesFailed++;
+        }
+      }
+
+      // Persist this site's cursor as soon as it's done — a later site
+      // failing shouldn't force this one to be re-walked from scratch. Must
+      // map over the accumulating scopeConfig.sites, not the outer `sites`
+      // snapshot — otherwise each site's update clobbers the previous
+      // site's freshly-persisted cursor with its stale pre-loop value.
+      scopeConfig = { ...scopeConfig, sites: scopeConfig.sites.map((s) => (s.siteId === site.siteId ? { ...s, lastSyncCursor: cursor } : s)) };
+      await prisma.orgIntegration.update({ where: { id: integrationId }, data: { scopeConfig } });
+    }
+  } catch (err) {
+    runError = err.message;
+    console.error("❌ SharePoint sync run failed:", err);
+  }
+
+  await prisma.orgIntegration.update({ where: { id: integrationId }, data: { lastSyncAt: new Date() } });
+  await prisma.syncRun.update({
+    where: { id: syncRunId },
+    data: {
+      status: runError ? "failed" : "completed",
+      finishedAt: new Date(),
+      filesFound,
+      filesFailed,
+      error: runError,
+    },
+  });
+
+  console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed}`);
+
+  // FR-7 — one digest email per sync run (not one per file), only when
+  // there's actually something new to review. Non-fatal: an email hiccup
+  // shouldn't retroactively fail a sync that otherwise succeeded.
+  if (filesFound > 0) {
+    try {
+      const [org, superAdmins] = await Promise.all([
+        prisma.organization.findUnique({ where: { id: integration.orgId }, select: { name: true } }),
+        prisma.organizationMember.findMany({
+          where: { orgId: integration.orgId, role: "super_admin" },
+          select: { user: { select: { email: true } } },
+        }),
+      ]);
+      const recipients = superAdmins.map((m) => m.user.email).filter(Boolean);
+      if (recipients.length > 0) {
+        await sendSyncDigestEmail({
+          to: recipients,
+          orgName: org?.name || "your organization",
+          source: "SharePoint",
+          filesFound,
+          needsReviewUrl: `${process.env.NEXT_PUBLIC_APP_URL}/org/${integration.orgId}/needs-review`,
+        });
+        console.log(`📧 Sync digest sent to ${recipients.length} super admin(s)`);
+      }
+    } catch (err) {
+      console.error("⚠️ Failed to send sync digest email (non-fatal):", err.message);
+    }
+  }
+}
+
 async function processJob(job) {
   if (job.type === "chunk")    return processChunkJob(job);
   if (job.type === "embed")    return processEmbeddingJob(job);
   if (job.type === "summarize") return processSummarizationJob(job);
-  if (job.type === "cluster")  return processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
+  if (job.type === "cluster") {
+    const result = await processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
+    try { await processKnowledgeContext(job.docId); } catch (error) { console.error("Knowledge context job failed", error); }
+    return result;
+  }
+  if (job.type === "sharepoint_sync") return processSharePointSyncJob(job);
 
   throw new Error("Unknown job type: " + job.type);
 }

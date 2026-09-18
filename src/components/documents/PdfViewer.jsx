@@ -1,13 +1,15 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 
-export default function PdfViewer({ fileUrl, onPageChange, onTotalPages }) {
+export default function PdfViewer({ fileUrl, onPageChange, onTotalPages, zoom = 1 }) {
   const containerRef = useRef(null);
   const [numPages, setNumPages] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const pdfRef = useRef(null);
+  const pdfjsRef = useRef(null);
   const canvasRefs = useRef({});
+  const textLayerRefs = useRef({});
   const onPageChangeRef = useRef(onPageChange);
 
   useEffect(() => { onPageChangeRef.current = onPageChange; }, [onPageChange]);
@@ -19,6 +21,7 @@ export default function PdfViewer({ fileUrl, onPageChange, onTotalPages }) {
       try {
         const pdfjs = await import('pdfjs-dist');
         pdfjs.GlobalWorkerOptions.workerSrc = '/pdf/pdf.worker.min.js';
+        pdfjsRef.current = pdfjs;
         const pdf = await pdfjs.getDocument(fileUrl).promise;
         if (cancelled) return;
         pdfRef.current = pdf;
@@ -43,11 +46,27 @@ export default function PdfViewer({ fileUrl, onPageChange, onTotalPages }) {
           if (!canvas) continue;
           const unscaled = page.getViewport({ scale: 1 });
           const containerWidth = (containerRef.current?.clientWidth ?? 640) - 32;
-          const scale = containerWidth / unscaled.width;
+          const scale = (containerWidth / unscaled.width) * zoom;
           const viewport = page.getViewport({ scale });
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+          // Overlay an invisible, selectable text layer aligned to the rendered
+          // canvas so users can select/copy PDF text (the canvas itself is just pixels).
+          const textLayerDiv = textLayerRefs.current[i];
+          if (textLayerDiv && pdfjsRef.current && !cancelled) {
+            textLayerDiv.innerHTML = '';
+            const textContent = await page.getTextContent();
+            if (!cancelled) {
+              pdfjsRef.current.renderTextLayer({
+                textContent,
+                container: textLayerDiv,
+                viewport,
+                textDivs: [],
+              });
+            }
+          }
         } catch (err) {
           if (!cancelled) console.error(`PDF page ${i} render error:`, err);
         }
@@ -55,7 +74,7 @@ export default function PdfViewer({ fileUrl, onPageChange, onTotalPages }) {
       if (!cancelled) setIsLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [numPages]);
+  }, [numPages, zoom]);
 
   useEffect(() => {
     if (numPages === 0) return;
@@ -94,11 +113,17 @@ export default function PdfViewer({ fileUrl, onPageChange, onTotalPages }) {
       )}
       {Array.from({ length: numPages }, (_, i) => (
         <div key={i + 1} className="flex justify-center py-2 px-4">
-          <canvas
-            ref={el => { canvasRefs.current[i + 1] = el; }}
-            data-page={i + 1}
-            className="shadow-md max-w-full"
-          />
+          <div className="relative inline-block leading-none">
+            <canvas
+              ref={el => { canvasRefs.current[i + 1] = el; }}
+              data-page={i + 1}
+              className="shadow-md block"
+            />
+            <div
+              ref={el => { textLayerRefs.current[i + 1] = el; }}
+              className="pdfTextLayer absolute inset-0"
+            />
+          </div>
         </div>
       ))}
     </div>

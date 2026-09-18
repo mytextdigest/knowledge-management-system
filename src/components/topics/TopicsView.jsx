@@ -13,6 +13,7 @@ import TopicGroup from './TopicGroup';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/components/ui/Toast';
 
 export default function TopicsView({
   topics = [],
@@ -22,7 +23,6 @@ export default function TopicsView({
   onUpload,
   onView,
   onDelete,
-  onToggleStar,
   onToggleSelect,
   onRename,
   onTopicsChange,
@@ -31,6 +31,8 @@ export default function TopicsView({
   onFilterChange,
   className,
 }) {
+  const toast = useToast();
+
   const [viewMode, setViewMode]       = useState('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeDocData, setActiveDocData] = useState(null);
@@ -61,7 +63,7 @@ export default function TopicsView({
     }
   }
 
-  const docCallbacks = { onView, onDelete, onToggleStar, onToggleSelect, onRename };
+  const docCallbacks = { onView, onDelete, onToggleSelect, onRename };
 
   const handleDragStart = ({ active }) => {
     setActiveDocData(active?.data?.current ?? null);
@@ -80,6 +82,13 @@ export default function TopicsView({
 
     try {
       if (targetId === 'unassigned') {
+        const canUnassign = active.data.current?.permissions?.canUnassign !== false;
+
+        if (!canUnassign) {
+          toast.warning("You don't have permission to unassign this document.");
+          return;
+        }
+
         await fetch(`/api/documents/${docId}/unassign`, { method: 'POST' });
       } else {
         await fetch(`/api/documents/${docId}/move-to-topic`, {

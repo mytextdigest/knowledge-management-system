@@ -18,15 +18,25 @@ model User {
 
   storageUsedBytes BigInt @default(0)
 
-  conversations Conversation[]
-  documents     Document[]
-  projects      Project[]
-  projectChats  ProjectConversation[]
-  settings      Setting[]
-  subscription  Subscription?
+  hasCompletedOnboarding Boolean @default(false) @map("has_completed_onboarding")
+
+  conversations        Conversation[]
+  documents            Document[]
+  projects             Project[]
+  projectChats         ProjectConversation[]
+  settings             Setting[]
+  managedSubscriptions Subscription[]
 
   orgMembers        OrganizationMember[]
   departmentMembers DepartmentMember[]
+  orgConversations  OrgConversation[]
+  chatAuditLogs     ChatAuditLog[]
+  auditLogsAsActor  AuditLog[]           @relation("AuditLogActor")
+  auditLogsAsTarget AuditLog[]           @relation("AuditLogTarget")
+  orgMemberMemories OrgMemberMemory[]
+  topicExpertise    TopicExpertise[]
+  documentInteractions DocumentInteraction[]
+  lessonsAuthored   Lesson[]
 }
 
 model OtpToken {
@@ -55,41 +65,58 @@ model Organization {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  members     OrganizationMember[]
-  invites     OrganizationInvite[]
-  departments Department[]
-  projects    Project[]
-  documents   Document[]
+  storageUsedBytes BigInt @default(0) @map("storage_used_bytes")
+
+  members           OrganizationMember[]
+  invites           OrganizationInvite[]
+  departments       Department[]
+  projects          Project[]
+  documents         Document[]
+  conversations     OrgConversation[]
+  chatAuditLogs     ChatAuditLog[]
+  auditLogs         AuditLog[]
+  subscription      Subscription?
+  orgMemberMemories OrgMemberMemory[]
+  knowledgeGaps     KnowledgeGap[]
+  repositoryTopics  Topic[]
+  integrations      OrgIntegration[]
+  documentInteractions DocumentInteraction[]
+  lessons           Lesson[]
 
   @@index([name])
 }
 
 model OrganizationMember {
-  id        String   @id @default(cuid())
-  orgId     String
-  userId    String
-  role      String   @default("employee")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(cuid())
+  orgId            String
+  userId           String
+  role             String   @default("employee")
+  lastDepartmentId String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastDepartment Department?  @relation(fields: [lastDepartmentId], references: [id], onDelete: SetNull)
 
   @@unique([orgId, userId])
   @@index([orgId])
   @@index([userId])
+  @@index([lastDepartmentId])
 }
 
 model OrganizationInvite {
-  id         String    @id @default(cuid())
-  orgId      String
-  email      String
-  role       String    @default("employee")
-  token      String    @unique
-  expiresAt  DateTime
-  acceptedAt DateTime?
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  id            String    @id @default(cuid())
+  orgId         String
+  email         String
+  role          String    @default("employee")
+  departmentIds String[]  @default([])
+  token         String    @unique
+  expiresAt     DateTime
+  acceptedAt    DateTime?
+  declinedAt    DateTime?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
@@ -105,9 +132,14 @@ model Department {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  organization Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  members      DepartmentMember[]
-  documents    Document[]
+  organization         Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members              DepartmentMember[]
+  documents            Document[]
+  projects             Project[]
+  lastVisitedByMembers OrganizationMember[]
+  timelineEvents       TimelineEvent[]
+  suggestedDocuments   Document[] @relation("SuggestedDocumentDepartment")
+  lessons              Lesson[]
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -129,6 +161,77 @@ model DepartmentMember {
   @@index([userId])
 }
 
+model OrgConversation {
+  id                       String   @id @default(cuid())
+  orgId                    String
+  userId                   String
+  title                    String?
+  activeTopic              String?
+  activeDocumentId         String?
+  activeWorkflowDocumentId String?
+  activeWorkflowStep       Int?
+  createdAt                DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages     OrgMessage[]
+  entities     Entity[]
+
+  @@index([orgId])
+  @@index([userId])
+}
+
+model OrgMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String
+  content        String
+  sources        Json?
+  confidence     String?
+  feedback       String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation OrgConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+model ChatAuditLog {
+  id          String   @id @default(cuid())
+  orgId       String
+  userId      String
+  question    String
+  citedDocIds String[] @default([])
+  outcome     String   @default("answered") // "answered" | "denied"
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([outcome])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  orgId        String
+  actorUserId  String?
+  targetUserId String?
+  action       String
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  actor        User?        @relation("AuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  target       User?        @relation("AuditLogTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([actorUserId])
+  @@index([createdAt])
+}
+
 model Project {
   id          String   @id @default(cuid())
   name        String
@@ -136,18 +239,24 @@ model Project {
   createdAt   DateTime @default(now()) @map("created_at")
   userId      String
 
-  scope String  @default("private")
-  orgId String?
+  scope        String @default("org")
+  orgId        String
+  departmentId String
 
-  documents    Document[]
-  topics       Topic[]
-  user         User                  @relation(fields: [userId], references: [id])
-  organization Organization?         @relation(fields: [orgId], references: [id], onDelete: SetNull)
-  projectChats ProjectConversation[]
+  documents      Document[]
+  topics         Topic[]
+  user           User                  @relation(fields: [userId], references: [id])
+  organization   Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  department     Department            @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  projectChats   ProjectConversation[]
+  documentProjectLinks DocumentProjectLink[]
+  timelineEvents TimelineEvent[]
+  lessons        Lesson[]
 
-  @@unique([userId, name])
+  @@unique([departmentId, name])
   @@index([scope])
   @@index([orgId])
+  @@index([departmentId])
 }
 
 model Document {
@@ -165,25 +274,81 @@ model Document {
 
   visibility String @default("private")
 
-  scope        String  @default("private")
+  scope        String  @default("project")
   orgId        String?
   departmentId String?
   lifecycle    String  @default("published")
   category     String?
 
-  chunks        Chunk[]
-  conversations Conversation[]
-  topicDocument TopicDocument?
-  project       Project?       @relation(fields: [projectId], references: [id])
-  user          User           @relation(fields: [userId], references: [id])
-  organization  Organization?  @relation(fields: [orgId], references: [id], onDelete: SetNull)
-  department    Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  // Rank 4: automatic knowledge classification signals. Topic/TopicDocument
+  // remain project-specific clustering models; the fixed enterprise category
+  // taxonomy is document metadata and intentionally stays separate.
+  categoryConfidence            Float?
+  classificationStatus          String  @default("pending_classification")
+  suggestedDepartmentId         String?
+  departmentSuggestionConfidence Float?
+  contentHash                   String?
+  lifecycleSuggestion           String?
+  lifecycleSuggestionReason     String?
+  lifecycleSuggestedAt          DateTime?
+  lifecycleSuggestionDismissedAt DateTime?
+  classifiedAt                  DateTime?
+
+  // Rank 3 — Ingestion Pipeline (Task 7-A): set for connector-synced documents,
+  // "manual" (default) for everything uploaded through the existing upload flow.
+  sourceProvider     String?   @default("manual") @map("source_provider")
+  externalId         String?   @map("external_id")
+  externalModifiedAt DateTime? @map("external_modified_at")
+
+  chunks          Chunk[]
+  conversations   Conversation[]
+  topicDocument   TopicDocument?
+  project         Project?           @relation(fields: [projectId], references: [id])
+  user            User               @relation(fields: [userId], references: [id])
+  organization    Organization?      @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  department      Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  suggestedDepartment Department?    @relation("SuggestedDocumentDepartment", fields: [suggestedDepartmentId], references: [id], onDelete: SetNull)
+  duplicatesAsDocument  DocumentDuplicate[] @relation("DuplicateDocument")
+  duplicatesAsOriginal  DocumentDuplicate[] @relation("DuplicateOriginal")
+  entities        Entity[]
+  decisions       Decision[]
+  timelineEvents  TimelineEvent[]
+  conflictsAsDocA DocumentConflict[] @relation("DocumentConflictA")
+  conflictsAsDocB DocumentConflict[] @relation("DocumentConflictB")
+  relationshipsFrom DocumentRelationship[] @relation("DocumentRelationshipFrom")
+  relationshipsTo   DocumentRelationship[] @relation("DocumentRelationshipTo")
+  projectLinks      DocumentProjectLink[]
+  interactions      DocumentInteraction[]
+  lessons           Lesson[]
 
   @@index([scope])
   @@index([orgId])
   @@index([departmentId])
   @@index([lifecycle])
   @@index([category])
+  @@index([classificationStatus])
+  @@index([suggestedDepartmentId])
+  @@index([contentHash])
+  @@index([lifecycleSuggestion])
+  @@index([sourceProvider, externalId])
+}
+
+model DocumentDuplicate {
+  id            String   @id @default(cuid())
+  documentId    String
+  duplicateOfId String
+  similarity    Float
+  status        String   @default("pending")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  document    Document @relation("DuplicateDocument", fields: [documentId], references: [id], onDelete: Cascade)
+  duplicateOf Document @relation("DuplicateOriginal", fields: [duplicateOfId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, duplicateOfId])
+  @@index([documentId])
+  @@index([duplicateOfId])
+  @@index([status])
 }
 
 model Chunk {
@@ -244,7 +409,9 @@ model ProjectMessage {
 
 model Topic {
   id                  String   @id @default(cuid())
-  projectId           String
+  projectId           String?
+  orgId               String?
+  scope               String   @default("project")
   name                String
   centroidEmbedding   Json?
   keywordDistribution Json?
@@ -252,10 +419,14 @@ model Topic {
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
-  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organization   Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   topicDocuments TopicDocument[]
+  expertise      TopicExpertise[]
 
   @@index([projectId])
+  @@index([orgId, scope])
+  @@unique([orgId, scope, name])
 }
 
 model TopicDocument {
@@ -269,6 +440,83 @@ model TopicDocument {
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@index([topicId])
+}
+
+
+model DocumentRelationship {
+  id             String   @id @default(cuid())
+  orgId          String
+  fromDocumentId String
+  toDocumentId   String
+  type           String   @default("related")
+  weight         Float
+  evidence       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  fromDocument Document @relation("DocumentRelationshipFrom", fields: [fromDocumentId], references: [id], onDelete: Cascade)
+  toDocument   Document @relation("DocumentRelationshipTo", fields: [toDocumentId], references: [id], onDelete: Cascade)
+
+  @@unique([fromDocumentId, toDocumentId, type])
+  @@index([orgId, fromDocumentId, weight])
+  @@index([orgId, toDocumentId, weight])
+}
+
+model DocumentProjectLink {
+  id         String   @id @default(cuid())
+  documentId String
+  projectId  String
+  confidence Float
+  status     String   @default("suggested")
+  evidence   String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, projectId])
+  @@index([projectId, status])
+  @@index([documentId, status])
+}
+
+model TopicExpertise {
+  id           String    @id @default(cuid())
+  topicId      String
+  userId       String
+  score        Float
+  signals      Json?
+  source       String    @default("inferred")
+  confirmedBy  String?
+  lastSignalAt DateTime?
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([topicId, userId])
+  @@index([topicId, score])
+  @@index([userId])
+}
+
+
+model DocumentInteraction {
+  id             String   @id @default(cuid())
+  documentId     String
+  userId         String
+  orgId          String
+  type           String   @default("view")
+  durationSeconds Int?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  document     Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, type])
+  @@index([userId, createdAt])
+  @@index([orgId, createdAt])
 }
 
 // Subscription Extension
@@ -290,7 +538,12 @@ model Plan {
 
 model Subscription {
   id                   String    @id @default(cuid())
-  userId               String    @unique
+  // Legacy per-user billing key. Nullable + no longer unique going forward;
+  // retained only as "who originally purchased this" denormalization once
+  // billing moves to orgId. Will be fully retired after the org-mandatory
+  // pivot's data migration completes.
+  managedByUserId      String?
+  orgId                String    @unique
   planId               String
   status               String
   stripeCustomerId     String
@@ -300,6 +553,194 @@ model Subscription {
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id])
-  plan Plan @relation(fields: [planId], references: [id])
+  managedByUser User?        @relation(fields: [managedByUserId], references: [id])
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  plan          Plan         @relation(fields: [planId], references: [id])
+}
+
+// Rank 1 Phase 2 — Knowledge Understanding (Task 5-A shared schema)
+
+model Entity {
+  id             String   @id @default(cuid())
+  documentId     String?
+  conversationId String?
+  name           String
+  type           String // "person" | "project" | "department" | "system"
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  document     Document?        @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  conversation OrgConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([documentId])
+  @@index([conversationId])
+  @@index([type])
+}
+
+model Decision {
+  id         String    @id @default(cuid())
+  documentId String
+  statement  String
+  rationale  String?
+  decidedAt  DateTime?
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  document       Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  timelineEvents TimelineEvent[]
+  lessons        Lesson[]
+
+  @@index([documentId])
+}
+
+model TimelineEvent {
+  id           String   @id @default(cuid())
+  projectId    String?
+  departmentId String?
+  documentId   String?
+  decisionId   String?
+  occurredAt   DateTime
+  description  String
+
+  project    Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  document   Document?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  decision   Decision?   @relation(fields: [decisionId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([departmentId])
+  @@index([documentId])
+  @@index([occurredAt])
+}
+
+model DocumentConflict {
+  id          String   @id @default(cuid())
+  documentAId String
+  documentBId String
+  summary     String
+  status      String   @default("flagged") // "flagged" | "reviewed" | "dismissed"
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  documentA Document @relation("DocumentConflictA", fields: [documentAId], references: [id], onDelete: Cascade)
+  documentB Document @relation("DocumentConflictB", fields: [documentBId], references: [id], onDelete: Cascade)
+
+  @@index([documentAId])
+  @@index([documentBId])
+  @@index([status])
+}
+
+model OrgMemberMemory {
+  id         String   @id @default(cuid())
+  orgId      String
+  userId     String
+  topic      String
+  lastSeenAt DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId, topic])
+  @@index([orgId, userId])
+  @@index([lastSeenAt])
+}
+
+model KnowledgeGap {
+  id                 String   @id @default(cuid())
+  orgId              String
+  topic              String
+  gapScore           Float
+  occurrenceCount    Int
+  zeroCitationCount  Int
+  lowConfidenceCount Int
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, gapScore])
+  @@index([createdAt])
+}
+
+// Rank 3 — Automated Knowledge Ingestion Pipeline (Task 7-A)
+
+model OrgIntegration {
+  id        String @id @default(cuid())
+  orgId     String
+  provider  String // "sharepoint" | "google_drive" | "confluence" ...
+  status    String @default("connected") // "connected" | "disconnected" | "error"
+
+  // { sites: [{ siteId, siteUrl, departmentId, lastSyncCursor }] } — one entry
+  // per connected site; cursor lives per-site since an org can connect more
+  // than one site, each synced independently. See REQUIREMENTS_INGESTION_PIPELINE.md FR-2.
+  scopeConfig Json @map("scope_config")
+
+  // App-only client-credentials token, scoped to only the sites granted in
+  // scopeConfig. Encrypted at rest — do not reuse the plaintext
+  // Organization.openaiApiKey pattern (NFR in requirements doc).
+  // refreshToken is nullable: SharePoint's app-only client-credentials flow
+  // has no refresh token (re-minted from client_id/secret + tenantId in
+  // scopeConfig instead) — kept nullable for future providers that do use one.
+  accessToken  String    @map("access_token")
+  refreshToken String?   @map("refresh_token")
+  tokenExpiry  DateTime  @map("token_expiry")
+  lastSyncAt   DateTime? @map("last_sync_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  syncRuns     SyncRun[]
+
+  @@unique([orgId, provider])
+  @@index([orgId])
+}
+
+model SyncRun {
+  id            String    @id @default(cuid())
+  integrationId String    @map("integration_id")
+  startedAt     DateTime  @default(now()) @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+  status        String    @default("running") // "running" | "completed" | "failed"
+  filesFound    Int       @default(0) @map("files_found")
+  filesFailed   Int       @default(0) @map("files_failed")
+  error         String?
+
+  integration OrgIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([integrationId])
+  @@index([status])
+}
+
+// Rank 11 — Lessons Learned Intelligence (Task 12-B)
+// See docs/tier-2/REQUIREMENTS_LESSONS_LEARNED_INTELLIGENCE.md for FR text.
+// v1 ships on-demand manual capture only (Open Question 1 resolved: no
+// Project.status/completedAt lifecycle trigger — see Task 12-A note in
+// docs/tier-2/TIER2_LESSONS_LEARNED_INTELLIGENCE_IMPLEMENTATION_TRACKER.md).
+
+model Lesson {
+  id             String    @id @default(cuid())
+  orgId          String
+  projectId      String?
+  departmentId   String?
+  documentId     String?
+  decisionId     String?
+  topic          String?
+  whatHappened   String
+  whatWorked     String?
+  whatDidntWork  String?
+  recommendation String?
+  authorUserId   String
+  source         String    @default("manual") // "manual" | "extracted"
+  status         String    @default("draft")  // "draft" | "published"
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  department   Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  document     Document?    @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  decision     Decision?    @relation(fields: [decisionId], references: [id], onDelete: SetNull)
+  author       User         @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([projectId])
+  @@index([departmentId])
+  @@index([documentId])
+  @@index([status])
 }

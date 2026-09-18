@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
+import { resolveOrgRole } from "@/lib/orgGuard";
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -10,12 +11,15 @@ export async function GET(req, { params }) {
 
   const { id: projectId } = await params;
 
-  // Verify project belongs to user
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, user: { email: session.user.email } },
-    select: { id: true },
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, orgId: true },
   });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // Verify the requesting user is a member of the project's org
+  const { role } = await resolveOrgRole(session.user.email, project.orgId);
+  if (!role) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const topics = await prisma.topic.findMany({
     where: { projectId },

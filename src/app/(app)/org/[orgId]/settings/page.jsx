@@ -1,0 +1,1335 @@
+'use client';
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { motion } from 'framer-motion';
+import {
+  Building2, Users, Key, Eye, EyeOff, Loader2,
+  CheckCircle2, ArrowLeft, Mail, Shield, Layers,
+  Plus, ChevronDown, ChevronUp, UserPlus, Trash2, ExternalLink,
+  ScrollText, Pencil, Check, X as XIcon, Plug, Unplug,
+} from 'lucide-react';
+import Layout from '@/components/layout/Layout';
+import { cn } from '@/lib/utils';
+
+const ROLE_LABELS = {
+  super_admin: 'Super Admin',
+  dept_admin: 'Dept Admin',
+  employee: 'Employee',
+  guest: 'Guest',
+};
+
+const INVITE_ROLES = ['dept_admin', 'employee', 'guest'];
+
+export default function OrgSettingsPage() {
+  const { orgId } = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get('tab');
+
+  const [org, setOrg] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('general');
+
+  // Org name editing
+  const [editName, setEditName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [nameStatus, setNameStatus] = useState(null);
+
+  // API key
+  const [apiKey, setApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
+  const [keyStatus, setKeyStatus] = useState(null);
+
+  // Integrations tab (Rank 3) — lean list + status; the actual per-provider
+  // UI (connect, sync, disconnect, ...) lives on its own dedicated page.
+  const [integrations, setIntegrations] = useState([]);
+  const [integrationsLoading, setIntegrationsLoading] = useState(false);
+  const [integrationsError, setIntegrationsError] = useState('');
+
+  // Audit log
+  const [auditEntries, setAuditEntries] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState('');
+  const [auditOutcomeFilter, setAuditOutcomeFilter] = useState('all');
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditTotalPages, setAuditTotalPages] = useState(1);
+  const [auditTotal, setAuditTotal] = useState(0);
+
+  // Security events (role grants, department delete/rename, ...)
+  const [securityEvents, setSecurityEvents] = useState([]);
+  const [securityEventsLoading, setSecurityEventsLoading] = useState(false);
+  const [securityEventsError, setSecurityEventsError] = useState('');
+
+  // Invite form
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('employee');
+  const [inviteDeptIds, setInviteDeptIds] = useState([]);
+  const [inviting, setInviting] = useState(false);
+  const [inviteStatus, setInviteStatus] = useState(null);
+
+  // Manage departments modal (editing an existing dept_admin's assignments)
+  const [manageTarget, setManageTarget] = useState(null); // member object
+  const [manageDeptIds, setManageDeptIds] = useState([]);
+  const [manageLoading, setManageLoading] = useState(false);
+  const [manageSaving, setManageSaving] = useState(false);
+  const [manageError, setManageError] = useState('');
+
+  // Edit role / remove member (super_admin only)
+  const [roleEditUserId, setRoleEditUserId] = useState(null);
+  const [roleEditValue, setRoleEditValue] = useState('employee');
+  const [savingRole, setSavingRole] = useState(false);
+  const [roleError, setRoleError] = useState('');
+  const [removingUserId, setRemovingUserId] = useState(null);
+  const [removeError, setRemoveError] = useState('');
+
+  // Departments
+  const [departments, setDepartments] = useState([]);
+  const [departmentsError, setDepartmentsError] = useState('');
+  const [deptName, setDeptName] = useState('');
+  const [creatingDept, setCreatingDept] = useState(false);
+  const [deptError, setDeptError] = useState('');
+  const [expandedDeptId, setExpandedDeptId] = useState(null);
+  const [deptMembers, setDeptMembers] = useState([]);
+  const [deptOrgLevelAccess, setDeptOrgLevelAccess] = useState([]);
+  const [loadingDeptMembers, setLoadingDeptMembers] = useState(false);
+  const [addMemberEmail, setAddMemberEmail] = useState('');
+  const [addMemberRole, setAddMemberRole] = useState('member');
+  const [addingMember, setAddingMember] = useState(false);
+  const [memberActionError, setMemberActionError] = useState('');
+  const deptMembersRequestRef = useRef(null);
+
+  // Rename/delete department (super_admin only)
+  const [renameDeptId, setRenameDeptId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [deletingDeptId, setDeletingDeptId] = useState(null);
+  const [deptActionError, setDeptActionError] = useState('');
+
+  useEffect(() => {
+    setDepartmentsError('');
+    Promise.all([
+      fetch(`/api/org/${orgId}/settings`).then((r) => r.json()),
+      fetch(`/api/org/${orgId}/members`).then((r) => r.json()),
+      fetch(`/api/org/${orgId}/department`).then((r) =>
+        r.json().then((data) => ({ ok: r.ok, data }))
+      ),
+    ]).then(([settingsData, membersData, departmentsResult]) => {
+      if (settingsData.error) { router.replace('/welcome-back'); return; }
+      setOrg(settingsData);
+      setEditName(settingsData.name);
+      setMembers(Array.isArray(membersData) ? membersData : []);
+
+      if (departmentsResult.ok && Array.isArray(departmentsResult.data)) {
+        setDepartments(departmentsResult.data);
+      } else {
+        setDepartments([]);
+        setDepartmentsError(departmentsResult.data?.error || 'Failed to load departments.');
+      }
+
+      const validTabs = settingsData.role === 'super_admin'
+        ? ['general', 'members', 'departments', 'apikey', 'integrations', 'audit']
+        : ['members', 'departments'];
+      setActiveTab(
+        validTabs.includes(requestedTab)
+          ? requestedTab
+          : (settingsData.role === 'super_admin' ? 'general' : 'members')
+      );
+    }).finally(() => setLoading(false));
+  }, [orgId]);
+
+  const canManageDepartments = org?.role === 'super_admin' || org?.role === 'dept_admin';
+  const canDeleteDepartments = org?.role === 'super_admin';
+
+  const loadAuditLog = async () => {
+    setAuditLoading(true);
+    setAuditError('');
+    try {
+      const search = new URLSearchParams();
+      search.set('page', String(auditPage));
+      if (auditOutcomeFilter !== 'all') search.set('outcome', auditOutcomeFilter);
+      const res = await fetch(`/api/org/${orgId}/audit-log?${search.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to load audit log.');
+      setAuditEntries(Array.isArray(data.entries) ? data.entries : []);
+      setAuditTotalPages(data.totalPages || 1);
+      setAuditTotal(data.total ?? 0);
+    } catch (err) {
+      setAuditError(err.message || 'Failed to load audit log.');
+      setAuditEntries([]);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const loadSecurityEvents = async () => {
+    setSecurityEventsLoading(true);
+    setSecurityEventsError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/audit-log/security`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to load security events.');
+      setSecurityEvents(Array.isArray(data.entries) ? data.entries : []);
+    } catch (err) {
+      setSecurityEventsError(err.message || 'Failed to load security events.');
+      setSecurityEvents([]);
+    } finally {
+      setSecurityEventsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'audit') { loadAuditLog(); loadSecurityEvents(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, auditPage, auditOutcomeFilter, orgId]);
+
+  const loadIntegrations = async () => {
+    setIntegrationsLoading(true);
+    setIntegrationsError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/integrations`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to load integrations.');
+      setIntegrations(Array.isArray(data.integrations) ? data.integrations : []);
+    } catch (err) {
+      setIntegrationsError(err.message || 'Failed to load integrations.');
+    } finally {
+      setIntegrationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'integrations') loadIntegrations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, orgId]);
+
+  useEffect(() => {
+    setAuditPage(1);
+  }, [auditOutcomeFilter]);
+
+  const createDepartment = async () => {
+    if (!deptName.trim()) return;
+    setCreatingDept(true);
+    setDeptError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/department`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: deptName }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setDeptError(data.error || 'Failed to create department.'); return; }
+      setDeptName('');
+      router.push(`/org/${orgId}/department/${data.id}?new=1`);
+    } catch { setDeptError('Failed to create department.'); }
+    finally { setCreatingDept(false); }
+  };
+
+  const startRenameDepartment = (dept) => {
+    setRenameDeptId(dept.id);
+    setRenameValue(dept.name);
+    setDeptActionError('');
+  };
+
+  const cancelRenameDepartment = () => {
+    setRenameDeptId(null);
+    setRenameValue('');
+  };
+
+  const saveRenameDepartment = async (dept) => {
+    const name = renameValue.trim();
+    if (!name || name === dept.name) { cancelRenameDepartment(); return; }
+    setRenaming(true);
+    setDeptActionError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${dept.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setDeptActionError(data.error || 'Failed to rename department.'); return; }
+      setDepartments((prev) =>
+        prev.map((d) => (d.id === dept.id ? { ...d, name: data.name } : d)).sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setRenameDeptId(null);
+    } catch { setDeptActionError('Failed to rename department.'); }
+    finally { setRenaming(false); }
+  };
+
+  const deleteDepartment = async (dept) => {
+    if (!confirm(`Delete department "${dept.name}"? This cannot be undone.`)) return;
+    setDeletingDeptId(dept.id);
+    setDeptActionError('');
+    try {
+      let res = await fetch(`/api/org/${orgId}/department/${dept.id}`, { method: 'DELETE' });
+      let data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.requiresConfirmation) {
+        if (!confirm(data.message)) return;
+        res = await fetch(`/api/org/${orgId}/department/${dept.id}?confirm=true`, { method: 'DELETE' });
+        data = await res.json().catch(() => ({}));
+      }
+      if (!res.ok) { setDeptActionError(data.error || 'Failed to delete department.'); return; }
+      setDepartments((prev) => prev.filter((d) => d.id !== dept.id));
+      if (expandedDeptId === dept.id) { setExpandedDeptId(null); setDeptMembers([]); }
+    } catch { setDeptActionError('Failed to delete department.'); }
+    finally { setDeletingDeptId(null); }
+  };
+
+  const toggleDepartment = async (deptId) => {
+    // Reset the add-member form so values typed for one department don't
+    // bleed into the next department's panel.
+    setAddMemberEmail('');
+    setAddMemberRole('member');
+    setMemberActionError('');
+
+    if (expandedDeptId === deptId) {
+      deptMembersRequestRef.current = null;
+      setExpandedDeptId(null);
+      setDeptMembers([]);
+      setDeptOrgLevelAccess([]);
+      return;
+    }
+
+    deptMembersRequestRef.current = deptId;
+    setExpandedDeptId(deptId);
+    setDeptMembers([]);
+    setDeptOrgLevelAccess([]);
+    setLoadingDeptMembers(true);
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${deptId}/members`);
+      const data = await res.json();
+      // Ignore stale responses from a department the user has since switched away from.
+      if (deptMembersRequestRef.current !== deptId) return;
+      setDeptMembers(Array.isArray(data.members) ? data.members : []);
+      setDeptOrgLevelAccess(Array.isArray(data.orgLevelAccess) ? data.orgLevelAccess : []);
+    } catch {
+      if (deptMembersRequestRef.current === deptId) { setDeptMembers([]); setDeptOrgLevelAccess([]); }
+    } finally {
+      if (deptMembersRequestRef.current === deptId) setLoadingDeptMembers(false);
+    }
+  };
+
+  const bumpMemberCount = (deptId, delta) => {
+    setDepartments((prev) =>
+      prev.map((d) =>
+        d.id === deptId
+          ? { ...d, _count: { ...d._count, members: (d._count?.members || 0) + delta } }
+          : d
+      )
+    );
+  };
+
+  const addDeptMember = async (deptId) => {
+    if (!addMemberEmail.trim()) return;
+    setAddingMember(true);
+    setMemberActionError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${deptId}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: addMemberEmail, role: addMemberRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMemberActionError(data.error || 'Failed to add member.'); return; }
+      setDeptMembers((prev) => {
+        const exists = prev.some((m) => m.userId === data.userId);
+        if (exists) return prev.map((m) => (m.userId === data.userId ? data : m));
+        bumpMemberCount(deptId, 1);
+        return [...prev, data];
+      });
+      setAddMemberEmail('');
+      setAddMemberRole('member');
+    } catch { setMemberActionError('Failed to add member.'); }
+    finally { setAddingMember(false); }
+  };
+
+  const removeDeptMember = async (deptId, userId) => {
+    setMemberActionError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/department/${deptId}/members/${userId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setMemberActionError(data.error || 'Failed to remove member.');
+        return;
+      }
+      setDeptMembers((prev) => prev.filter((m) => m.userId !== userId));
+      bumpMemberCount(deptId, -1);
+    } catch { setMemberActionError('Failed to remove member.'); }
+  };
+
+  const saveName = async () => {
+    if (!editName.trim() || editName === org.name) return;
+    setSavingName(true);
+    setNameStatus(null);
+    try {
+      const res = await fetch(`/api/org/${orgId}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editName }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setNameStatus({ type: 'error', msg: data.error }); return; }
+      setOrg((o) => ({ ...o, name: data.name }));
+      window.dispatchEvent(new CustomEvent('kms:org-updated', { detail: { orgId, name: data.name } }));
+      setNameStatus({ type: 'success', msg: 'Name updated.' });
+    } catch { setNameStatus({ type: 'error', msg: 'Failed to save.' }); }
+    finally { setSavingName(false); }
+  };
+
+  const saveApiKey = async () => {
+    setSavingKey(true);
+    setKeyStatus(null);
+    try {
+      const res = await fetch(`/api/org/${orgId}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ openaiApiKey: apiKey }),
+      });
+      if (!res.ok) { setKeyStatus({ type: 'error', msg: 'Failed to save.' }); return; }
+      setOrg((o) => ({ ...o, hasApiKey: !!apiKey }));
+      setApiKey('');
+      setKeyStatus({ type: 'success', msg: apiKey ? 'API key saved.' : 'API key removed.' });
+    } catch { setKeyStatus({ type: 'error', msg: 'Failed to save.' }); }
+    finally { setSavingKey(false); }
+  };
+
+  const sendInvite = async () => {
+    if (!inviteEmail.trim()) return;
+    if (inviteRole === 'dept_admin' && inviteDeptIds.length === 0) {
+      setInviteStatus({ type: 'error', msg: 'Select at least one department for a Dept Admin invite.' });
+      return;
+    }
+    setInviting(true);
+    setInviteStatus(null);
+    try {
+      const res = await fetch(`/api/org/${orgId}/invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole, departmentIds: inviteDeptIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setInviteStatus({ type: 'error', msg: data.error }); return; }
+      setInviteEmail('');
+      setInviteDeptIds([]);
+      setInviteStatus({ type: 'success', msg: `Invite sent to ${inviteEmail}.` });
+    } catch { setInviteStatus({ type: 'error', msg: 'Failed to send invite.' }); }
+    finally { setInviting(false); }
+  };
+
+  const toggleInviteDept = (deptId) => {
+    setInviteDeptIds((prev) =>
+      prev.includes(deptId) ? prev.filter((id) => id !== deptId) : [...prev, deptId]
+    );
+  };
+
+  const openManageDepartments = async (member) => {
+    setManageTarget(member);
+    setManageError('');
+    setManageLoading(true);
+    try {
+      const res = await fetch(`/api/org/${orgId}/members/${member.userId}/departments`);
+      const data = await res.json();
+      setManageDeptIds(Array.isArray(data.departmentIds) ? data.departmentIds : []);
+    } catch {
+      setManageError('Failed to load department assignments.');
+    } finally {
+      setManageLoading(false);
+    }
+  };
+
+  const toggleManageDept = (deptId) => {
+    setManageDeptIds((prev) =>
+      prev.includes(deptId) ? prev.filter((id) => id !== deptId) : [...prev, deptId]
+    );
+  };
+
+  const saveManageDepartments = async () => {
+    if (!manageTarget) return;
+    setManageSaving(true);
+    setManageError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/members/${manageTarget.userId}/departments`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ departmentIds: manageDeptIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setManageError(data.error || 'Failed to save.'); return; }
+      setManageTarget(null);
+    } catch { setManageError('Failed to save.'); }
+    finally { setManageSaving(false); }
+  };
+
+  const startEditRole = (member) => {
+    setRoleEditUserId(member.userId);
+    setRoleEditValue(member.role);
+    setRoleError('');
+  };
+
+  const cancelEditRole = () => {
+    setRoleEditUserId(null);
+    setRoleError('');
+  };
+
+  const saveRole = async (member) => {
+    setSavingRole(true);
+    setRoleError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/members/${member.userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: roleEditValue }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setRoleError(data.error || 'Failed to update role.'); return; }
+      setMembers((prev) => prev.map((m) => (m.userId === member.userId ? { ...m, role: data.role } : m)));
+      setRoleEditUserId(null);
+    } catch { setRoleError('Failed to update role.'); }
+    finally { setSavingRole(false); }
+  };
+
+  const removeMember = async (member) => {
+    if (!confirm(`Remove ${member.name || member.email} from this organization?`)) return;
+    setRemovingUserId(member.userId);
+    setRemoveError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/members/${member.userId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) { setRemoveError(data.error || 'Failed to remove member.'); return; }
+      setMembers((prev) => prev.filter((m) => m.userId !== member.userId));
+    } catch { setRemoveError('Failed to remove member.'); }
+    finally { setRemovingUserId(null); }
+  };
+
+  if (loading) {
+    return (
+      <Layout orgId={orgId}>
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+        </div>
+      </Layout>
+    );
+  }
+
+  const tabs = [
+    ...(org?.role === 'super_admin' ? [{ id: 'general', label: 'General', icon: Building2 }] : []),
+    { id: 'members', label: 'Members', icon: Users },
+    { id: 'departments', label: 'Departments', icon: Layers },
+    ...(org?.role === 'super_admin' ? [{ id: 'apikey', label: 'API Key', icon: Key }] : []),
+    ...(org?.role === 'super_admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
+    ...(org?.role === 'super_admin' ? [{ id: 'audit', label: 'Audit Log', icon: ScrollText }] : []),
+  ];
+
+  return (
+    <Layout orgId={orgId}>
+      <div className="max-w-5xl mx-auto py-8 px-4">
+        {/* Back link */}
+        <button
+          onClick={() => router.push('/welcome-back')}
+          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 mb-6"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to organizations
+        </button>
+
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-6">
+          <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+            <Building2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">{org?.name}</h1>
+            <p className="text-sm text-gray-500">Organization Settings</p>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-6">
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
+                activeTab === id
+                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* General tab */}
+        {activeTab === 'general' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Organization Name
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="flex-1 p-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={saveName}
+                  disabled={savingName || editName === org?.name || !editName.trim()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {savingName && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Save
+                </button>
+              </div>
+              {nameStatus && (
+                <p className={cn('mt-1.5 text-sm', nameStatus.type === 'success' ? 'text-green-600' : 'text-red-600')}>
+                  {nameStatus.msg}
+                </p>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Members tab */}
+        {activeTab === 'members' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            {/* Members table */}
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600 dark:text-gray-400">Member</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600 dark:text-gray-400">Role</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600 dark:text-gray-400"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {members.map((m) => (
+                    <tr key={m.id} className="bg-white dark:bg-gray-900">
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-gray-900 dark:text-gray-100">{m.name || m.email}</p>
+                        <p className="text-xs text-gray-500">{m.email}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        {roleEditUserId === m.userId ? (
+                          <select
+                            value={roleEditValue}
+                            onChange={(e) => setRoleEditValue(e.target.value)}
+                            className="p-1.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            {Object.keys(ROLE_LABELS).map((r) => (
+                              <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className={cn(
+                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+                            m.role === 'super_admin'
+                              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                              : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                          )}>
+                            {m.role === 'super_admin' && <Shield className="h-3 w-3" />}
+                            {ROLE_LABELS[m.role] ?? m.role}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-3">
+                          {m.role === 'dept_admin' && org?.role === 'super_admin' && roleEditUserId !== m.userId && (
+                            <button
+                              onClick={() => openManageDepartments(m)}
+                              className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                              Manage departments
+                            </button>
+                          )}
+                          {org?.role === 'super_admin' && (
+                            roleEditUserId === m.userId ? (
+                              <>
+                                <button
+                                  onClick={() => saveRole(m)}
+                                  disabled={savingRole}
+                                  title="Save role"
+                                  className="text-green-600 hover:text-green-700 disabled:opacity-50"
+                                >
+                                  {savingRole ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                                </button>
+                                <button
+                                  onClick={cancelEditRole}
+                                  disabled={savingRole}
+                                  title="Cancel"
+                                  className="text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                                >
+                                  <XIcon className="h-4 w-4" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => startEditRole(m)}
+                                  title="Edit role"
+                                  className="text-gray-500 hover:text-blue-600 dark:hover:text-blue-400"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => removeMember(m)}
+                                  disabled={removingUserId === m.userId}
+                                  title="Remove from organization"
+                                  className="text-gray-500 hover:text-red-600 disabled:opacity-50"
+                                >
+                                  {removingUserId === m.userId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                </button>
+                              </>
+                            )
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {(roleError || removeError) && (
+              <p className="text-sm text-red-600">{roleError || removeError}</p>
+            )}
+
+            {manageTarget && (
+              <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+                <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-5 w-full max-w-sm">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                    Manage departments
+                  </h3>
+                  <p className="text-xs text-gray-500 mb-3">
+                    {manageTarget.name || manageTarget.email}
+                  </p>
+
+                  {manageLoading ? (
+                    <div className="flex justify-center py-6">
+                      <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                    </div>
+                  ) : departments.length === 0 ? (
+                    <p className="text-sm text-gray-500">No departments yet.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {departments.map((dept) => (
+                        <label key={dept.id} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={manageDeptIds.includes(dept.id)}
+                            onChange={() => toggleManageDept(dept.id)}
+                          />
+                          {dept.name}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {manageError && <p className="mt-2 text-sm text-red-600">{manageError}</p>}
+
+                  <div className="flex gap-2 mt-4">
+                    <button
+                      onClick={() => setManageTarget(null)}
+                      className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={saveManageDepartments}
+                      disabled={manageSaving || manageLoading}
+                      className="flex-1 px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+                    >
+                      {manageSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Invite form */}
+            {org?.role === 'super_admin' && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+                  <Mail className="h-4 w-4" /> Invite Member
+                </h3>
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    type="email"
+                    placeholder="email@example.com"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="flex-1 min-w-0 p-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <select
+                    value={inviteRole}
+                    onChange={(e) => { setInviteRole(e.target.value); setInviteDeptIds([]); }}
+                    className="p-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {INVITE_ROLES.map((r) => (
+                      <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={sendInvite}
+                    disabled={inviting || !inviteEmail.trim() || (inviteRole === 'dept_admin' && inviteDeptIds.length === 0)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {inviting && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Send Invite
+                  </button>
+                </div>
+
+                <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                    {inviteRole === 'dept_admin'
+                      ? 'Departments this Dept Admin will manage'
+                      : 'Departments to add this member to (optional)'}
+                  </p>
+                  {departments.length === 0 ? (
+                    <p className="text-xs text-gray-500">No departments yet. Create one first.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-3">
+                      {departments.map((dept) => (
+                        <label key={dept.id} className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={inviteDeptIds.includes(dept.id)}
+                            onChange={() => toggleInviteDept(dept.id)}
+                          />
+                          {dept.name}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {inviteStatus && (
+                  <p className={cn('mt-2 text-sm', inviteStatus.type === 'success' ? 'text-green-600' : 'text-red-600')}>
+                    {inviteStatus.msg}
+                  </p>
+                )}
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* Departments tab */}
+        {activeTab === 'departments' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            {canManageDepartments && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+                  <Plus className="h-4 w-4" /> Create Department
+                </h3>
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    type="text"
+                    placeholder="Example: Engineering"
+                    value={deptName}
+                    onChange={(e) => setDeptName(e.target.value)}
+                    className="flex-1 min-w-0 p-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={createDepartment}
+                    disabled={creatingDept || !deptName.trim()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {creatingDept && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Create
+                  </button>
+                </div>
+                {deptError && <p className="mt-2 text-sm text-red-600">{deptError}</p>}
+              </div>
+            )}
+
+            {departmentsError ? (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
+                {departmentsError}
+              </div>
+            ) : departments.length === 0 ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-8 text-center text-sm text-gray-500">
+                No departments yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {deptActionError && <p className="text-sm text-red-600">{deptActionError}</p>}
+                {departments.map((dept) => (
+                  <div key={dept.id} className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div className="w-full flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      {renameDeptId === dept.id ? (
+                        <div className="flex flex-1 items-center gap-2 min-w-0">
+                          <Layers className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                          <input
+                            autoFocus
+                            type="text"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') saveRenameDepartment(dept);
+                              if (e.key === 'Escape') cancelRenameDepartment();
+                            }}
+                            className="flex-1 min-w-0 p-1.5 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <button
+                            onClick={() => saveRenameDepartment(dept)}
+                            disabled={renaming || !renameValue.trim()}
+                            title="Save"
+                            className="text-green-600 hover:text-green-700 disabled:opacity-50"
+                          >
+                            {renaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                          </button>
+                          <button onClick={cancelRenameDepartment} title="Cancel" className="text-gray-400 hover:text-gray-600">
+                            <XIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => toggleDepartment(dept.id)}
+                          className="flex flex-1 items-center gap-3 text-left min-w-0"
+                        >
+                          <Layers className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                          <span className="font-medium text-gray-900 dark:text-gray-100 truncate">{dept.name}</span>
+                          <span className="text-xs text-gray-500 flex-shrink-0">
+                            {dept._count?.members || 0} member{dept._count?.members === 1 ? '' : 's'} ·{' '}
+                            {dept._count?.documents || 0} doc{dept._count?.documents === 1 ? '' : 's'}
+                          </span>
+                        </button>
+                      )}
+                      <div className="flex items-center gap-2 flex-shrink-0 pl-2">
+                        {renameDeptId !== dept.id && (
+                          <>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => router.push(`/org/${orgId}/department/${dept.id}`)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Open
+                            </span>
+                            {canDeleteDepartments && (
+                              <>
+                                <button
+                                  onClick={() => startRenameDepartment(dept)}
+                                  title="Rename department"
+                                  className="text-gray-400 hover:text-blue-600"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() => deleteDepartment(dept)}
+                                  disabled={deletingDeptId === dept.id}
+                                  title="Delete department"
+                                  className="text-gray-400 hover:text-red-600 disabled:opacity-50"
+                                >
+                                  {deletingDeptId === dept.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
+                                </button>
+                              </>
+                            )}
+                            <button onClick={() => toggleDepartment(dept.id)} title="Toggle members">
+                              {expandedDeptId === dept.id ? (
+                                <ChevronUp className="h-4 w-4 text-gray-500" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4 text-gray-500" />
+                              )}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {expandedDeptId === dept.id && (
+                      <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800/50 space-y-4">
+                        {loadingDeptMembers ? (
+                          <div className="flex justify-center py-6">
+                            <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                          </div>
+                        ) : deptMembers.length === 0 ? (
+                          <p className="text-sm text-gray-500">No members in this department yet.</p>
+                        ) : (
+                          <ul className="space-y-2">
+                            {deptMembers.map((m) => (
+                              <li
+                                key={m.userId}
+                                className="flex items-center justify-between rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 px-3 py-2"
+                              >
+                                <div>
+                                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{m.name || m.email}</p>
+                                  <p className="text-xs text-gray-500">{m.email}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className={cn(
+                                    'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+                                    m.role === 'admin'
+                                      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                                      : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                                  )}>
+                                    {m.role === 'admin' && <Shield className="h-3 w-3" />}
+                                    {m.role === 'admin' ? 'Admin' : 'Member'}
+                                  </span>
+                                  {canManageDepartments && (
+                                    <button
+                                      onClick={() => removeDeptMember(dept.id, m.userId)}
+                                      className="text-gray-400 hover:text-red-600"
+                                      title="Remove from department"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {deptOrgLevelAccess.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                              Org-level access (Super Admin)
+                            </p>
+                            <ul className="space-y-2">
+                              {deptOrgLevelAccess.map((m) => (
+                                <li
+                                  key={m.userId}
+                                  className="flex items-center justify-between rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 px-3 py-2"
+                                >
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{m.name || m.email}</p>
+                                    <p className="text-xs text-gray-500">{m.email}</p>
+                                  </div>
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                                    <Shield className="h-3 w-3" />
+                                    Super Admin (not an explicit member)
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {canManageDepartments && (
+                          <div className="flex gap-2 flex-wrap pt-2 border-t border-gray-200 dark:border-gray-700">
+                            <input
+                              type="email"
+                              placeholder="email@example.com"
+                              value={addMemberEmail}
+                              onChange={(e) => setAddMemberEmail(e.target.value)}
+                              className="flex-1 min-w-0 p-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <select
+                              value={addMemberRole}
+                              onChange={(e) => setAddMemberRole(e.target.value)}
+                              className="p-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="member">Member</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                            <button
+                              onClick={() => addDeptMember(dept.id)}
+                              disabled={addingMember || !addMemberEmail.trim()}
+                              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 text-sm"
+                            >
+                              {addingMember ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                              Add
+                            </button>
+                          </div>
+                        )}
+                        {memberActionError && <p className="text-sm text-red-600">{memberActionError}</p>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* API Key tab */}
+        {activeTab === 'apikey' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+            {org?.hasApiKey && (
+              <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-sm text-green-800 dark:text-green-200">
+                <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                OpenAI API key is configured for this organization.
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                {org?.hasApiKey ? 'Replace API Key' : 'Set OpenAI API Key'}
+              </label>
+              <div className="relative">
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-..."
+                  className="w-full p-2.5 pr-10 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey((v) => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Used for Enterprise Chat and org-level document processing. Leave blank to remove.
+              </p>
+            </div>
+
+            <button
+              onClick={saveApiKey}
+              disabled={savingKey}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              {savingKey && <Loader2 className="h-4 w-4 animate-spin" />}
+              {apiKey ? 'Save API Key' : 'Remove API Key'}
+            </button>
+
+            {keyStatus && (
+              <p className={cn('text-sm', keyStatus.type === 'success' ? 'text-green-600' : 'text-red-600')}>
+                {keyStatus.msg}
+              </p>
+            )}
+          </motion.div>
+        )}
+
+        {/* Integrations tab */}
+        {activeTab === 'integrations' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Connect external platforms to automatically bring their Knowledge into this org's repository.
+            </p>
+
+            {integrationsError ? (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
+                {integrationsError}
+              </div>
+            ) : integrationsLoading ? (
+              <div className="flex justify-center py-10">
+                <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+                {integrations.map((integ) => (
+                  <div key={integ.provider} className="flex items-center justify-between gap-4 px-4 py-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-9 w-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+                        <Plug className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-gray-900 dark:text-gray-100">{integ.displayName}</p>
+                          <span className={cn(
+                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0',
+                            integ.connected
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                              : integ.status === 'disconnected'
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                          )}>
+                            {integ.connected ? (
+                              <CheckCircle2 className="h-3 w-3" />
+                            ) : integ.status === 'disconnected' ? (
+                              <Unplug className="h-3 w-3" />
+                            ) : null}
+                            {integ.connected ? 'Connected' : integ.status === 'disconnected' ? 'Disconnected' : 'Not Connected'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {integ.connected
+                            ? `${integ.siteCount} site${integ.siteCount === 1 ? '' : 's'}${integ.lastSyncAt ? ` · last synced ${new Date(integ.lastSyncAt).toLocaleDateString()}` : ''}`
+                            : integ.status === 'disconnected'
+                            ? 'Sync paused — reconnect to resume'
+                            : 'Connect to start syncing documents'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => router.push(`/org/${orgId}/integrations/${integ.provider}`)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium flex-shrink-0"
+                    >
+                      Manage
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* Audit Log tab */}
+        {activeTab === 'audit' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Every Org Chat query, who asked it, and whether it was answered or denied for lacking org access.
+            </p>
+
+            <div className="flex items-center gap-2 text-xs">
+              {[
+                { value: 'all', label: 'All' },
+                { value: 'answered', label: 'Answered' },
+                { value: 'denied', label: 'Denied' },
+              ].map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => setAuditOutcomeFilter(item.value)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 transition',
+                    auditOutcomeFilter === item.value
+                      ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                      : 'border-gray-300 text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+
+            {auditError ? (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
+                {auditError}
+              </div>
+            ) : auditLoading ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-500 dark:text-gray-400">
+                Loading audit log...
+              </div>
+            ) : auditEntries.length === 0 ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">No entries found</h2>
+                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                  No chat queries match this filter yet.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                {auditEntries.map((entry) => (
+                  <div key={entry.id} className="p-4 space-y-1.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{entry.question}</p>
+                      <span
+                        className={cn(
+                          'flex-shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium capitalize',
+                          entry.outcome === 'denied'
+                            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                            : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                        )}
+                      >
+                        {entry.outcome}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {entry.user.name || entry.user.email} &middot; {new Date(entry.createdAt).toLocaleString()}
+                    </p>
+                    {entry.citedDocs.length > 0 && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Cited: {entry.citedDocs.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!auditLoading && auditEntries.length > 0 && auditTotalPages > 1 ? (
+              <div className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-sm text-gray-600 dark:text-gray-300">
+                <span>Page {auditPage} of {auditTotalPages} ({auditTotal} entries)</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
+                    disabled={auditPage <= 1}
+                    className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuditPage((p) => Math.min(auditTotalPages, p + 1))}
+                    disabled={auditPage >= auditTotalPages}
+                    className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="pt-6 mt-6 border-t border-gray-200 dark:border-gray-700 space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Security Events</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Role grants and department admin actions (create/rename/delete).
+                </p>
+              </div>
+
+              {securityEventsError ? (
+                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
+                  {securityEventsError}
+                </div>
+              ) : securityEventsLoading ? (
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-500 dark:text-gray-400">
+                  Loading security events...
+                </div>
+              ) : securityEvents.length === 0 ? (
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-center text-sm text-gray-500">
+                  No security events recorded yet.
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-200 dark:divide-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                  {securityEvents.map((entry) => (
+                    <div key={entry.id} className="p-4 space-y-1">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {describeSecurityEvent(entry)}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {entry.actor?.name || entry.actor?.email || 'System'} &middot;{' '}
+                        {new Date(entry.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </div>
+    </Layout>
+  );
+}
+
+function describeSecurityEvent(entry) {
+  const actorLabel = entry.actor?.name || entry.actor?.email || 'A user';
+  const targetLabel = entry.target?.name || entry.target?.email;
+  const meta = entry.metadata || {};
+  switch (entry.action) {
+    case 'org_created_super_admin_granted':
+      return `${actorLabel} created org "${meta.orgName}" and was granted Super Admin.`;
+    case 'department_renamed':
+      return `${actorLabel} renamed department "${meta.from}" to "${meta.to}".`;
+    case 'department_deleted':
+      return `${actorLabel} deleted department "${meta.name}" (${meta.counts?.members ?? 0} members, ${meta.counts?.projects ?? 0} projects, ${meta.counts?.documents ?? 0} documents affected).`;
+    case 'role_revoked':
+      return `${actorLabel} revoked ${targetLabel || 'a member'}'s role from ${meta.from} to ${meta.to}${meta.reason ? ` (${meta.reason})` : ''}.`;
+    default:
+      return `${actorLabel}: ${entry.action}`;
+  }
+}
