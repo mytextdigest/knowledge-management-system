@@ -1351,7 +1351,8 @@ function DocumentContent() {
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {doc.relatedDocuments.map((related) => (
                       <button key={related.id} type="button" onClick={() => router.push(`/document?id=${related.id}`)} className="rounded border border-cyan-200 bg-white px-2 py-1 text-cyan-800 hover:bg-cyan-100 dark:border-cyan-800 dark:bg-gray-900 dark:text-cyan-200">
-                        {related.filename} · {Math.round(Number(related.weight || 0) * 100)}%
+                        <span className="font-medium">{related.filename} · {Math.round(Number(related.weight || 0) * 100)}%</span>
+                        <span className="ml-1 opacity-75">· {String(related.type || "related").replaceAll("_", " ")}{related.evidence?.projectContext ? " · Same project" : ""}{related.evidence?.topicOverlap ? " · Shared topic" : ""}{related.evidence?.sharedEntities?.length ? ` · ${related.evidence.sharedEntities.length} shared entities` : ""}{related.evidence?.lessonEvidence ? " · Lesson/decision context" : ""}</span>
                       </button>
                     ))}
                   </div>

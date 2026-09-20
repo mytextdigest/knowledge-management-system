@@ -25,7 +25,9 @@
     "alpha:combined-test": "node --test scripts/alpha-bugfix/combined-permissions.test.mjs",
     "task10:test": "node --test scripts/task-10/tier2-expert.static.test.mjs scripts/task-10/expertise-scoring.logic.test.mjs scripts/task-10/expert-test1-individual-signals.logic.test.mjs scripts/task-10/expert-test2-signal-caps.logic.test.mjs scripts/task-10/expert-test8-recency-decay.logic.test.mjs",
     "task10:test:integration": "node --test scripts/task-10/expert-rbac.integration.test.mjs scripts/task-10/expert-test3-anti-gaming.integration.test.mjs scripts/task-10/expert-test6-false-positives.integration.test.mjs scripts/task-10/expert-test9-topic-isolation.integration.test.mjs scripts/task-10/expert-test10-cross-topic-contamination.integration.test.mjs scripts/task-10/expert-test11-human-override.integration.test.mjs",
-    "task11:test": "node --test scripts/task-11/tier2-recommendations.static.test.mjs scripts/task-11/recommendation-ranking.logic.test.mjs"
+    "task11:test": "node --test scripts/task-11/tier2-recommendations.static.test.mjs scripts/task-11/recommendation-ranking.logic.test.mjs",
+    "task13:test": "node --test scripts/task-13/*.test.mjs",
+    "task14:test": "node --test scripts/task-14/*.test.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
