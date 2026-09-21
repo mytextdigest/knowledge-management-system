@@ -45,7 +45,9 @@ Out of scope (handled elsewhere or explicitly deferred):
 
 ## Interface Contract with Existing Extraction/Chat-Grounding
 
-`extractDecisions()`, `isDecisionQuestion()`, and `getDecisionEvidence()` are unchanged by this feature. Any new field added to `Decision` (the outcome/status field in FR-2) must be nullable/optional with a safe default, so existing extraction (which does not set it) continues to work without modification.
+`extractDecisions()` and `isDecisionQuestion()` are unchanged by this feature. Any new field added to `Decision` (`status` and `statusNote`, FR-2) must be nullable/optional with a safe default, so existing extraction (which does not set them) continues to work without modification.
+
+`getDecisionEvidence()`'s exported signature and behavior are unchanged, but its internal access-check SQL was factored out into a shared `decisionAccessSql()` (also used by FR-1/FR-4's repository query) so the two surfaces can't drift apart, and its result rows now additionally carry `status`/`statusNote`. `formatDecisionContext()` and `DECISION_INSTRUCTION` were extended, not replaced: a decision whose `status` is not `"active"` now has its outcome and note folded into the chat context string, and the instruction tells the model to treat a reversed/superseded decision as historical context rather than current guidance. A decision still `"active"` (the default for every existing and newly-extracted row) formats identically to before this feature shipped.
 
 ---
 
@@ -56,6 +58,7 @@ Out of scope (handled elsewhere or explicitly deferred):
 
 ### FR-2 — Decision Outcome Tracking
 - Add an optional `status` field to `Decision` (e.g. `"active" | "reversed" | "superseded"`, default `"active"`), settable manually (by a project/department admin or the decision's originating document's owner — see Open Questions) and, where a `Lesson` explicitly references the decision, informable by that lesson's content. This is additive and does not change extraction behavior (Interface Contract above).
+- Add an optional free-text `statusNote` field, saved together with `status` in a single write (not two separate actions) — it exists to explain *why* the outcome changed, not just record that it did. Wherever a `Decision` is surfaced as evidence — today, chat grounding via `formatDecisionContext()` — a non-default outcome and its note are included in that context, so a reversed/superseded decision cited in an answer carries its own correction rather than being presented as if it still holds.
 
 ### FR-3 — Decision-to-Lesson Linkage Display
 - Where a `Decision` has one or more `Lesson` rows referencing it (`Lesson.decisionId`), the repository view surfaces them together — "here's what was decided, here's what we learned." Read-only consumption of the existing relation; no change to lesson authoring.
@@ -81,7 +84,8 @@ Out of scope (handled elsewhere or explicitly deferred):
 ```
 Decision {
   ...existing fields unchanged...
-  status String @default("active")  // "active" | "reversed" | "superseded" — new, optional, additive
+  status     String  @default("active")  // "active" | "reversed" | "superseded" — new, optional, additive
+  statusNote String?                     // free-text, why the outcome changed — new, optional, additive
 }
 ```
 No new models required. Purely additive migration to the existing `Decision` table.
@@ -91,9 +95,9 @@ No new models required. Purely additive migration to the existing `Decision` tab
 ## Open Questions
 
 1. ~~**Ownership.**~~ **Resolved:** Johurul owns this feature end-to-end, one PR — see tracker.
-2. Who is authorized to set/change a decision's outcome status (FR-2) — the document's owner, any project/department admin, or only whoever authored the referencing `Lesson`? Given the precedent set by Lessons Learned (human-confirmed, never auto-published), status changes should likely require a person, not an LLM inference, but the specific role boundary needs a call.
-3. Should FR-1's repository page live at the org level only, or also get a department/project-scoped variant (mirroring how Recommendations has both a personal and department-admin view)?
-4. Is there a real need for decision search to be semantic (embedding-based) rather than the existing keyword/BM25 approach `getDecisionEvidence()` already uses? Defaulting to reusing the existing approach (FR-4) unless a concrete gap is demonstrated.
+2. ~~Who is authorized to set/change a decision's outcome status (FR-2)?~~ **Resolved:** the source document's owner, or a department admin who can manage that document's department (or, for a project-scoped document with no direct department, its project's department) — the same reviewer shape as `canManageLesson` in `lessonAccess.js`, substituting "document owner" for "project owner" since a `Decision` has no author of its own. Not "whoever authored the referencing `Lesson`" — a decision's outcome can be worth recording before any lesson exists, and Lesson authorship carries no standing over a `Decision` it merely points at. Implemented as `canManageDecision()` in `src/lib/decisionAccess.js`, enforced server-side in `PATCH /api/org/[orgId]/decisions/[decisionId]`.
+3. ~~Should FR-1's repository page live at the org level only, or also get a department/project-scoped variant?~~ **Resolved:** org-level page only, filterable by department/project/date/status. Unlike Recommendations, decisions have no department-admin-only analytics view to justify a second mode — filtering already gives every scope FR-1 needs without duplicating the page pattern.
+4. ~~Is there a real need for decision search to be semantic?~~ **Resolved:** no — no concrete gap was demonstrated, so FR-4 reuses `getDecisionEvidence()`'s existing keyword/BM25 approach as-is.
 
 ---
 

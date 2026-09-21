@@ -24,6 +24,7 @@ import {
   X,
   Users,
   Sparkles,
+  Scale,
 } from "lucide-react";
 import Image from "next/image";
 import CreateOrgModal from "@/components/org/CreateOrgModal";
@@ -138,6 +139,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
         { label: "Knowledge Repository", href: `/org/${orgId}/repository`, icon: Library },
         { label: "Experts", href: `/org/${orgId}/experts`, icon: Users },
         { label: "Recommendations", href: `/org/${orgId}/recommendations`, icon: Sparkles },
+        { label: "Decisions", href: `/org/${orgId}/decisions`, icon: Scale },
         ...(isSuperAdmin
           ? [{ label: "Needs Review", href: `/org/${orgId}/needs-review`, icon: ClipboardList }]
           : []),

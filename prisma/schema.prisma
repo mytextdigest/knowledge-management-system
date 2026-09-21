@@ -584,6 +584,19 @@ model Decision {
   decidedAt  DateTime?
   createdAt  DateTime  @default(now()) @map("created_at")
 
+  // Rank 14 (Decision Intelligence Repository), FR-2: "active" | "reversed" |
+  // "superseded". Purely additive — extractDecisions() never sets this, so
+  // every existing and newly-extracted Decision defaults to "active" with no
+  // backfill step.
+  status String @default("active")
+
+  // Free-text explanation accompanying a status change (e.g. why a decision
+  // was reversed/superseded) — set together with `status`, never by
+  // extraction. Surfaced in the decision's detail view and folded into
+  // formatDecisionContext() so a decision cited in chat carries its outcome
+  // note, not just the raw statement/rationale.
+  statusNote String?
+
   document       Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
   timelineEvents TimelineEvent[]
   lessons        Lesson[]
