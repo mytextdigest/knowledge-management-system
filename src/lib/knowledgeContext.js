@@ -1,8 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAccessibleExpertsWithPrisma } from "@/lib/expertDiscoveryQuery.mjs";
+import { RELATIONSHIP_MIN_CONFIDENCE } from "./relationshipScoringPolicy.mjs";
 
-export const RELATED_DOCUMENT_MIN_WEIGHT = 0.68;
+export const RELATED_DOCUMENT_MIN_WEIGHT = RELATIONSHIP_MIN_CONFIDENCE;
 
 export function accessSql({ userId, isSuperAdmin = false, alias = "d" }) {
   const table = Prisma.raw(`"${alias}"`);

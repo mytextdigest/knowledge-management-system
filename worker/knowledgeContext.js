@@ -9,7 +9,11 @@ const SOURCE_CHUNK_LIMIT = 8;
 const NEIGHBORS_PER_CHUNK = 40;
 
 async function findRelatedDocumentsWithPgvector(doc) {
-  const projectFilter = doc.scope === "project" && doc.projectId
+  // A project association is the durable signal here, not the historical Document.scope value.
+  // Older KMS data can legitimately be scope="private" while still belonging to an
+  // org-scoped project. Include same-project candidates for those records too; all
+  // user-facing relationship reads remain RBAC-filtered in src/lib/knowledgeContext.js.
+  const projectFilter = doc.projectId
     ? Prisma.sql`AND (d."projectId" = ${doc.projectId} OR (d.scope = 'repository' AND d.lifecycle = 'published'))`
     : Prisma.sql`AND d.scope = 'repository' AND d.lifecycle = 'published'`;
   return prisma.$queryRaw`
@@ -241,7 +245,7 @@ export async function processKnowledgeContext(docId) {
     where: {
       id: { not: doc.id }, orgId: doc.orgId,
       AND: [
-        doc.scope === "project" && doc.projectId
+        doc.projectId
           ? { OR: [{ projectId: doc.projectId }, { scope: "repository", lifecycle: "published" }] }
           : { scope: "repository", lifecycle: "published" },
         { OR: [
