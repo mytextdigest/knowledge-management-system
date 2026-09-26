@@ -1,77 +1,14 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-import { canAccessDecisionDocument, canManageDecision } from "@/lib/decisionAccess";
+import { canAccessDecisionDocument, canReviewDecision } from "@/lib/decisionAccess";
+import { loadDecisionForReview, serializeDecision, applyDecisionReview, ReviewError } from "@/lib/decisionReview";
 
-const STATUSES = ["active", "reversed", "superseded"];
-const MAX_NOTE_LENGTH = 2000;
-
-function serializeDecision(decision, { canManage = false } = {}) {
-  return {
-    id: decision.id,
-    statement: decision.statement,
-    rationale: decision.rationale,
-    status: decision.status,
-    statusNote: decision.statusNote,
-    decidedAt: decision.decidedAt,
-    document: {
-      id: decision.document.id,
-      filename: decision.document.filename,
-      departmentName: decision.document.department?.name || null,
-      projectName: decision.document.project?.name || null,
-    },
-    lessons: decision.lessons.map((lesson) => ({
-      id: lesson.id,
-      topic: lesson.topic,
-      whatHappened: lesson.whatHappened,
-      whatWorked: lesson.whatWorked,
-      whatDidntWork: lesson.whatDidntWork,
-      recommendation: lesson.recommendation,
-      status: lesson.status,
-      projectId: lesson.projectId,
-    })),
-    timelineEvents: decision.timelineEvents.map((event) => ({
-      id: event.id,
-      description: event.description,
-      occurredAt: event.occurredAt,
-      projectId: event.projectId,
-      departmentId: event.departmentId,
-    })),
-    canManage,
-  };
-}
-
-async function loadDecision(decisionId, orgId) {
-  return prisma.decision.findFirst({
-    where: { id: decisionId, document: { orgId } },
-    include: {
-      document: {
-        select: {
-          id: true,
-          filename: true,
-          userId: true,
-          scope: true,
-          lifecycle: true,
-          departmentId: true,
-          projectId: true,
-          department: { select: { name: true } },
-          project: { select: { name: true } },
-        },
-      },
-      // FR-3: only Lesson rows that explicitly reference this decision —
-      // read-only consumption of the existing Lesson.decisionId relation.
-      lessons: { orderBy: { createdAt: "desc" } },
-      // FR-5: any TimelineEvent chained off this same decision.
-      timelineEvents: { orderBy: { occurredAt: "desc" } },
-    },
-  });
-}
-
-// Rank 14, FR-5 (detail view) + FR-3 (linked lessons). RBAC: never visible to
-// a user who couldn't already access the source document (Non-Functional
-// Requirements) — reuses canAccessDecisionDocument, the same rule
-// getAccessibleDecisions applies for the list view.
+// Rank 14, FR-5 (detail view) + FR-3 (decision-to-lesson linkage display),
+// extended by Decision Extraction v2: a "pending"/"rejected" decision is
+// invisible to anyone who isn't a reviewer for its department (FR-5) — it
+// returns 404, same as a document the requester can't otherwise see, so a
+// pending decision's existence isn't leaked either.
 export async function GET(req, { params }) {
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -81,22 +18,33 @@ export async function GET(req, { params }) {
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
   if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const decision = await loadDecision(decisionId, orgId);
+  const decision = await loadDecisionForReview(decisionId, orgId);
   if (!decision) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const superAdmin = isSuperAdmin(role);
   const hasAccess = await canAccessDecisionDocument({ document: decision.document, userId: user.id, isSuperAdmin: superAdmin });
   if (!hasAccess) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const canManage = superAdmin || (await canManageDecision({ document: decision.document, userId: user.id, role }));
-  return NextResponse.json(serializeDecision(decision, { canManage }));
+  const isReviewer = superAdmin || (await canReviewDecision({ document: decision.document, userId: user.id, role }));
+
+  if ((decision.status === "pending" || decision.status === "rejected") && !isReviewer) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  return NextResponse.json(serializeDecision(decision, { canReview: isReviewer }));
 }
 
-// Rank 14, FR-2/FR-6 (Task 15-G): outcome status write path. Human-driven,
-// never auto-inferred by an LLM, consistent with the Lessons Learned
-// publish-gate precedent — gated on canManageDecision (document owner or a
-// department admin who can manage the document's department), never on
-// authorship of a Lesson referencing the decision.
+// Rank 14 FR-2/FR-6, superseded by Decision Extraction v2 Decision 5: every
+// status transition (confirm, reject, and outcome changes to
+// reversed/superseded alike) now requires canReviewDecision — dept_admin who
+// manages this decision's department, or super_admin. The document's
+// owner/uploader is no longer sufficient on its own. A human can never set
+// status to "pending" (worker-only). Reviewers may also edit
+// statement/rationale/decidedAt before confirming; the extractor's original
+// statement is preserved in aiStatement on first edit, so reconcile-on-
+// regenerate can still match this row against a future extraction. Shared
+// validation/transaction logic lives in src/lib/decisionReview.js, reused by
+// the bulk-review route.
 export async function PATCH(req, { params }) {
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -106,50 +54,14 @@ export async function PATCH(req, { params }) {
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
   if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const decision = await loadDecision(decisionId, orgId);
-  if (!decision) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-  const superAdmin = isSuperAdmin(role);
-  const hasAccess = await canAccessDecisionDocument({ document: decision.document, userId: user.id, isSuperAdmin: superAdmin });
-  if (!hasAccess) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-  const canManage = superAdmin || (await canManageDecision({ document: decision.document, userId: user.id, role }));
-  if (!canManage) {
-    return NextResponse.json(
-      { error: "Only the source document's owner or a department admin can change a decision's status" },
-      { status: 403 }
-    );
-  }
-
   const body = await req.json().catch(() => ({}));
-  if (!STATUSES.includes(body.status)) {
-    return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+
+  try {
+    const updated = await applyDecisionReview({ orgId, decisionId, user, role, body });
+    return NextResponse.json(serializeDecision(updated, { canReview: true }));
+  } catch (error) {
+    if (error instanceof ReviewError) return NextResponse.json({ error: error.message }, { status: error.status });
+    console.error("Failed to update decision:", error);
+    return NextResponse.json({ error: "Failed to update decision" }, { status: 500 });
   }
-  if (body.statusNote !== undefined && body.statusNote !== null && String(body.statusNote).length > MAX_NOTE_LENGTH) {
-    return NextResponse.json({ error: "Note is too long" }, { status: 400 });
-  }
-
-  // statusNote always travels with status in one save (per the requirements
-  // doc: a note explains *why* the outcome changed) — an omitted/empty note
-  // clears it rather than leaving a stale note attached to a new status.
-  const statusNote = body.statusNote ? String(body.statusNote).trim().slice(0, MAX_NOTE_LENGTH) || null : null;
-
-  const updated = await prisma.decision.update({
-    where: { id: decisionId },
-    data: { status: body.status, statusNote },
-    include: {
-      document: {
-        select: {
-          id: true, filename: true, userId: true, scope: true, lifecycle: true,
-          departmentId: true, projectId: true,
-          department: { select: { name: true } },
-          project: { select: { name: true } },
-        },
-      },
-      lessons: { orderBy: { createdAt: "desc" } },
-      timelineEvents: { orderBy: { occurredAt: "desc" } },
-    },
-  });
-
-  return NextResponse.json(serializeDecision(updated, { canManage: true }));
 }

@@ -8,6 +8,15 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { computeBM25, tokenize } from "@/lib/keywordSearch";
 import { scopeSql } from "@/lib/vectorSearch";
+import { STATUS_LABELS, certaintyRank } from "@/lib/decisionStatus";
+
+// Decision Extraction v2: "pending" (awaiting reviewer) and "rejected" (not a
+// decision) must never reach chat grounding or the general browse/search
+// surface — only the reviewer-scoped queue below. Applied as a hard filter
+// inside every query in this file that isn't the review queue itself, so
+// these two functions can never leak either status regardless of caller
+// input (status params are validated separately at the route level).
+const NON_REVIEW_STATUS_FILTER = Prisma.sql`AND dec.status NOT IN ('pending', 'rejected')`;
 
 const DECISION_INTENT_PATTERNS = [
   /\bshould we\b/i,
@@ -105,6 +114,7 @@ export async function getDecisionEvidence({
       ${scopeFilter}
       AND (${Prisma.join(termFilters, " OR ")})
       AND ${decisionAccessSql({ orgId, userId, isSuperAdmin })}
+      ${NON_REVIEW_STATUS_FILTER}
     LIMIT 100
   `;
 
@@ -153,7 +163,12 @@ export async function getAccessibleDecisions({
 }) {
   const scopeFilter = scopeSql({ scope: departmentId ? "department" : "organization", departmentId, userId });
   const projectFilter = projectId ? Prisma.sql`AND d."projectId" = ${projectId}` : Prisma.empty;
-  const statusFilter = status ? Prisma.sql`AND dec.status = ${status}` : Prisma.empty;
+  // "pending"/"rejected" can never be requested through this path — the
+  // route validates that too, but this function must be safe by construction
+  // regardless of what a caller passes in (see NON_REVIEW_STATUS_FILTER).
+  const statusFilter = status && status !== "pending" && status !== "rejected"
+    ? Prisma.sql`AND dec.status = ${status}`
+    : Prisma.empty;
   const fromFilter = from ? Prisma.sql`AND dec."decidedAt" >= ${new Date(from)}` : Prisma.empty;
   const toFilter = to ? Prisma.sql`AND dec."decidedAt" <= ${new Date(to)}` : Prisma.empty;
 
@@ -174,6 +189,7 @@ export async function getAccessibleDecisions({
 
   const rows = await prisma.$queryRaw`
     SELECT dec.id, dec.statement, dec.rationale, dec.status, dec."decidedAt", dec."documentId",
+           dec.certainty, dec.explicitness, dec.source,
            d.filename, d."departmentId", d."projectId", d.scope,
            dept.name AS department_name,
            proj.name AS project_name
@@ -191,6 +207,7 @@ export async function getAccessibleDecisions({
       ${toFilter}
       ${termFilter}
       AND ${decisionAccessSql({ orgId, userId, isSuperAdmin })}
+      ${NON_REVIEW_STATUS_FILTER}
     ORDER BY dec."decidedAt" DESC NULLS LAST, dec.created_at DESC
     LIMIT ${Prisma.raw(String(fetchLimit))}
     OFFSET ${Prisma.raw(String(terms.length ? 0 : safeOffset))}
@@ -201,6 +218,9 @@ export async function getAccessibleDecisions({
     statement: r.statement,
     rationale: r.rationale,
     status: r.status,
+    certainty: r.certainty,
+    explicitness: r.explicitness,
+    source: r.source,
     decidedAt: r.decidedAt,
     documentId: r.documentId,
     filename: r.filename,
@@ -221,7 +241,119 @@ export async function getAccessibleDecisions({
     .map(serialize);
 }
 
-const STATUS_LABELS = { active: "Active", reversed: "Reversed", superseded: "Superseded" };
+// Decision Extraction v2 (FR-4/FR-6): the review queue is scoped by
+// *reviewer* standing — super_admin, or a dept_admin who is an actual admin
+// member of the document's effective department — not by plain department
+// membership like decisionAccessSql above. `proj` is already LEFT JOINed in
+// every query below, so its departmentId is available without another join.
+function reviewerScopeSql({ userId, isSuperAdmin }) {
+  if (isSuperAdmin) return Prisma.sql`TRUE`;
+  return Prisma.sql`
+    EXISTS (
+      SELECT 1 FROM "DepartmentMember" rdm
+      WHERE rdm."userId" = ${userId}
+        AND rdm.role = 'admin'
+        AND rdm."departmentId" = COALESCE(d."departmentId", proj."departmentId")
+    )
+  `;
+}
+
+/**
+ * Decision Extraction v2, FR-6: the reviewer's queue — decisions with
+ * status "pending" or "rejected", scoped to departments the requesting user
+ * can actually review (see reviewerScopeSql), never plain department
+ * membership. A non-reviewer / reviewer of a different department simply
+ * gets an empty list — this function is the only place pending/rejected
+ * rows are ever returned.
+ */
+export async function getReviewQueueDecisions({
+  orgId,
+  userId,
+  isSuperAdmin = false,
+  status = "pending",
+  documentId = null,
+  limit = 200,
+}) {
+  if (status !== "pending" && status !== "rejected") return [];
+
+  const documentFilter = documentId ? Prisma.sql`AND dec."documentId" = ${documentId}` : Prisma.empty;
+  const safeLimit = Math.max(1, Math.min(500, Number(limit) || 200));
+
+  const rows = await prisma.$queryRaw`
+    SELECT dec.id, dec.statement, dec.rationale, dec.status, dec."decidedAt", dec."documentId",
+           dec.certainty, dec.explicitness, dec.score, dec.signals, dec.subject,
+           dec.actors, dec.alternatives, dec.source, dec."aiStatement",
+           dec."reviewedById", dec."reviewedAt", dec."reviewNote", dec.created_at,
+           d.filename, d."departmentId", d."projectId", d.scope,
+           dept.name AS department_name,
+           proj.name AS project_name
+    FROM "Decision" dec
+    JOIN "Document" d ON dec."documentId" = d.id
+    LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    WHERE d."orgId" = ${orgId}
+      AND dec.status = ${status}
+      ${documentFilter}
+      AND ${reviewerScopeSql({ userId, isSuperAdmin })}
+    ORDER BY d.filename ASC, dec.created_at ASC
+    LIMIT ${Prisma.raw(String(safeLimit))}
+  `;
+
+  return rows
+    .map((r) => ({
+      id: r.id,
+      statement: r.statement,
+      rationale: r.rationale,
+      status: r.status,
+      certainty: r.certainty,
+      explicitness: r.explicitness,
+      score: r.score,
+      signals: r.signals,
+      subject: r.subject,
+      actors: r.actors,
+      alternatives: r.alternatives,
+      source: r.source,
+      aiStatement: r.aiStatement,
+      reviewedById: r.reviewedById,
+      reviewedAt: r.reviewedAt,
+      reviewNote: r.reviewNote,
+      createdAt: r.created_at,
+      decidedAt: r.decidedAt,
+      documentId: r.documentId,
+      filename: r.filename,
+      departmentId: r.departmentId,
+      projectId: r.projectId,
+      departmentName: r.department_name,
+      projectName: r.project_name,
+    }))
+    // Certainty ordering (FR-6: "confirmed → likely → candidate within a
+    // document") on top of the SQL's per-document/created_at ordering —
+    // JS re-sort is simplest here since certaintyRank isn't expressible as a
+    // plain SQL column without duplicating the tier vocabulary in SQL too.
+    .sort((a, b) => {
+      if (a.filename !== b.filename) return a.filename < b.filename ? -1 : 1;
+      return certaintyRank(a.certainty) - certaintyRank(b.certainty);
+    });
+}
+
+/**
+ * Decision Extraction v2, FR-6: lightweight count for the sidebar's pending
+ * review badge — same reviewer scoping as getReviewQueueDecisions, always
+ * status "pending" (a reviewer needs to know what's waiting on them, not how
+ * many rows they've already rejected).
+ */
+export async function getReviewQueueCount({ orgId, userId, isSuperAdmin = false }) {
+  const rows = await prisma.$queryRaw`
+    SELECT COUNT(*)::int AS count
+    FROM "Decision" dec
+    JOIN "Document" d ON dec."documentId" = d.id
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    WHERE d."orgId" = ${orgId}
+      AND dec.status = 'pending'
+      AND ${reviewerScopeSql({ userId, isSuperAdmin })}
+  `;
+  return rows[0]?.count ?? 0;
+}
 
 export function formatDecisionContext(decisions) {
   if (!decisions.length) return "";

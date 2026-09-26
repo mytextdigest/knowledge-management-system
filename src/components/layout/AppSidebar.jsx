@@ -49,6 +49,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
   const [showCreateDept, setShowCreateDept] = useState(false);
   const [deptName, setDeptName] = useState("");
   const [creatingDept, setCreatingDept] = useState(false);
+  const [pendingDecisionCount, setPendingDecisionCount] = useState(0);
 
   const switcherRef = useRef(null);
   const userMenuRef = useRef(null);
@@ -74,6 +75,19 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
       .then((data) => Array.isArray(data) && setDepartments(data))
       .catch(() => {})
       .finally(() => setDeptsLoading(false));
+  }, [orgId]);
+
+  // Decision Extraction v2, FR-6: pending-review badge — only ever
+  // meaningful for dept_admin/super_admin, and the endpoint itself returns 0
+  // for anyone else, so this is safe to fetch unconditionally.
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    fetch(`/api/org/${orgId}/decisions/pending-count`)
+      .then((r) => r.json())
+      .then((data) => { if (!cancelled) setPendingDecisionCount(Number(data?.count) || 0); })
+      .catch(() => { if (!cancelled) setPendingDecisionCount(0); });
+    return () => { cancelled = true; };
   }, [orgId]);
 
   useEffect(() => {
@@ -139,7 +153,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
         { label: "Knowledge Repository", href: `/org/${orgId}/repository`, icon: Library },
         { label: "Experts", href: `/org/${orgId}/experts`, icon: Users },
         { label: "Recommendations", href: `/org/${orgId}/recommendations`, icon: Sparkles },
-        { label: "Decisions", href: `/org/${orgId}/decisions`, icon: Scale },
+        { label: "Decisions", href: `/org/${orgId}/decisions`, icon: Scale, badge: pendingDecisionCount },
         ...(isSuperAdmin
           ? [{ label: "Needs Review", href: `/org/${orgId}/needs-review`, icon: ClipboardList }]
           : []),
@@ -275,6 +289,11 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
                 >
                   <Icon className="h-4 w-4" />
                   {item.label}
+                  {Boolean(item.badge) && (
+                    <span className="ml-auto rounded-full bg-primary-600 px-1.5 py-0.5 text-xs font-medium text-white">
+                      {item.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}

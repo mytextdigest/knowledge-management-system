@@ -58,3 +58,27 @@ export async function canManageDecision({ document, userId, role }) {
   if (!departmentId) return role === "super_admin";
   return canManageDepartment(role, departmentId, userId);
 }
+
+// Decision Extraction v2 (REQUIREMENTS_DECISION_EXTRACTION_V2_HITL.md,
+// Decisions 2 and 5): the sole authorization gate for every Decision.status
+// write — confirm, reject, and outcome changes to reversed/superseded alike.
+// Deliberately narrower than canManageDecision above: a document's
+// owner/uploader is never sufficient on their own, only super_admin or a
+// dept_admin who is an actual admin member of the document's (or its
+// project's) department. canManageDecision is kept for any other future use
+// but is no longer called from the decision status write path.
+export async function canReviewDecision({ document, userId, role }) {
+  if (role === "super_admin") return true;
+  if (role !== "dept_admin") return false;
+
+  let departmentId = document.departmentId || null;
+  if (!departmentId && document.projectId) {
+    const project = await prisma.project.findUnique({
+      where: { id: document.projectId },
+      select: { departmentId: true },
+    });
+    departmentId = project?.departmentId || null;
+  }
+  if (!departmentId) return false;
+  return canManageDepartment(role, departmentId, userId);
+}
