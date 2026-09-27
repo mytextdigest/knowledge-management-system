@@ -7,7 +7,6 @@ import { resolveOrgRole, isOrgAdmin, isSuperAdmin, canManageDepartment } from "@
 import { filterAccessibleDocuments } from "@/lib/documentAccess";
 import { getAccessibleRelatedDocuments, getAccessibleExperts } from "@/lib/knowledgeContext";
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
-import { canReviewDecision } from "@/lib/decisionAccess";
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -156,23 +155,10 @@ export async function GET(req, { params }) {
       Boolean(effectiveDepartmentId) &&
       (await canManageDepartment(role, effectiveDepartmentId, user.id)));
 
-  // Decision Extraction v2, FR-5: a "pending"/"rejected" decision must not
-  // appear on the document page either, unless the viewer is a reviewer for
-  // this document's department (or super_admin). Everyone else only sees
-  // active/reversed/superseded rows, same as the repository/chat surfaces.
-  const isDecisionReviewer =
-    Boolean(user?.id) && Boolean(role) &&
-    (isSuperAdmin(role) ||
-      (await canReviewDecision({ document: { departmentId: doc.departmentId, projectId: doc.projectId }, userId: user.id, role })));
-  const visibleDecisions = isDecisionReviewer
-    ? doc.decisions
-    : doc.decisions.filter((d) => d.status !== "pending" && d.status !== "rejected");
-
-  const { conflictsAsDocA, conflictsAsDocB, decisions: _rawDecisions, ...docWithoutRawConflicts } = doc;
+  const { conflictsAsDocA, conflictsAsDocB, ...docWithoutRawConflicts } = doc;
 
   return NextResponse.json({
     ...docWithoutRawConflicts,
-    decisions: visibleDecisions,
     conflicts,
     relatedDocuments,
     experts,
