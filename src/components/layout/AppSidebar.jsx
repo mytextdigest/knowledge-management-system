@@ -24,6 +24,7 @@ import {
   X,
   Users,
   Sparkles,
+  Network,
   Scale,
 } from "lucide-react";
 import Image from "next/image";
@@ -154,6 +155,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
         { label: "Experts", href: `/org/${orgId}/experts`, icon: Users },
         { label: "Recommendations", href: `/org/${orgId}/recommendations`, icon: Sparkles },
         { label: "Decisions", href: `/org/${orgId}/decisions`, icon: Scale, badge: pendingDecisionCount },
+        { label: "Knowledge Graph", href: `/org/${orgId}/knowledge-graph`, icon: Network },
         ...(isSuperAdmin
           ? [{ label: "Needs Review", href: `/org/${orgId}/needs-review`, icon: ClipboardList }]
           : []),

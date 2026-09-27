@@ -1,10 +1,11 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAccessibleExpertsWithPrisma } from "@/lib/expertDiscoveryQuery.mjs";
+import { RELATIONSHIP_MIN_CONFIDENCE } from "./relationshipScoringPolicy.mjs";
 
-export const RELATED_DOCUMENT_MIN_WEIGHT = 0.68;
+export const RELATED_DOCUMENT_MIN_WEIGHT = RELATIONSHIP_MIN_CONFIDENCE;
 
-function accessSql({ userId, isSuperAdmin = false, alias = "d" }) {
+export function accessSql({ userId, isSuperAdmin = false, alias = "d" }) {
   const table = Prisma.raw(`"${alias}"`);
   return Prisma.sql`(
     ${isSuperAdmin}
@@ -78,4 +79,34 @@ export async function expandWithRelatedDocuments({ rows, orgId, userId, isSuperA
   return [...rows, ...additions]
     .sort((a,b) => Number(b.hybridScore || 0) - Number(a.hybridScore || 0))
     .slice(0, limit);
+}
+
+
+export async function getAccessibleOrgRelationships({ orgId, userId, isSuperAdmin = false, limit = 100 }) {
+  const fromAccess = accessSql({ userId, isSuperAdmin, alias: "a" });
+  const toAccess = accessSql({ userId, isSuperAdmin, alias: "b" });
+  const safeLimit = Prisma.raw(String(Math.max(1, Math.min(250, Number(limit) || 100))));
+  const relationships = await prisma.$queryRaw`
+    SELECT r.id, 'relationship'::text AS kind, r.type, r.weight, r.evidence,
+      a.id AS "fromDocumentId", a.filename AS "fromFilename",
+      b.id AS "toDocumentId", b.filename AS "toFilename", r."updated_at" AS "createdAt"
+    FROM "DocumentRelationship" r
+    JOIN "Document" a ON a.id = r."fromDocumentId"
+    JOIN "Document" b ON b.id = r."toDocumentId"
+    WHERE r."orgId" = ${orgId} AND ${fromAccess} AND ${toAccess}
+    ORDER BY r.weight DESC LIMIT ${safeLimit}
+  `;
+  const conflicts = await prisma.$queryRaw`
+    SELECT c.id, 'conflict'::text AS kind, 'conflict'::text AS type, 1::float AS weight,
+      jsonb_build_object('summary', c.summary, 'status', c.status) AS evidence,
+      a.id AS "fromDocumentId", a.filename AS "fromFilename",
+      b.id AS "toDocumentId", b.filename AS "toFilename", c."created_at" AS "createdAt"
+    FROM "DocumentConflict" c
+    JOIN "Document" a ON a.id = c."documentAId"
+    JOIN "Document" b ON b.id = c."documentBId"
+    WHERE a."orgId" = ${orgId} AND b."orgId" = ${orgId} AND c.status <> 'dismissed'
+      AND ${fromAccess} AND ${toAccess}
+    ORDER BY c."created_at" DESC LIMIT ${safeLimit}
+  `;
+  return [...relationships, ...conflicts].slice(0, Math.max(1, Math.min(250, Number(limit) || 100)));
 }

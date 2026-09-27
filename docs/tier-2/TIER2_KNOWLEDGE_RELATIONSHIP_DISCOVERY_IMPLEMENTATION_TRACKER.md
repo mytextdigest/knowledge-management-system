@@ -27,73 +27,83 @@
 
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
-| `13-A` | Multi-Signal Scoring — Topic + Entity + Project Signals (FR-1) | `TODO` | Sandeep | — | | |
-| `13-B` | Decision/Lesson Chain Signal (FR-1) | `TODO` | Sandeep | `13-A` | | |
-| `13-C` | Configurable Confidence Formula (FR-2) | `TODO` | Sandeep | `13-A`, `13-B` | | |
-| `13-D` | Extend Coverage to Project-Scoped Documents (FR-3) | `TODO` | Sandeep | `13-C` | | |
-| `13-E` | Relationship Type Taxonomy (FR-4) | `TODO` | Sandeep | `13-C` | | |
-| `13-F` | Evidence Enrichment (FR-5) | `TODO` | Sandeep | `13-A`, `13-B` | | |
-| `13-G` | Org-Wide Relationships Endpoint (FR-6) | `TODO` | Sandeep | `13-E`, `13-F` | | |
-| `13-H` | Related-Documents UI Enrichment (FR-7) | `TODO` | Sandeep | `13-F` | | |
-| `13-I` | Integration Validation | `TODO` | Sandeep | `13-D`, `13-G`, `13-H` | | |
-| `13-J` | PR + Cross-Review | `TODO` | Sandeep | `13-I` | | |
+| `13-A` | Multi-Signal Scoring — Topic + Entity + Project Signals (FR-1) | `IN_PROGRESS` | Sandeep | — | | |
+| `13-B` | Decision/Lesson Chain Signal (FR-1) | `IN_PROGRESS` | Sandeep | `13-A` | | |
+| `13-C` | Configurable Confidence Formula (FR-2) | `IN_PROGRESS` | Sandeep | `13-A`, `13-B` | | |
+| `13-D` | Extend Coverage to Project-Scoped Documents (FR-3) | `IN_PROGRESS` | Sandeep | `13-C` | | |
+| `13-E` | Relationship Type Taxonomy (FR-4) | `IN_PROGRESS` | Sandeep | `13-C` | | |
+| `13-F` | Evidence Enrichment (FR-5) | `IN_PROGRESS` | Sandeep | `13-A`, `13-B` | | |
+| `13-G` | Org-Wide Relationships Endpoint (FR-6) | `IN_PROGRESS` | Sandeep | `13-E`, `13-F` | | |
+| `13-H` | Related-Documents UI Enrichment (FR-7) | `IN_PROGRESS` | Sandeep | `13-F` | | |
+| `13-I` | Integration Validation | `IN_PROGRESS` | Sandeep | `13-D`, `13-G`, `13-H` | | |
+| `13-J` | PR + Cross-Review | `IN_PROGRESS` | Sandeep | `13-I` | | |
 
 ---
 
 ### Task 13-A — Multi-Signal Scoring: Topic + Entity + Project Signals
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** FR-1 — add topic-overlap (`TopicDocument`), entity-overlap (`Entity`), and project-context (`Document.projectId` / confirmed `DocumentProjectLink`) signals into `processKnowledgeContext()`'s existing scoring, alongside the embedding-similarity signal `findRelatedDocumentsWithPgvector()` already computes.
 - **Key files:** `worker/knowledgeContext.js` (`findRelatedDocumentsWithPgvector()`, `relationshipType()`, `processKnowledgeContext()`).
 - **Acceptance criteria:** a document pair with no strong embedding similarity but shared topic + shared entities is discoverable as a relationship.
 
 ### Task 13-B — Decision/Lesson Chain Signal
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** FR-1 — connect two *different* documents when one's extracted `Decision` is referenced by a `Lesson` whose `documentId` is the other, or both share a `Lesson.projectId`. Distinct from the existing direct `Decision.documentId`/`Lesson.documentId` FKs, which already link a document to its own decisions/lessons.
 - **Key files:** `worker/knowledgeContext.js`.
 - **Acceptance criteria:** a design document and a later incident/lesson document that share a decision/lesson context are linked, with evidence identifying the shared decision or lesson.
 
 ### Task 13-C — Configurable Confidence Formula
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** FR-2 — replace the fixed `RELATED_THRESHOLD = 0.72` cutoff and raw-similarity `weight` with a weighted combination of all signals from `13-A`/`13-B`. Weights live in one configurable place, not scattered per-signal magic numbers.
 - **Key files:** `worker/knowledgeContext.js`.
 - **Acceptance criteria:** relationship weight reflects combined signal strength, not embedding similarity alone; weights are adjustable without code restructuring.
 
 ### Task 13-D — Extend Coverage to Project-Scoped Documents
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** FR-3 — remove/narrow the `doc.scope !== "repository"` early return in `processKnowledgeContext()`. Resolve Open Question 1 (candidate pool boundaries for project docs) before implementing.
 - **Key files:** `worker/knowledgeContext.js`.
 - **Acceptance criteria:** project-scoped documents get `DocumentRelationship` rows populated; candidate pool scoping decision is documented in this tracker's notes.
 
 ### Task 13-E — Relationship Type Taxonomy
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** FR-4 — extend `relationshipType()`'s output space with `shares_topic`, `shares_entity`, `related_to_project`, `related_to_lesson`, in addition to the existing `related`/`references`/`supersedes`. No `contradicts` type — see requirements doc's Interface Contract with `DocumentConflict`.
 - **Key files:** `worker/knowledgeContext.js`.
 - **Acceptance criteria:** a relationship gets the most specific type its evidence supports; no `contradicts` value is ever written to `DocumentRelationship.type`.
 
 ### Task 13-F — Evidence Enrichment
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** FR-5 — extend the `evidence` JSON (`{embeddingSimilarity, strategy}`) with a per-signal breakdown (`topicOverlap`, `entityOverlap`, `projectContext`, `lessonEvidence`). Purely additive to the existing JSON column. Agree the final field names with Simran (Rank 13) before finalizing, per the requirements doc's Interface Contract.
 - **Key files:** `worker/knowledgeContext.js`.
 - **Acceptance criteria:** `DocumentRelationship.evidence` contains a per-signal breakdown consumable by Rank 13's UI without a schema change.
 
 ### Task 13-G — Org-Wide Relationships Endpoint
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** FR-6 — new `GET /api/org/[orgId]/relationships`, RBAC-scoped via the existing `accessSql()`-style pattern (`src/lib/knowledgeContext.js`). Composes `DocumentRelationship` and `DocumentConflict` rows, tagged by `kind` (`"relationship"` vs `"conflict"`), per the requirements doc's Interface Contract with existing conflict detection.
 - **Key files:** new `src/app/api/org/[orgId]/relationships/route.js`; likely a new shared read helper in `src/lib/knowledgeContext.js`.
 - **Acceptance criteria:** endpoint returns RBAC-scoped, `kind`-tagged results; no user sees a relationship/conflict involving a document they can't otherwise access.
 
 ### Task 13-H — Related-Documents UI Enrichment
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** FR-7 — extend the existing "Related documents" panel (`src/app/(app)/document/page.jsx`, ~line 1348) to show relationship type and evidence summary, not only a weight percentage.
 - **Key files:** `src/app/(app)/document/page.jsx`, `src/app/api/documents/[id]/route.js` (response shape for `relatedDocuments`).
 - **Acceptance criteria:** panel shows e.g. "Same project · Authentication · 3 shared entities" alongside each related document, without regressing existing click-through navigation.
 
 ### Task 13-I — Integration Validation
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** Full regression pass — confirm existing repository-scoped relationship discovery still works, confirm no `contradicts` type leaks in, confirm project-scope extension (`13-D`) doesn't introduce excessive/noisy relationships, confirm no upload/processing latency regression (scoring remains fully background).
 - **Acceptance criteria:** all acceptance criteria in `REQUIREMENTS_KNOWLEDGE_RELATIONSHIP_DISCOVERY.md` verified.
 
 ### Task 13-J — PR + Cross-Review
-- **Status:** `TODO`
+- **Status:** `IN_PROGRESS`
 - **Objective:** Submit this feature's PR. Request review explicitly focused on the confidence-formula weights (`13-C`) and the `DocumentConflict` composition boundary (`13-G`), since both are judgment calls without a single objectively-correct answer.
 - **Acceptance criteria:** merged to `dev` with explicit reviewer sign-off on scoring-weight and conflict-boundary decisions.
+
+
+## Current implementation note — 2026-09-20
+
+Implementation is complete on the combined feature branch and is undergoing final local/integration validation before PR/merge. Tracker statuses remain `IN_PROGRESS` until the feature is validated and merged, consistent with this tracker’s status legend.
+
+- **13-D candidate-pool decision:** project-scoped documents compare against documents in the same project plus published repository knowledge in the same organization. This preserves useful repository↔project discovery while avoiding unrelated project↔project noise.
+- **13-C confidence decision:** weights are centralized in `src/lib/relationshipScoringPolicy.mjs` and sum to 1.0: embedding 0.46, topic 0.18, entity 0.16, project 0.12, lesson/decision 0.08; minimum combined confidence is 0.32 and per-document output is capped.
+- **13-F/Rank-13 evidence contract:** `embeddingSimilarity`, `topicOverlap`, `entityOverlap`, `projectContext`, `lessonEvidence`, `sharedEntities`, `lessonDetails`, `strategy`.
+- `DocumentConflict` remains a separate source of truth; no `contradicts` `DocumentRelationship.type` is introduced.
