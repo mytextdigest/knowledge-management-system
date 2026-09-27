@@ -27,12 +27,12 @@ Without these capabilities, it is simply a document repository with AI.
 |---|---|---|---|---|
 | 1 | Conversational Knowledge Assistant | Primary interface to organizational knowledge | Daily | In Progress |
 | 2 | Semantic Knowledge Retrieval | Finds information regardless of wording | Daily | Done |
-| 3 | Automated Knowledge Ingestion Pipeline | Converts documents into organizational intelligence | Continuous | TBD |
+| 3 | Automated Knowledge Ingestion Pipeline | Converts documents into organizational intelligence | Continuous | Done |
 | 4 | Automatic Knowledge Classification | Self-organizing enterprise knowledge | Continuous | Done |
 | 5 | Cross-Document Reasoning | Connects knowledge across repositories | Daily | Done |
 | 6 | Knowledge Summarization | Compresses large information volumes | Daily | Done |
 | 7 | Enterprise Knowledge Repository | Persistent organizational memory | Continuous | Done |
-| 8 | Knowledge Context Engine | Understands relationships among documents, topics, people, and projects | Daily | TBD |
+| 8 | Knowledge Context Engine | Understands relationships among documents, topics, people, and projects | Daily | Done |
 
 #### Why These Are Tier 1
 
@@ -48,12 +48,12 @@ These capabilities transform information into enterprise-wide intelligence.
 
 | Rank | Capability | Purpose | Typical Usage | Status |
 |---|---|---|---|---|
-| 9 | Expert Discovery | Find who knows what | Daily | TBD |
-| 10 | Knowledge Recommendation Engine | Deliver relevant knowledge proactively | Daily | TBD |
-| 11 | Lessons Learned Intelligence | Institutional memory | Weekly | NA |
-| 12 | Knowledge Relationship Discovery | Reveal hidden connections | Weekly | TBD |
-| 13 | Organizational Knowledge Graph | Enterprise-wide knowledge map | Weekly | TBD |
-| 14 | Decision Intelligence Repository | Preserve why decisions were made | Weekly | TBD |
+| 9 | Expert Discovery | Find who knows what | Daily | Done |
+| 10 | Knowledge Recommendation Engine | Deliver relevant knowledge proactively | Daily | Done |
+| 11 | Lessons Learned Intelligence | Institutional memory | Weekly | Done |
+| 12 | Knowledge Relationship Discovery | Reveal hidden connections | Weekly | Done |
+| 13 | Organizational Knowledge Graph | Enterprise-wide knowledge map | Weekly | Done |
+| 14 | Decision Intelligence Repository | Preserve why decisions were made | Weekly | Done |
 | 15 | Project Intelligence | Link projects, documents, lessons, experts | Weekly | TBD |
 | 16 | Topic Evolution Tracking | Monitor how knowledge changes over time | Monthly | TBD |
 

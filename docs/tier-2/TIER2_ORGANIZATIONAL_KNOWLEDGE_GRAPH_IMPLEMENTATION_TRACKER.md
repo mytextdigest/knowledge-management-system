@@ -27,74 +27,74 @@
 
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
-| `14-A` | Knowledge Graph Service — Node/Edge Normalization (FR-1) | `IN_PROGRESS` | Simran | — | | |
-| `14-B` | Document→Project Edge Resolution Rule (FR-5) | `IN_PROGRESS` | Simran | `14-A` | | |
-| `14-C` | TimelineEvent as an Edge Source (FR-7) | `IN_PROGRESS` | Simran | `14-A` | | |
-| `14-D` | Edge Provenance/Evidence Tagging (FR-4) | `IN_PROGRESS` | Simran | `14-A`, `14-B` | | |
-| `14-E` | Graph Traversal API (FR-2) | `IN_PROGRESS` | Simran | `14-D` | | |
-| `14-F` | RBAC Enforcement Before Traversal (FR-3) | `IN_PROGRESS` | Simran | `14-E` | | |
-| `14-G` | Progressive Graph UI (FR-6) | `IN_PROGRESS` | Simran | `14-F` | | |
-| `14-H` | Integration Validation | `IN_PROGRESS` | Simran | `14-F`, `14-G` | | |
-| `14-I` | PR + Cross-Review | `IN_PROGRESS` | Simran | `14-H` | | |
+| `14-A` | Knowledge Graph Service — Node/Edge Normalization (FR-1) | `DONE` | Simran | — | 2026-09-27 | 2026-09-27 |
+| `14-B` | Document→Project Edge Resolution Rule (FR-5) | `DONE` | Simran | `14-A` | 2026-09-27 | 2026-09-27 |
+| `14-C` | TimelineEvent as an Edge Source (FR-7) | `DONE` | Simran | `14-A` | 2026-09-27 | 2026-09-27 |
+| `14-D` | Edge Provenance/Evidence Tagging (FR-4) | `DONE` | Simran | `14-A`, `14-B` | 2026-09-27 | 2026-09-27 |
+| `14-E` | Graph Traversal API (FR-2) | `DONE` | Simran | `14-D` | 2026-09-27 | 2026-09-27 |
+| `14-F` | RBAC Enforcement Before Traversal (FR-3) | `DONE` | Simran | `14-E` | 2026-09-27 | 2026-09-27 |
+| `14-G` | Progressive Graph UI (FR-6) | `DONE` | Simran | `14-F` | 2026-09-27 | 2026-09-27 |
+| `14-H` | Integration Validation | `DONE` | Simran | `14-F`, `14-G` | 2026-09-27 | 2026-09-27 |
+| `14-I` | PR + Cross-Review | `DONE` | Simran | `14-H` | 2026-09-27 | 2026-09-27 |
 
 ---
 
 ### Task 14-A — Knowledge Graph Service: Node/Edge Normalization
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Objective:** FR-1 — build `src/lib/knowledgeGraph.js`, converting existing Prisma records (`Document`, `Project`, `Topic`, `Entity`, `Person/Expert` via `TopicExpertise`, `Decision`, `Lesson`, `Department`) into normalized `{id, type, label}` nodes and their existing relations (`TopicDocument`, `Entity.documentId`, `Decision.documentId`, `Decision.lessons`/`Lesson.decisionId`, `Lesson.projectId`, `TopicExpertise`, `DocumentRelationship`) into `{source, target, type}` edges.
 - **Key files:** new `src/lib/knowledgeGraph.js`.
 - **Acceptance criteria:** service returns nodes/edges for a given org/start node without the API/UI needing to know the underlying Prisma schema.
 
 ### Task 14-B — Document→Project Edge Resolution Rule
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Objective:** FR-5 — default `Document → Project` edges come from `Document.projectId` (direct) and `DocumentProjectLink` rows with `status !== "suggested"` only. Suggested links excluded by default.
 - **Key files:** `src/lib/knowledgeGraph.js`.
 - **Acceptance criteria:** an unconfirmed `DocumentProjectLink` never appears as a plain edge without an explicit `includeSuggested` filter.
 
 ### Task 14-C — TimelineEvent as an Edge Source
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Objective:** FR-7 — feed existing `TimelineEvent` rows (Project/Department/Document/Decision) into the graph's edge set, tagged `source: "explicit"`.
 - **Key files:** `src/lib/knowledgeGraph.js`.
 - **Acceptance criteria:** a decision's timeline context (project, department, document) appears as graph edges without a new extraction step.
 
 ### Task 14-D — Edge Provenance/Evidence Tagging
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Objective:** FR-4 — every edge tagged `source: "explicit" | "inferred" | "conflict" | "suggested"`. Inferred edges carry `DocumentRelationship.evidence`/`.weight`; conflict edges come from `DocumentConflict`. Coordinate `evidence` field names with Sandeep (Rank 12) per both features' Interface Contracts.
 - **Key files:** `src/lib/knowledgeGraph.js`.
 - **Acceptance criteria:** every edge in the service's output carries a `source` tag; inferred/conflict edges carry their originating evidence.
 
 ### Task 14-E — Graph Traversal API
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Objective:** FR-2 — `GET /api/org/[orgId]/knowledge-graph` with starting node, depth (1–2 hops v1), and filters (department, project, topic, relationship type, `includeSuggested`). Frontend-neutral `{nodes, edges}` JSON.
 - **Key files:** new `src/app/api/org/[orgId]/knowledge-graph/route.js`.
 - **Acceptance criteria:** endpoint returns bounded, filtered graph data; response shape stable enough for future non-UI consumers.
 
 ### Task 14-F — RBAC Enforcement Before Traversal
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Objective:** FR-3 — apply the existing `accessSql()`-style scoping (`src/lib/knowledgeContext.js`) inside the graph service before nodes/edges are returned, not after. Verify a confidential document's existence isn't disclosed via an edge label even when its content stays hidden.
 - **Key files:** `src/lib/knowledgeGraph.js`.
 - **Acceptance criteria:** a user who cannot access Document B never receives an edge referencing Document B, even indirectly.
 
 ### Task 14-G — Progressive Graph UI
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Objective:** FR-6 — search-to-node entry point, neighbor-count summary, expand-on-click, filters (node type, department, project, relationship type, suggested-link toggle). Clicking a document node navigates to the existing document page.
 - **Key files:** new page under `src/app/(app)/org/[orgId]/knowledge-graph/`, new components under `src/components/knowledge-graph/`.
 - **Acceptance criteria:** UI never renders a full org graph at once; expansion is progressive and bounded.
 
 ### Task 14-H — Integration Validation
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Objective:** Full regression pass — confirm RBAC holds under multiple test scenarios (cross-department, cross-project), confirm suggested links stay hidden by default, confirm explicit/inferred/conflict edges render distinctly, confirm no regression to existing document/project/department/timeline pages.
 - **Acceptance criteria:** all acceptance criteria in `REQUIREMENTS_ORGANIZATIONAL_KNOWLEDGE_GRAPH.md` verified.
 
 ### Task 14-I — PR + Cross-Review
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Objective:** Submit this feature's PR. Request review explicitly focused on RBAC enforcement (`14-F`) given the graph's inherent risk of indirect information disclosure.
 - **Acceptance criteria:** merged to `dev` with explicit reviewer sign-off on the RBAC boundary.
 
 
-## Current implementation note — 2026-09-20
+## Current implementation note — 2026-09-20 (updated 2026-09-27: merged to dev via PR #28)
 
-Implementation is complete on the combined feature branch and is undergoing final local/integration validation before PR/merge. Tracker statuses remain `IN_PROGRESS` until the feature is validated and merged, consistent with this tracker’s status legend.
+Implementation is complete and merged to `dev` (PR #28, `feature/tier2-relationship-knowledge-graph`). All tasks are `DONE`.
 
 - **14-D/Rank-12 evidence contract:** inferred graph edges pass through Rank 12’s additive evidence JSON unchanged; graph provenance is exposed separately as `provenance: explicit | inferred | conflict | suggested`.
 - **14-B:** suggested `DocumentProjectLink` rows are excluded by default and only included through `includeSuggested`.

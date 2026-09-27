@@ -35,7 +35,7 @@
 | `15-F` | Decision-to-Lesson Linkage Display (FR-3) | `DONE` | Johurul | `15-E` | 2026-09-21 | 2026-09-21 |
 | `15-G` | Outcome Status Write Path (FR-2) | `DONE` | Johurul | `15-B`, `15-E` | 2026-09-21 | 2026-09-21 |
 | `15-H` | Integration Validation | `DONE` | Johurul | `15-D`, `15-F`, `15-G` | 2026-09-21 | 2026-09-21 |
-| `15-I` | PR + Cross-Review | `TODO` | Johurul | `15-H` | | |
+| `15-I` | PR + Cross-Review | `DONE` | Johurul | `15-H` | 2026-09-26 | 2026-09-26 |
 
 ---
 
@@ -96,6 +96,6 @@
 - **Notes:** `extractDecisions()`, `isDecisionQuestion()`, and the exported shape/signature of `getDecisionEvidence()` are untouched — only its internal access-check duplication was factored out into `decisionAccessSql()`, which `getDecisionEvidence()` now calls too (behavior-preserving refactor, confirmed by re-running its exact prior SQL logic against the live DB and getting identical results). `npx next build` passes clean with the new routes/pages included. Caught and fixed one real bug during dry-run verification: the first draft of `getAccessibleDecisions()`'s `ORDER BY` referenced `dec."createdAt"`, but `Decision.createdAt` is `@map("created_at")` — Postgres raised `column dec.createdAt does not exist` until corrected to `dec.created_at`.
 
 ### Task 15-I — PR + Cross-Review
-- **Status:** `TODO`
+- **Status:** `DONE`
 - **Objective:** Submit this feature's PR. Request review focused on the outcome-status write path's RBAC (`15-G`) and confirmation that extraction/chat-grounding logic was untouched.
 - **Acceptance criteria:** merged to `dev` with explicit reviewer sign-off on the RBAC boundary for `15-G`.
