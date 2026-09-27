@@ -37,6 +37,7 @@ model User {
   topicExpertise    TopicExpertise[]
   documentInteractions DocumentInteraction[]
   lessonsAuthored   Lesson[]
+  decisionsReviewed Decision[] @relation("DecisionReviewedBy")
 }
 
 model OtpToken {
@@ -320,6 +321,7 @@ model Document {
   projectLinks      DocumentProjectLink[]
   interactions      DocumentInteraction[]
   lessons           Lesson[]
+  decisionEvidence  DecisionEvidence[]
 
   @@index([scope])
   @@index([orgId])
@@ -361,6 +363,7 @@ model Chunk {
   metadata     Json?
   documentId   String                       @map("document_id")
   document     Document                     @relation(fields: [documentId], references: [id])
+  decisionEvidence DecisionEvidence[]
 
   @@index([documentId])
 }
@@ -584,10 +587,105 @@ model Decision {
   decidedAt  DateTime?
   createdAt  DateTime  @default(now()) @map("created_at")
 
-  document       Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  // Rank 14 (Decision Intelligence Repository), FR-2: originally
+  // "active" | "reversed" | "superseded". Decision Extraction v2
+  // (REQUIREMENTS_DECISION_EXTRACTION_V2_HITL.md) adds "pending" (extracted,
+  // awaiting reviewer confirm/reject — never set by a human) and "rejected"
+  // (reviewer determined this is not a decision), ordered:
+  // pending, active, rejected, reversed, superseded.
+  // DX-J cutover: default flipped to "pending" once the full review
+  // pipeline (gating, reconcile, review API, review UI) shipped — the
+  // worker always sets this explicitly regardless, so this default only
+  // matters as a safety net for any other future write path. Pre-existing
+  // rows from before this feature are untouched and stay "active" with
+  // certainty = null (never backfilled).
+  status String @default("pending")
+
+  // Free-text explanation accompanying a status change (e.g. why a decision
+  // was reversed/superseded) — set together with `status`, never by
+  // extraction. Surfaced in the decision's detail view and folded into
+  // formatDecisionContext() so a decision cited in chat carries its outcome
+  // note, not just the raw statement/rationale.
+  statusNote String?
+
+  // --- Decision Extraction v2 (implicit detection + human review) ---
+  // All additive/nullable; null on every pre-existing row and never
+  // backfilled. See REQUIREMENTS_DECISION_EXTRACTION_V2_HITL.md.
+
+  // Model-side judgment, separate from the human-owned `status` lifecycle:
+  // "confirmed" | "likely" | "candidate". Computed deterministically in code
+  // from `signals`, not trusted verbatim from the LLM.
+  certainty String?
+
+  // "explicit" | "implicit" — whether the source text states the decision
+  // outright or the extractor inferred it from commitment/action language.
+  explicitness String?
+
+  // The deterministic score (see certainty above) that produced the
+  // certainty tier, kept for reproducibility when scoring weights are tuned.
+  score Int?
+
+  // Fixed-vocabulary evidence signals the scorer summed to produce `score`
+  // (e.g. "explicit_commitment", "implementation_action",
+  // "open_question_remains"). Unknown labels from the model are dropped
+  // before storage, so this array is always drawn from the fixed vocabulary.
+  signals String[] @default([])
+
+  // The issue/topic being decided, distinct from `statement` (the choice
+  // itself) — optional, model-supplied.
+  subject String?
+
+  actors       String[] @default([])
+  alternatives String[] @default([])
+
+  // "extracted" (worker, the default) | "manual" (added by a reviewer via
+  // FR-6/DX-L — lands "active" directly since the reviewer's own entry is
+  // the review).
+  source String @default("extracted")
+
+  // The extractor's original wording, captured on a reviewer's first edit to
+  // `statement`. Lets reconcile-on-regenerate (FR-3) match a new extraction
+  // against a since-edited row by its original text, not the edited one.
+  aiStatement String?
+
+  reviewedById String?
+  reviewedBy   User?     @relation("DecisionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt   DateTime?
+  reviewNote   String?
+
+  document       Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
   timelineEvents TimelineEvent[]
   lessons        Lesson[]
+  evidence       DecisionEvidence[]
 
+  @@index([documentId])
+  @@index([status])
+}
+
+// Decision Extraction v2 — verified quotes backing a Decision, shown in the
+// "why KMS thinks this" panel (FR-6) so a client/reviewer can see the exact
+// source text behind an extracted (especially implicit) decision. `quote`
+// must verify as a substring of its source chunk's text before being stored
+// (worker-side check) — the guard against fabricated evidence. `documentId`
+// duplicates `Decision.documentId` today (every quote comes from the
+// decision's own document) but is kept separate so cross-document evidence
+// aggregation (deferred, see requirements doc) needs no migration later.
+model DecisionEvidence {
+  id         String   @id @default(cuid())
+  decisionId String
+  documentId String
+  chunkId    String?
+  chunkIndex Int?
+  quote      String
+  type       String // explicit_statement | approval | commitment | directive |
+  // resolved_discussion | follow_up_action | assumed_direction
+  createdAt DateTime @default(now()) @map("created_at")
+
+  decision Decision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunk    Chunk?   @relation(fields: [chunkId], references: [id], onDelete: SetNull)
+
+  @@index([decisionId])
   @@index([documentId])
 }
 
