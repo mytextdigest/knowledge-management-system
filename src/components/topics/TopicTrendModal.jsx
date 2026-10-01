@@ -80,7 +80,7 @@ export default function TopicTrendModal({ orgId, topicRef, onClose }) {
           </p>
         ) : (
           <div className="space-y-6">
-            <TopicTrendChart title="Knowledge volume" series={trend.series} valueKey="documentCount" formatPeriod={formatPeriod} />
+            <TopicTrendChart title="Information volume" series={trend.series} valueKey="documentCount" formatPeriod={formatPeriod} />
             <TopicTrendChart title="Contributor (expert) count" series={trend.series} valueKey="expertCount" formatPeriod={formatPeriod} />
           </div>
         )}
