@@ -4,18 +4,16 @@ import { NextResponse } from "next/server";
 export async function POST(req) {
   try {
     const { apiKey } = await req.json();
+    const normalizedKey = typeof apiKey === "string" ? apiKey.trim() : "";
 
-    if (!apiKey || typeof apiKey !== "string") {
+    if (!normalizedKey) {
       return NextResponse.json(
         { valid: false, error: "API key is required" },
         { status: 400 }
       );
     }
 
-    // Same logic as desktop IPC
-    const client = new OpenAI({ apiKey });
-
-    // Cheap validation call
+    const client = new OpenAI({ apiKey: normalizedKey });
     await client.models.list();
 
     return NextResponse.json({ valid: true });
@@ -25,7 +23,7 @@ export async function POST(req) {
         valid: false,
         error: err?.message || "Invalid OpenAI API key",
       },
-      { status: 200 } // intentional: validation failure ≠ server error
+      { status: 200 }
     );
   }
 }

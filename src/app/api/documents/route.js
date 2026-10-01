@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { resolveProjectManagementAccess } from "@/lib/projectManagementPolicy";
 
 export async function GET(req) {
   try {
@@ -13,22 +14,23 @@ export async function GET(req) {
     const projectId = searchParams.get("projectId");
     if (!projectId) return NextResponse.json([], { status: 200 });
 
-    // 🔹 Fetch the user record first
-    const dbUser = await prisma.user.findUnique({
-      where: { email: session.user.email },
-      select: { id: true },
-    });
+    // Resolve project-level management access so project owners, Super Admins,
+    // and Dept Admins who administer the project department see the same
+    // documents they are authorized to manage through the detail/mutation APIs.
+    const { project, canManage } = await resolveProjectManagementAccess(
+      session.user.email,
+      projectId
+    );
 
-    if (!dbUser) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    if (!canManage) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // 🔹 Now fetch documents by userId + projectId (include topic assignment)
     const documents = await prisma.document.findMany({
-      where: {
-        projectId,
-        userId: dbUser.id,
-      },
+      where: { projectId },
       select: {
         id: true,
         filename: true,
@@ -57,6 +59,12 @@ export async function GET(req) {
       topicName:       d.topicDocument?.topic?.name ?? null,
       topicConfidence: d.topicDocument?.confidence ?? null,
       topicDocument:   undefined, // strip the nested object
+      permissions: {
+        canManage: true,
+        canStar: true,
+        canRename: true,
+        canDelete: true,
+      },
     }));
 
     return NextResponse.json(formatted);

@@ -1,7 +1,6 @@
 import { motion } from 'framer-motion';
 import {
   FileText,
-  Star,
   Trash2,
   Edit,
   Calendar,
@@ -24,12 +23,11 @@ const DocumentCard = ({
   viewMode = 'grid',
   onView,
   onDelete,
-  onToggleStar,
   onToggleSelect,
   onRename,
   className,
 }) => {
-  const { id, filename, created_at, file_size, starred = false } = document;
+  const { id, filename, created_at, file_size } = document;
 
   const isProcessing = PROCESSING_STATUSES.has(document.status);
 
@@ -85,7 +83,6 @@ const DocumentCard = ({
   const visibilityBadge = getVisibilityBadge(document.visibility);
   const statusBadge = getStatusBadge(document.status);
 
-  // ─── LIST VIEW ──────────────────────────────────────────────────────────────
   if (viewMode === 'list') {
     return (
       <motion.div
@@ -99,7 +96,6 @@ const DocumentCard = ({
           className
         )}
       >
-        {/* Icon + meta */}
         <div className="flex items-center flex-1 min-w-0">
           <div className="flex-shrink-0 mr-4">
             <div className="w-10 h-10 bg-primary-100 dark:bg-primary-900/50 rounded-lg flex items-center justify-center">
@@ -139,21 +135,10 @@ const DocumentCard = ({
           </div>
         </div>
 
-        {/* Action buttons */}
         {isProcessing ? (
           <span className="text-xs text-gray-400 dark:text-gray-500 italic">Processing…</span>
         ) : (
           <div className="flex items-center space-x-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onToggleStar?.(id)}
-              className={cn('h-8 w-8', starred ? 'text-yellow-500' : 'text-gray-400')}
-              title={starred ? 'Unstar' : 'Star'}
-            >
-              <Star className={cn('h-4 w-4', starred && 'fill-current')} />
-            </Button>
-
             <Button
               variant="ghost"
               size="icon"
@@ -199,7 +184,6 @@ const DocumentCard = ({
     );
   }
 
-  // ─── GRID VIEW ──────────────────────────────────────────────────────────────
   return (
     <motion.div
       variants={cardVariants}
@@ -210,8 +194,6 @@ const DocumentCard = ({
     >
       <Card hover={!isProcessing} className="group relative overflow-hidden h-full card-full-width document-card">
         <CardContent className="p-6 h-full flex flex-col card-full-width">
-
-          {/* Header */}
           <div className="flex items-start justify-between mb-4">
             <div className="flex items-center space-x-3">
               <div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/50 rounded-xl flex items-center justify-center">
@@ -247,40 +229,17 @@ const DocumentCard = ({
                 </div>
               </div>
             </div>
-
-            {!isProcessing && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onToggleStar?.(id)}
-                className={cn('h-8 w-8 flex-shrink-0', starred ? 'text-yellow-500' : 'text-gray-400')}
-                title={starred ? 'Unstar' : 'Star'}
-              >
-                <Star className={cn('h-4 w-4', starred && 'fill-current')} />
-              </Button>
-            )}
           </div>
-
-          {/* Content Preview */}
-          {/* <div className="mb-4 overflow-hidden flex-1">
-            <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-4 break-words">
-              {isProcessing
-                ? 'Extracting text and generating summary…'
-                : document.content || 'No preview available'
-              }
-            </p>
-          </div> */}
 
           <div className="mb-4 overflow-hidden flex-1">
             <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-4 break-words">
               {isProcessing
                 ? 'Extracting text and generating summary…'
-                :''
+                : ''
               }
             </p>
           </div>
 
-          {/* Action buttons */}
           <div className="flex items-center justify-between mt-auto gap-2">
             {isProcessing ? (
               <span className="text-xs text-gray-400 dark:text-gray-500 italic">
@@ -354,7 +313,6 @@ const DocumentCard = ({
               </span>
             )}
           </div>
-
         </CardContent>
       </Card>
     </motion.div>

@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
+import { resolveOrgRole, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -11,23 +12,36 @@ export async function GET(req, { params }) {
 
   const { id: projectId } = await params;
 
-  // console.log("project id: ", projectId)
-  // console.log("Params ", params)
-
   if (!projectId) return NextResponse.json(null);
 
-  const project = await prisma.project.findFirst({
-    where: {
-      id: projectId,
-      user: { email: session.user.email },
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      createdAt: true,
+      scope: true,
+      orgId: true,
+      departmentId: true,
+      userId: true,
+      department: { select: { id: true, name: true } },
     },
-    select: { id: true, name: true, description: true, createdAt: true },
   });
 
   if (!project) return NextResponse.json(null, { status: 404 });
 
+  const { user, role } = await resolveOrgRole(session.user.email, project.orgId);
+  if (!role) return NextResponse.json(null, { status: 404 });
+
+  const canManage =
+    project.userId === user.id ||
+    isSuperAdmin(role) ||
+    (role === "dept_admin" && (await canManageDepartment(role, project.departmentId, user.id)));
+
   return NextResponse.json({
     ...project,
+    canManage,
     created_at: project.createdAt.toISOString(),
   });
 }
@@ -48,25 +62,32 @@ export async function PATCH(req, { params }) {
     return NextResponse.json({ error: "Project name is required" }, { status: 400 });
   }
 
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, user: { email: session.user.email } },
-    select: { id: true },
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, orgId: true, departmentId: true, userId: true },
   });
   if (!project) {
-    return NextResponse.json({ error: "Project not found or unauthorized" }, { status: 404 });
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  // Check for duplicate name (unique per user)
+  const { user, role } = await resolveOrgRole(session.user.email, project.orgId);
+  if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (project.userId !== user.id && !isSuperAdmin(role)) {
+    const canManage = role === "dept_admin" && (await canManageDepartment(role, project.departmentId, user.id));
+    if (!canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Check for duplicate name (unique per department)
   const duplicate = await prisma.project.findFirst({
     where: {
-      user: { email: session.user.email },
+      departmentId: project.departmentId,
       name: name.trim(),
       NOT: { id: projectId },
     },
     select: { id: true },
   });
   if (duplicate) {
-    return NextResponse.json({ error: "A project with that name already exists" }, { status: 409 });
+    return NextResponse.json({ error: "A project with that name already exists in this department" }, { status: 409 });
   }
 
   const updated = await prisma.project.update({
@@ -87,13 +108,19 @@ export async function DELETE(req, { params }) {
   const { id:projectId } = await params;
   if (!projectId) return NextResponse.json({ success: false, error: "Invalid project id" }, { status: 400 });
 
-  // Verify project belongs to user
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, user: { email: session.user.email } },
-    select: { id: true },
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, orgId: true, userId: true, departmentId: true },
   });
   if (!project) {
-    return NextResponse.json({ success: false, error: "Project not found or unauthorized" }, { status: 404 });
+    return NextResponse.json({ success: false, error: "Project not found" }, { status: 404 });
+  }
+
+  const { user, role } = await resolveOrgRole(session.user.email, project.orgId);
+  if (!role) return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+  if (project.userId !== user.id && !isSuperAdmin(role)) {
+    const canManage = role === "dept_admin" && (await canManageDepartment(role, project.departmentId, user.id));
+    if (!canManage) return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
   }
 
   try {

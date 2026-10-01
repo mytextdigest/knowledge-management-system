@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 
 export async function POST(req, { params }) {
   try {
@@ -22,13 +23,25 @@ export async function POST(req, { params }) {
     if (!documentId)
       return NextResponse.json({ error: "Missing document id" }, { status: 400 });
 
-    // Verify ownership
-    const doc = await prisma.document.findFirst({
-      where: { id: documentId, user: { email: session.user.email } },
+    const access = await resolveDocumentManagementAccess(session.user.email, documentId);
+    if (!access.document) return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    if (!access.canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const doc = await prisma.document.findUnique({
+      where: { id: documentId },
       include: { project: true, user: true },
     });
 
-    if (!doc) return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    const BLOCKING_STATUSES = new Set([
+      'queued', 'extracting', 'running_ocr', 'chunked',
+      'embedding', 'embedded', 'summarizing', 'clustering',
+    ]);
+    if (BLOCKING_STATUSES.has(doc.status)) {
+      return NextResponse.json(
+        { error: "Document is currently being processed. Wait until processing completes before regenerating the summary." },
+        { status: 409 }
+      );
+    }
 
     if (!doc.filePath)
       return NextResponse.json(

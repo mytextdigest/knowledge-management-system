@@ -13,36 +13,41 @@ const s3 = new S3Client({
 
 export async function POST(req) {
   try {
-    const { fileName, fileType, userId, projectId } = await req.json();
+    const { fileName, fileType, userId, projectId, orgId } = await req.json();
 
-    if (!fileName || !fileType || !userId || !projectId) {
+    if (!fileName || !fileType || !userId || (!projectId && !orgId)) {
       return NextResponse.json(
         { error: "Missing parameters" },
         { status: 400 }
       );
     }
 
-    // ✅ Exact match (case + extension sensitive)
-    const existing = await prisma.document.findFirst({
-      where: {
-        userId,
-        projectId,
-        filename: fileName,
-      },
-      select: { id: true },
-    });
-
-    if (existing) {
-      return NextResponse.json(
-        {
-          error: "DUPLICATE_FILENAME",
-          message: `A document named "${fileName}" already exists in this project.`,
+    // ✅ Exact match (case + extension sensitive) — only enforced for
+    // project-scoped uploads, which is where filenames must stay unique today.
+    if (projectId) {
+      const existing = await prisma.document.findFirst({
+        where: {
+          userId,
+          projectId,
+          filename: fileName,
         },
-        { status: 409 }
-      );
+        select: { id: true },
+      });
+
+      if (existing) {
+        return NextResponse.json(
+          {
+            error: "DUPLICATE_FILENAME",
+            message: `A document named "${fileName}" already exists in this project.`,
+          },
+          { status: 409 }
+        );
+      }
     }
 
-    const key = `uploads/${userId}/${projectId}/${fileName}`;
+    const key = projectId
+      ? `uploads/${userId}/${projectId}/${fileName}`
+      : `uploads/${userId}/org/${orgId}/${fileName}`;
 
     const presignedPost = await createPresignedPost(s3, {
       Bucket: process.env.S3_BUCKET,

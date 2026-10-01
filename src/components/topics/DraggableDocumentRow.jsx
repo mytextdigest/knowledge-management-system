@@ -3,10 +3,10 @@ import { useDraggable } from '@dnd-kit/core';
 import { GripVertical } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export default function DraggableDocumentRow({ docId, docFilename, currentTopicId, children }) {
+export default function DraggableDocumentRow({ docId, docFilename, currentTopicId, permissions, children }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `doc-${docId}`,
-    data: { docId, docFilename, currentTopicId },
+    data: { docId, docFilename, currentTopicId, permissions },
   });
 
   return (
