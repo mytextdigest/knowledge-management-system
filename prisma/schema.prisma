@@ -83,6 +83,7 @@ model Organization {
   integrations      OrgIntegration[]
   documentInteractions DocumentInteraction[]
   lessons           Lesson[]
+  topicSnapshots    TopicSnapshot[]
 
   @@index([name])
 }
@@ -426,10 +427,44 @@ model Topic {
   organization   Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   topicDocuments TopicDocument[]
   expertise      TopicExpertise[]
+  snapshots      TopicSnapshot[]
 
   @@index([projectId])
   @@index([orgId, scope])
   @@unique([orgId, scope, name])
+}
+
+// Rank 16 — Topic Evolution Tracking (Milestone 17, Task 17-B)
+// Append-only history for a Topic's state over time. `topicRef` is the
+// stable grouping identity (set once, never changed) — unlike `topicId`,
+// it survives the Topic row's own deletion (adjustTopicOnDocumentRemoval()'s
+// delete-on-empty path), which is why trend queries group by `topicRef`,
+// not `topicId`. `departmentIds`/`hasUnrestrictedDoc` denormalize enough of
+// the topic's contributing-document access shape at capture time that RBAC
+// on the trend view (FR-3) doesn't depend on TopicDocument rows that no
+// longer exist once a topic is retired (TopicDocument cascade-deletes with
+// its Topic).
+model TopicSnapshot {
+  id             String   @id @default(cuid())
+  topicRef       String
+  topicId        String?
+  topicName      String
+  orgId          String
+  scope          String
+  periodStart    DateTime @map("period_start")
+  capturedAt     DateTime @default(now()) @map("captured_at")
+  documentCount  Int      @map("document_count")
+  expertCount    Int      @default(0) @map("expert_count")
+  keywordSummary Json?    @map("keyword_summary")
+  departmentIds  String[] @default([]) @map("department_ids")
+  hasUnrestrictedDoc Boolean @default(false) @map("has_unrestricted_doc")
+
+  topic        Topic?       @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([topicRef, periodStart])
+  @@index([topicRef, capturedAt])
+  @@index([orgId, scope, capturedAt])
 }
 
 model TopicDocument {

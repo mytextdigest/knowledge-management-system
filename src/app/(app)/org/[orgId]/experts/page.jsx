@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { Search, Mail, Users, CheckCircle2, XCircle, Info } from "lucide-react";
+import Link from "next/link";
+import { Search, Mail, Users, CheckCircle2, XCircle, Info, TrendingUp } from "lucide-react";
 import Layout from "@/components/layout/Layout";
 import ExpertScoreModal from "@/components/experts/ExpertScoreModal";
 
@@ -51,9 +52,14 @@ export default function ExpertsPage() {
   return (
     <Layout orgId={orgId}>
     <div className="mx-auto max-w-6xl space-y-6 p-6">
-      <div>
-        <div className="flex items-center gap-2"><Users className="h-6 w-6 text-primary-600" /><h1 className="text-2xl font-bold">Experts</h1></div>
-        <p className="mt-1 text-sm text-gray-500">Search who knows about a topic across the knowledge you can access.</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2"><Users className="h-6 w-6 text-primary-600" /><h1 className="text-2xl font-bold">Experts</h1></div>
+          <p className="mt-1 text-sm text-gray-500">Search who knows about a topic across the knowledge you can access.</p>
+        </div>
+        <Link href={`/org/${orgId}/topics/trend`} className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-gray-50 dark:hover:bg-gray-700">
+          <TrendingUp className="h-3.5 w-3.5" />Topic Evolution
+        </Link>
       </div>
 
       <form onSubmit={(e) => { e.preventDefault(); load(query); }} className="flex gap-2">

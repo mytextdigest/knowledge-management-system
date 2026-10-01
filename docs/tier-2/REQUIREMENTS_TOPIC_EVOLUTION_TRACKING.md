@@ -77,37 +77,45 @@ Contributor/expert-count trend data (if included in a topic's snapshot, per FR-2
 
 ---
 
-## Data Model Impact (proposed, not final)
+## Data Model Impact (as implemented — see Open Questions' "Implementation-time schema deviation" note)
 
 ```
 model TopicSnapshot {
-  id            String   @id @default(cuid())
-  topicId       String?                    // nullable — survives Topic deletion (FR-4)
-  topicName     String                     // denormalized at capture time, so history is readable after topicId goes null
-  orgId         String
-  scope         String                     // "project" | "repository" — mirrors Topic.scope
-  capturedAt    DateTime @default(now())
-  documentCount Int
-  expertCount   Int      @default(0)
-  keywordSummary Json?                     // compact snapshot of keywordDistribution at capture time
+  id             String   @id @default(cuid())
+  topicRef       String                     // stable grouping identity, set once at first capture — survives Topic deletion (FR-4)
+  topicId        String?                    // nullable FK — null once the live Topic row is deleted; "is this topic still alive"
+  topicName      String                     // denormalized at capture time, so history is readable after topicId goes null
+  orgId          String
+  scope          String                     // "repository" for v1 (Open Question 3)
+  periodStart    DateTime                   // start of the captured ISO week — the actual idempotency key
+  capturedAt     DateTime @default(now())
+  documentCount  Int
+  expertCount    Int      @default(0)
+  keywordSummary Json?                      // top-15 keywordDistribution entries at capture time
+  departmentIds  String[] @default([])      // distinct non-null contributing-document departmentIds at capture time — RBAC only
+  hasUnrestrictedDoc Boolean @default(false) // true if any contributing document had departmentId IS NULL at capture time — RBAC only
 
-  topic Topic? @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  topic        Topic?       @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
-  @@index([topicId, capturedAt])
+  @@unique([topicRef, periodStart])
+  @@index([topicRef, capturedAt])
   @@index([orgId, scope, capturedAt])
 }
 ```
-One new model, purely additive. No existing table's schema changes. No backfill possible or required (Non-Functional Requirements).
+One new model, purely additive. No existing table's schema changes. No backfill possible or required (Non-Functional Requirements). Migration: `prisma/migrations/20260929000000_add_topic_snapshot/`.
 
 ---
 
 ## Open Questions
 
-1. **Snapshot cadence.** Daily or weekly? The PRD lists this capability's "Typical Usage" as `Monthly`, suggesting weekly capture (with monthly-granularity viewing) is likely sufficient and cheaper than daily — needs a product call before FR-2's job is scheduled.
-2. **Scheduling mechanism.** This codebase has no existing cron/periodic-job infrastructure (`worker/index.js` is purely queue/event-driven). Is a lightweight in-process interval timer inside the existing worker process sufficient for v1, or does this feature need to introduce a real scheduler (e.g. a hosted cron trigger)? Needs an infrastructure decision — prefer the smallest addition that satisfies FR-2, not a new subsystem, consistent with this codebase's "no dedicated graph database," "no new subsystem" precedent set by Rank 13.
-3. **Scope to track (FR-5).** Repository-scope only (fewer, more stable topics; likely cheaper and less noisy), project-scope only (more directly useful per-project, ties into Rank 15), or both (most complete, doubles storage/job work)? Recommend repository-scope only for v1 given the "Monthly" usage cadence implies org-wide trend-watching, not per-project drill-down — revisit if Rank 15 demonstrates real demand for project-scoped evolution.
-4. Should FR-3's "vocabulary drift" be a simple keyword-set diff (added/dropped top keywords between two snapshots) or a more elaborate distributional-distance metric? Recommend the simple diff for v1 — cheap, explainable, and consistent with this feature's otherwise-conservative scope; revisit only if the simple version proves uninformative in practice.
-5. Does closing this feature's data gap retroactively benefit a future Knowledge Gap Detection capability (which the PRD lists separately, unranked/deferred), enough to justify shaping `TopicSnapshot` with that in mind now? Recommend no — build for this feature's own FR-3 needs only; speculative shaping for an unscoped future feature risks over-engineering a v1 that has no working precedent to model against.
+1. ~~**Snapshot cadence.**~~ **Resolved (2026-09-29):** weekly, keyed to the ISO week start (Monday 00:00 UTC) — matches the PRD's "Monthly" typical-usage cadence at cheaper-than-daily granularity.
+2. ~~**Scheduling mechanism.**~~ **Resolved (2026-09-29):** no in-process interval, no new subsystem. This codebase already has the exact precedent needed: `scripts/task-8/flag-stale-documents.mjs` and `scripts/task-5d/detect-knowledge-gaps.mjs` are standalone scripts invoked periodically by an external ops-level scheduler, not built-in cron. Implemented the same way as `scripts/task-17/capture-topic-snapshots.mjs` (`npm run task17:capture-snapshots`).
+3. ~~**Scope to track (FR-5).**~~ **Resolved (2026-09-29):** repository-scope only, per this doc's own recommendation. Also confirmed to be the only scope `refreshTopicExpertise()` populates `TopicExpertise` for today, so `expertCount` is meaningful without any Rank 15-style expert-computation gap-closing.
+4. ~~Should FR-3's "vocabulary drift" be a simple keyword-set diff...~~ **Resolved (2026-09-29):** simple top-keyword-set diff (added/dropped) between adjacent snapshots, computed at read time.
+5. ~~Does closing this feature's data gap retroactively benefit a future Knowledge Gap Detection capability...~~ **Resolved (2026-09-29):** no — `TopicSnapshot` is shaped only for this feature's own FR-3 needs.
+
+**Implementation-time schema deviation (recorded 2026-09-29, see tracker `17-A`/`17-B` for full reasoning):** the schema below was extended past this section's original proposal. `topicId String?` alone can't serve as the trend view's grouping key, because `onDelete: SetNull` nulls every retired topic's snapshot rows to the same indistinguishable `null`. Added `topicRef String` (stable, set once, the real grouping identity — `topicId` is now only "is this topic still alive"), `periodStart DateTime` (the actual idempotency key FR-2's "same period" language needs — `capturedAt` alone never collides on a retry), and `departmentIds String[]` / `hasUnrestrictedDoc Boolean` (a denormalized RBAC footprint, since a retired topic's `TopicDocument` rows are cascade-deleted along with it and can no longer answer "who could access this topic's documents").
 
 ---
 
