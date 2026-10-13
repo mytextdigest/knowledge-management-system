@@ -69,7 +69,7 @@ How to read each entry:
 - **Today:** what already exists and where.
 - **Open:** decisions the owner must make in their requirements doc, and ❓ items waiting on NYPA's answers.
 
-The owner turns their workstream's entries into a full `REQUIREMENTS_EKP_<WORKSTREAM>.md` (see §4 Workflow). **Expand, don't shrink:** keep every "Done when" bullet. You can add bullets but not drop them without team agreement.
+The owner details these entries in their workstream document under `docs/ekp/phase1/` (see §4 Workflow). **Expand, don't shrink:** keep every "Done when" bullet. You can add bullets but not drop them without team agreement.
 
 ### Workstream A: M365 & Connectors (Johurul)
 
@@ -241,9 +241,9 @@ E6 recommendations, E8 cited and permission-aware answers, E9 follow-ups, E17 gr
 →  5. Self-test against "Done when"  →  6. PR + review  →  7. Merge to dev  →  8. Update status
 ```
 
-1. **Write the requirements doc.** Expand your workstream's §3 entries into `docs/ekp/REQUIREMENTS_EKP_<WORKSTREAM>.md`, using the existing Tier 2 format: Problem, Scope / Out of scope, Functional Requirements (FR-1…, each tagged with its E-number), Non-Functional Requirements, Data Model Impact, Open Questions, Acceptance Criteria. Copy every "Done when" bullet into Acceptance Criteria.
-2. **Review before coding.** Johurul plus one teammate review within 1 working day. Agree on the data model and any shared-file changes here, not in the PR.
-3. **Create the tracker.** Use `docs/ekp/TRACKER_EKP_<WORKSTREAM>.md` in the existing tracker format (Task ID, Status TODO/IN_PROGRESS/DONE/BLOCKED, Depends On, dates). Task IDs: `A-1`, `B-3`, …
+1. **Write the workstream document.** One document per workstream, in `docs/ekp/phase1/` for Phase 1 (`WS_A_M365_CONNECTORS.md`, `WS_B_GOVERNANCE_LIFECYCLE.md`). It links to the product requirements and implementation specifications instead of copying them, and holds: scope (E-numbers and FR numbers), working assumptions, the shared design for the workstream, one short section per package (design, edge cases, open questions, acceptance tests), cross-workstream dependencies and the tracker. Every "Done when" bullet appears in a package's acceptance tests. Package sections are detailed just before each package starts, not all up front.
+2. **Review before coding.** Johurul plus one teammate review the shared design and the first package within 1 working day, then each later package section before it starts. Agree on the data model and any shared-file changes here, not in the PR.
+3. **Use the tracker.** The tracker is the last section of the workstream document (Task ID, Status TODO/IN_PROGRESS/REVIEW/DONE/BLOCKED, Depends On, PR, Tests). Task IDs: `A-1`, `B-3`, …
 4. **Build on a branch.** Branch off the latest `dev` as `feature/ekp-<workstream>-<short-name>` (e.g. `feature/ekp-b-audit-log`). Keep PRs small, one FR or a few related tasks each. Don't hold a whole workstream in one PR.
 5. **Self-test.** Walk through every Acceptance Criteria bullet. Add or extend `node --test` tests. Verify data changes with read-only Prisma queries. Check RBAC: a member and a guest must not see or do what they shouldn't.
 6. **Open a PR into `dev`.**
@@ -339,6 +339,6 @@ The single status board. **Update it in the same PR that completes a requirement
 | Who | Task |
 |---|---|
 | All | Kickoff meeting: confirm Phase 1 scope (A + B). Read this doc and the RFP gap analysis. |
-| Johurul | Send the NYPA questions (due 14 Oct). Write `REQUIREMENTS_EKP_A.md`. Start Microsoft single sign-on (S2), since per-file SharePoint permissions depend on it. |
-| Sandeep & Simran | Write `REQUIREMENTS_EKP_B.md` together and **agree the split of B's 8 requirements** between you. Define the audit event format first (everyone uses it), then start E23 audit logging. |
-| All | By the end of week 1, the A and B requirements docs are reviewed and both trackers created. |
+| Johurul | Send the NYPA questions (due 14 Oct). Review `phase1/WS_A_M365_CONNECTORS.md`. Start Microsoft single sign-on (S2), since per-file SharePoint permissions depend on it. |
+| Sandeep & Simran | Review `phase1/WS_B_GOVERNANCE_LIFECYCLE.md` together and **agree the split of B's 8 requirements** between you (suggested lanes in its §1.1). Define the audit event format first (everyone uses it), then start E23 audit logging. |
+| All | By the end of week 1, the shared design and first package of both workstream documents are reviewed, and tracker owners are filled in. |
