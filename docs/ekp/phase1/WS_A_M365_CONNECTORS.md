@@ -6,7 +6,7 @@
 | **Requirements** | E2, E12, E32 + S2 (Microsoft sign-in, RFP §6) |
 | **Foundations owned** | F1 central document access, F3 scheduled jobs |
 | **Phase 1 window** | 13 Oct – 22 Nov 2026 (6 weeks, Mon–Sat) |
-| **Status** | Shared design + A1 ready for review. A2–A4 outlined; detail each section before it starts. |
+| **Status** | Shared design + A1 decided (updated 15 Oct, see §7). A2–A3 outlined; detail each section before it starts. Content Server deferred to after award. |
 
 **Source documents (don't copy from them, link to them):**
 - Requirements and acceptance criteria: [KMS_EKP_PRODUCT_REQUIREMENTS_SPECIFICATION.md](../KMS_EKP_PRODUCT_REQUIREMENTS_SPECIFICATION.md) (E2, E12, E32)
@@ -19,45 +19,64 @@
 
 | Package | Covers (PRS FR numbers) | Foundations | Weeks |
 |---|---|---|---|
-| **A1** Microsoft sign-in | E32.1, S2 | — | 1–2 (+ SAML in 6) |
-| **A2** SharePoint per-file permissions + scheduled sync | E2.2, E2.3, E2.4, E2.5, E2.6, E2.7 | F1, F3 | 1 (F1), 3–4 |
+| **A1** Microsoft sign-in (OIDC, then SAML 2.0) | E32.1, S2 | — | 1–2 (OIDC), 3 (SAML) |
+| **A2** SharePoint per-file permissions + scheduled sync | E2.2, E2.3, E2.4, E2.5, E2.6, E2.7 | F1, F3 | 1 (F1), 2 (identity by email), 3–4 |
 | **A3** SharePoint pages, deep links, SharePoint as master copy | E12.1, E12.3, E12.4, E32.2, E32.3, E32.4, E32.5 | — | 5 |
-| **A4** ServiceNow + Content Server connectors | E2.1, E2.8, E12.2 | — | 6 / after award |
+| **A4** ServiceNow connector (stretch) · Content Server (after award) | E2.1, E2.8, E12.2 | — | 6 (stretch) / after award |
 
 **Out of scope for Phase 1:**
 - E32.6 tag write-back to SharePoint managed metadata (depends on Workstream C taxonomy).
 - SharePoint on-premises (unless NYPA's answers require it; see §2).
 - Search ranking changes and search analytics (Workstreams C and D, F7).
+- **Content Server connector build** (design note only). It's on-premises at NYPA, has no test instance before award, and needs a network path from KMS to NYPA's network (VPN, private link or an on-premises sync agent). This is an architecture decision for after award.
+- OAuth/token authentication for KMS APIs (the "OAuth for APIs" half of S2): Workstream G.
 
 ## 2. Working Assumptions (until NYPA answers)
 
-NYPA won't register KMS in their tenant or give test access until after the award, so we build against our own test tenant (`nextgenerationinnovation.onmicrosoft.com`, mock org "NGI") and state these assumptions in the proposal. Revisit this table when the answers arrive (expected 19 Oct).
+NYPA won't register KMS in their tenant or give test access until after the award, so we build against our own test tenant (`nextgenerationinnovation.onmicrosoft.com`, mock org "NGI") and state these assumptions in the proposal.
+
+**The questions haven't been sent to NYPA**, so we build on these assumptions until award. After award, NYPA's design team will review the design. Expect changes then, and keep each assumption behind one setting or one module so it can change without a rewrite.
 
 | # | Assumption we build on | Why | Cost if NYPA says otherwise |
 |---|---|---|---|
 | AS-1 | **SharePoint Online** (M365), not on-premises | NYPA's RFP says "M365"; Graph only covers Online | On-premises needs a different connector (SharePoint REST/CSOM). Large. |
 | AS-2 | **Per-file permissions** are enforced (not just per site) | Safest reading of "respects original permissions". Site-level is a subset. | None: per-file also covers site-level. |
-| AS-3 | **The customer registers the KMS app in their own Entra tenant** (tenant id, client id, secret/certificate entered in KMS admin settings) | Most utilities don't consent to vendor multi-tenant apps | None: a multi-tenant app can be added later. |
-| AS-4 | **OIDC first, SAML 2.0 second** | OIDC is native to NextAuth and Entra. The PRS says SAML "must", so it follows in week 6. | If NYPA mandates SAML only, SAML moves earlier. |
+| AS-3 | **Two multi-tenant KMS apps in Entra, one per purpose:** (1) the existing **SharePoint connector app** (`MSGRAPH_CLIENT_ID`), used by org admins at connect time and by the worker for sync and permission lookups; (2) a new **KMS Sign-in app** (`ENTRA_SSO_CLIENT_ID`), used by every user to sign in, with sign-in scopes only. The customer's admin consents to each once. | Least privilege: the app every user touches holds no data permissions, and its secret lives only in the web app. The customer can assign sign-in to users/groups and apply Conditional Access without affecting sync. SSO and SharePoint can be enabled independently. | If NYPA refuses vendor multi-tenant apps, support customer-registered apps (tenant id, client id, secret in org settings). About 2 days. |
+| AS-4 | **SAML 2.0 is required** (RFP §6 S2 says "Login with NYPA Active Directory (SAML)"; PRS E32.1 says SAML must, OIDC may). **Build OIDC first** (weeks 1–2) because it's native to NextAuth and proves the shared sign-in path; **SAML follows in week 3** on the same path. | Fastest route to a working Microsoft login, and SAML is still delivered in Phase 1 | If NYPA accepts OIDC, SAML stays as a checkbox feature. If NYPA requires SAML only, nothing changes. |
 | AS-5 | **No-copy mode on by default** for M365 content (SharePoint stays the master copy) | E32.2 | None. |
-| AS-6 | **ServiceNow** built against a free developer instance; **Content Server** designed from OpenText docs and finished after award | No NYPA test systems before award | Content Server may slip past Phase 1 (already accepted in the plan). |
+| AS-6 | **ServiceNow** (Phase 1 stretch) built against a free developer instance, Knowledge Base articles only, permissions per knowledge base mapped to a KMS department. **Content Server** deferred to after award. | No NYPA test systems before award; ServiceNow and Content Server are "target capability", not mandatory | Per-article ServiceNow user criteria and incidents/problems (Q6) are added after award. |
+| AS-7 | **Entra ID is NYPA's identity provider for all KMS users**, including contractors (as B2B guests) | Needed so every user can be mapped to SharePoint permissions | Users outside Entra can still sign in with a password but see no permission-restricted M365 items. |
 
 ## 3. Shared Design (decided once for the whole workstream)
 
 ### 3.1 Identity model
 
-A KMS user can have zero or more external identities. Every ACL check for M365 content goes through the user's Entra object id and their group ids, never through email alone.
+A KMS user can have zero or more external identities. Every ACL check for M365 content goes through the user's Entra object id and their group ids. Email is used only to *find* the object id, never as the ACL principal itself.
+
+**Two ways an identity is created**, so per-file permissions don't wait for SSO:
+
+| `source` | How | Trust |
+|---|---|---|
+| `sso` | User signs in with Microsoft (OIDC or SAML). The `oid` comes from the signed token. | Exact. Always wins. |
+| `email_match` | For a user with `emailVerified: true` in an org that has a SharePoint integration, look up the verified email in that org's tenant with Graph app-only: `GET /users?$filter=mail eq '<email>' or userPrincipalName eq '<email>'`. Exactly one enabled match → store its `oid`. | Good: the email is OTP-verified in KMS. Replaced by `sso` on the first Microsoft sign-in. |
+
+**`email_match` rules:**
+- Only for verified emails; zero or several matches → no identity (fails closed).
+- Re-checked by the `sharepoint.acl-refresh` job (F3). If the Entra account is disabled (`accountEnabled: false`) or gone, the identity is deleted.
+- Needs app-only Graph permission `User.Read.All` (plus `GroupMember.Read.All` for group resolution in A2), on the **SharePoint connector app**, granted in the same admin consent as `Sites.Selected`. The Sign-in app never gets these.
 
 ```prisma
 model UserIdentity {
   id         String   @id @default(cuid())
   userId     String
   provider   String   // "entra"
+  source     String   // "sso" | "email_match"
   tenantId   String
-  externalId String   // Entra object id (oid claim)
+  externalId String   // Entra object id (oid claim / Graph user id)
   email      String?
   createdAt  DateTime @default(now()) @map("created_at")
   lastLoginAt DateTime? @map("last_login_at")
+  verifiedAt DateTime? @map("verified_at") // last email_match check
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -66,7 +85,7 @@ model UserIdentity {
 }
 ```
 
-**Users who sign in with a password (no Entra identity) never see SharePoint items that have an ACL.** This fails closed. Org admins see everything, as today.
+**Users with no Entra identity (neither `sso` nor `email_match`) never see SharePoint items that have an ACL.** This fails closed. Org admins see everything, as today.
 
 ### 3.2 F1: Central document access
 
@@ -75,7 +94,7 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 - New module `src/lib/access/documentAccess.js` exporting:
   - `documentAccessSql({ userId, role, principals, alias })`, the only SQL predicate for document visibility;
   - `canAccessDocument(doc, ctx)` and `filterAccessibleDocuments(docs, ctx)`, the JS equivalents;
-  - `resolvePrincipals(userId)`, which returns the user's Entra object ids plus transitive group ids, cached for 15 minutes.
+  - `resolvePrincipals(userId)`, which returns the user's Entra object ids (from `UserIdentity`, either source) plus transitive group ids, cached for 15 minutes.
 - **The predicate is:** today's rule (role, department, lifecycle, visibility) **AND** (the document has no `DocumentAcl` rows **OR** a row matches one of the user's principals).
 - **Places to refactor** (D1 in the implementation spec):
   - `vectorSearch.js` (3 copies)
@@ -143,7 +162,8 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 | `DocumentAcl` | A2 | `documentId`, `principalType` (user / group / tenant), `principalId`, `source`. Indexed on `documentId` and `principalId`. |
 | `Document.externalUrl` | A3 | Graph `webUrl` |
 | `Document.contentType` | A3 | `file` (default) / `page` / `article` |
-| `OrgIntegration` rows with `provider: "entra_sso"`, `"servicenow"`, `"content_server"` | A1, A4 | Uses the existing table (`@@unique([orgId, provider])`). Secrets encrypted with `src/lib/crypto.js`. |
+| `OrgIntegration` rows with `provider: "entra_sso"`, `"servicenow"` | A1, A4 | Uses the existing table (`@@unique([orgId, provider])`). `entra_sso` stores no secret (KMS Sign-in app credentials are in env). ServiceNow credentials encrypted with `src/lib/crypto.js`. |
+| SAML Jackson tables | A1 (SAML) | Created by `@boxyhq/saml-jackson` itself, **in a separate Postgres schema `jackson`**, not in Prisma's schema, so `prisma migrate diff` doesn't report them as drift. |
 
 **One migration per PR, merged one at a time** (plan §4.3). B also adds `Document` fields, so agree on all `Document` field names in the review of both documents.
 
@@ -151,71 +171,76 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 
 ### A1: Microsoft sign-in (E32.1, S2)
 
-**Status:** ready for review. Build in weeks 1–2.
+**Status:** decided. OIDC in weeks 1–2, SAML in week 3.
+
+**What it is:** a "Sign in with Microsoft" option alongside email/password and OTP. Users sign in with their Entra ID work account and their organization's MFA. It doesn't change documents, search, chat, departments or the worker.
 
 **Finding that shapes the design:**
 - `src/lib/auth.js` configures `PrismaAdapter(prisma)`, but the schema has no `Account`, `Session` or `VerificationToken` models.
 - It works today only because Credentials providers bypass the adapter.
 - An OAuth/OIDC provider would call `adapter.getUserByAccount` and fail.
 
-**Decision (for review):**
-- **Remove the adapter.**
-- Create and link users ourselves in the `signIn` callback, using `UserIdentity`.
-- This keeps one explicit code path and avoids adding three NextAuth tables we wouldn't otherwise use.
+**Decision:**
+- **Remove the adapter.** Create and link users ourselves in the `signIn` callback, using `UserIdentity`. One explicit code path, no unused NextAuth tables.
+- **A separate multi-tenant KMS Sign-in app** (AS-3), not the SharePoint connector app. No per-org client id or secret, and no dynamic per-org providers.
 
 **Design:**
-1. **Per-org SSO configuration:**
-   - stored in `OrgIntegration` with `provider: "entra_sso"`;
-   - `scopeConfig` holds `{ tenantId, clientId, allowedDomains[], groupRoleMap }`;
-   - the client secret is encrypted in `accessToken` via `crypto.js`, as SharePoint does today;
-   - Admin UI: Settings → Single sign-on (super_admin only), with a "Test connection" button.
-2. **Dynamic provider:**
-   - The NextAuth route handler builds `authOptions` per request.
-   - It adds one `AzureADProvider` per org with SSO enabled (`id: "entra-<orgId>"`, `tenantId` from config), cached for 5 minutes.
-   - Static Credentials and OTP providers stay unchanged.
-   - **Spike on day 1:** confirm the NextAuth v4 advanced initialisation works with the App Router handler. If it doesn't, the fallback is one provider per deployment configured from env (fine for a single-tenant NYPA deployment).
-3. **Home realm discovery:**
+1. **App registration (once, new "KMS Sign-in" app in our tenant, multi-tenant, "Accounts in any organizational directory"):**
+   - add the NextAuth redirect URIs (`/api/auth/callback/azure-ad` for each environment);
+   - delegated scopes `openid profile email User.Read`;
+   - optional claims `email`, and `groupMembershipClaims: "SecurityGroup"` so tokens carry group ids.
+2. **Static provider:** one `AzureADProvider` (`id: "azure-ad"`, `tenantId: "organizations"`, client id/secret from new `ENTRA_SSO_CLIENT_ID` / `ENTRA_SSO_CLIENT_SECRET` env). Personal Microsoft accounts are excluded, as in `msGraph.js`.
+3. **Per-org SSO configuration:**
+   - `OrgIntegration` with `provider: "entra_sso"`; `scopeConfig` holds `{ tenantId, allowedDomains[], groupRoleMap, protocol: "oidc" | "saml", passwordLogin: "admins_only" | "all" }`.
+   - `tenantId` is filled in automatically when an admin of that tenant completes the Sign-in app's admin-consent flow (`/adminconsent` returns `tenant`). It must equal the tenant of the org's SharePoint integration when both are enabled; the settings page shows a warning if they differ.
+   - In their tenant, the customer can set "Assignment required" on the KMS Sign-in enterprise app to limit who can sign in, and apply Conditional Access (MFA, compliant device) to it. Neither affects SharePoint sync.
+   - Admin UI: Settings → Single sign-on (super_admin only), with a "Test sign-in" button.
+4. **Home realm discovery:**
    - The login page asks for the email first.
    - If its domain matches an org's `allowedDomains`, the page shows "Continue with Microsoft". Otherwise it shows the password form.
-4. **`signIn` callback:**
-   - Check that the token's `tid` matches the org's configured tenant.
+5. **`signIn` callback** (same code for OIDC and SAML):
+   - Find the org whose `entra_sso` config has the token's `tid`. **No match → reject** (stops any other Microsoft tenant from signing in).
    - Find `UserIdentity` by (`entra`, `tid`, `oid`).
-   - If there's no identity, match an existing `User` by email (Entra email or `preferred_username`, lower-cased) and link it.
+   - If there's none, match an existing `User` by email (`email` claim, lower-cased; `preferred_username` only if it's not a `#EXT#` guest UPN) and link it. An existing `email_match` identity for the same `oid` is upgraded to `source: "sso"`.
    - If there's no user, create one just in time, with `emailVerified: true` and no password.
-   - Ensure an `OrganizationMember` row exists.
-   - Update `lastLoginAt`.
-   - Audit-log `auth.sso_login` and `auth.sso_user_created` (F2).
-5. **Role mapping:**
+   - Ensure an `OrganizationMember` row exists. Update `lastLoginAt`.
+   - Audit-log `auth.sso_login` and `auth.sso_user_created` with today's `logAudit`; switch to `entityType`/`entityId` when B-2 lands.
+6. **Role mapping:**
    - `groupRoleMap: [{ groupId, role, departmentIds[] }]`, applied at each login from the token's `groups` claim.
    - **The highest mapped role wins.**
-   - **If no group matches, the existing manual role is kept** (fallback), and new users become `member`.
+   - **If no group matches, the existing manual role is kept**, and new users become `member`.
    - **Group overage:** if a user is in more than 200 groups, Entra omits the claim, so fetch the groups via Graph `/me/transitiveMemberOf` using the sign-in access token.
-6. **Session:** the JWT carries `userId` and `entraOid` so that A2's `resolvePrincipals` doesn't need a lookup.
-7. **SAML 2.0 (week 6):** evaluate BoxyHQ SAML Jackson as a SAML-to-OIDC bridge, so the same `signIn` path is reused. Decide in week 5 based on NYPA's answer to Q4.
+7. **Password login for SSO orgs:** `passwordLogin: "admins_only"` (default once SSO is on) blocks password/OTP for members and keeps it for super_admins as break-glass.
+8. **Session:** the JWT carries `userId` and `entraOid` so that A2's `resolvePrincipals` doesn't need a lookup.
+9. **SAML 2.0 (week 3):**
+   - Embed `@boxyhq/saml-jackson` as a library inside Next.js API routes (no extra service), storing its data in the `jackson` Postgres schema.
+   - NextAuth's built-in `BoxyHQSAMLProvider` talks to it as if it were an OIDC provider, so the `signIn` callback (step 5) is reused unchanged.
+   - Per org, the admin uploads the IdP metadata XML from their Entra "Enterprise application (SAML)" in Settings → Single sign-on (`protocol: "saml"`). Jackson connection `tenant = orgId`, `product = "kms"`.
+   - Entra must send the `objectidentifier` and `tenantid` claims (and `groups` for role mapping). Document this in the admin setup guide.
+   - Verify end to end with a SAML enterprise app in our test tenant.
 
 **Files touched:**
 - `src/lib/auth.js` (shared, A owns it)
-- `src/app/api/auth/[...nextauth]/route.js`
+- `src/app/api/auth/[...nextauth]/route.js`, new `src/app/api/auth/saml/*` (Jackson endpoints)
 - login page and components
-- new `src/lib/sso/entra.js`
+- new `src/lib/sso/entra.js`, `src/lib/sso/jackson.js`
 - new admin settings page and API `api/org/[orgId]/sso`
 
 **Edge cases:**
 - The same email exists in two orgs: the identity links to the user, and membership is per org (already how KMS works).
 - A user is removed from all mapped groups: keep their membership but downgrade them to `member`. **Never auto-delete users.**
-- The secret expires or is rotated: "Test connection" fails visibly, and password login still works for super_admins.
+- The org's admin revokes consent for the KMS Sign-in app: Microsoft sign-in fails visibly; super_admins can still use a password.
 - A guest (B2B) account in NYPA's tenant has `#EXT#` in the UPN: use the `email` claim, not the UPN.
 
-**Open questions:**
-- Do we allow password login for SSO-enabled domains? Proposed: no for members, yes for super_admin as a break-glass account.
-
 **Acceptance tests** (`scripts/ekp/a/a1-sso.*.test.mjs` + manual test-tenant checklist):
-- [ ] A test-tenant user signs in with Microsoft. A KMS user and `UserIdentity` are created, and they land in the right org.
+- [ ] A test-tenant user signs in with Microsoft (OIDC). A KMS user and `UserIdentity` are created, and they land in the right org.
+- [ ] The same user signs in through SAML and lands on the same KMS user.
 - [ ] An existing password user with the same email signs in with Microsoft and is linked, not duplicated.
 - [ ] A user in a mapped Entra group gets the mapped role and departments. Removing them from the group downgrades them at the next login.
-- [ ] A token from another tenant is rejected.
+- [ ] A token from a tenant with no `entra_sso` config is rejected.
+- [ ] With `passwordLogin: "admins_only"`, a member can't use a password; a super_admin can.
 - [ ] Every SSO login and every user creation is in the audit log.
-- [ ] Password and OTP login still work (regression).
+- [ ] Password and OTP login still work for orgs without SSO (regression).
 
 ### A2: SharePoint per-file permissions + scheduled sync (E2.2–E2.7)
 
@@ -232,10 +257,11 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 - **Permission-only changes:** request delta with `Prefer: deltashowsharingchanges, hierarchicalsharing` (to verify in the test tenant). Items flagged as permission changes only re-fetch their ACL and don't re-download the file.
 - **Safety net:** `sharepoint.acl-refresh` job (F3), a full ACL pass daily.
 - **Enforcement:** the F1 predicate gains the ACL clause.
-  - `resolvePrincipals(userId)`: `UserIdentity.externalId` + Graph `/users/{oid}/transitiveMemberOf` (app-only token), plus `tenant:<tid>`.
+  - `resolvePrincipals(userId)`: `UserIdentity.externalId` (either `sso` or `email_match`, §3.1) + Graph `/users/{oid}/transitiveMemberOf` (app-only token), plus `tenant:<tid>`.
+  - **This works without Microsoft sign-in**, so A2 doesn't wait for A1.
   - Cached for 15 minutes.
 - **Scheduled sync:** register `sharepoint.sync` per org. The interval comes from the integration settings (default 60 min, NFR-6). "Sync Now" stays.
-- **Graph permissions:** document exactly what NYPA's admin must grant (`Sites.Selected` + whatever reading item permissions and group membership needs). Verify in the test tenant.
+- **Graph permissions:** document exactly what NYPA's admin must grant: `Sites.Selected`, `User.Read.All`, `GroupMember.Read.All` (app-only), plus the delegated sign-in scopes. Verify in the test tenant.
 
 **Known risks:**
 - **SharePoint site groups** (Owners / Members / Visitors) appear as `siteGroup` principals. Graph doesn't expand them.
@@ -249,7 +275,9 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 - [ ] File shared with user A only: A sees it in search, chat, citations, recommendations, graph and preview. B never does.
 - [ ] Removing A's access in SharePoint removes it from A's results after the next scheduled sync, with no manual action.
 - [ ] Access granted via an Entra group works, and removing the user from the group revokes it.
-- [ ] A password-only user sees no ACL-restricted items.
+- [ ] A password user whose verified email matches an Entra user sees exactly what that Entra user can see (`email_match`).
+- [ ] A password user with no Entra match sees no ACL-restricted items.
+- [ ] Disabling the Entra account removes the `email_match` identity at the next `acl-refresh`.
 - [ ] Sync history shows each scheduled run. A 5,000-item sync completes without errors.
 - [ ] The F1 parity test still passes for all non-SharePoint documents.
 
@@ -280,29 +308,36 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 - [ ] With no-copy on, a synced file leaves no S3 object, and its preview still works.
 - [ ] Edit in SharePoint → updated in KMS after the next sync (E32 acceptance).
 
-### A4: ServiceNow + Content Server connectors (E2.1, E2.8, E12.2)
+### A4: ServiceNow connector (stretch) · Content Server (after award) (E2.1, E2.8, E12.2)
 
-**Status:** outlined. Detail before week 6. Depends on NYPA's answers to Q3 and Q6.
+**Status:** outlined. ServiceNow is a Phase 1 stretch for week 6; Content Server is deferred. Both are "target capability" in the RFP, not mandatory.
 
-**Design summary:**
-- **`ServiceNowConnector`:**
-  - Table API `kb_knowledge` (published articles), incremental by `sys_updated_on`.
-  - Saved as `contentType: "article"`.
-  - ACL from the article's knowledge-base user criteria, mapped to `DocumentAcl` (approach to confirm on the developer instance).
-- **`ContentServerConnector`:**
-  - Interface and design from the OpenText REST API v2 docs.
-  - Implementation and tests after NYPA provides an instance.
-- **One ranked result list:** all sources already land in the same `Document` / `Chunk` index, so E2.1 only needs a source label and filter in the UI.
+**Scope for both:** read-only ingestion, the same pattern as SharePoint (`BaseConnector`). Content is indexed, searchable and citable, with a link back to the original. Nothing is written back to the source system.
 
-**Acceptance tests:**
-- [ ] A ServiceNow KB article from the developer instance is searchable and citable, with a link back to the original. User-criteria restrictions are enforced.
+**`ServiceNowConnector` (Phase 1 stretch):**
+- **What it is:** ServiceNow is a cloud IT service management platform; its Knowledge Base module holds how-to and support articles.
+- **What we ingest:** published Knowledge Base articles (Table API `kb_knowledge`), incremental by `sys_updated_on`, saved as `contentType: "article"`. Incidents/problems only if NYPA asks (Q6), after award.
+- **Permissions (first version):** each knowledge base is mapped to a KMS department in the integration settings, like SharePoint sites today. Per-article "user criteria" enforcement is after award.
+- **Auth:** basic auth or OAuth client credentials for a read-only integration user, encrypted in `OrgIntegration` (`provider: "servicenow"`).
+- **Test system:** free ServiceNow developer instance.
+
+**Content Server (after award):**
+- **What it is:** OpenText Content Server (formerly Livelink), an enterprise document management product, usually installed on the customer's own servers.
+- **Phase 1 deliverable:** a short design note only (REST API v2 nodes, categories metadata, per-node permissions → `DocumentAcl`).
+- **Blocked on:** an NYPA test instance, the Content Server version, and a network path from KMS to NYPA's on-premises network (VPN, private link or an on-premises sync agent).
+
+**One ranked result list:** all sources already land in the same `Document` / `Chunk` index, so E2.1 only needs a source label and filter in the UI.
+
+**Acceptance tests (ServiceNow):**
+- [ ] A ServiceNow KB article from the developer instance is searchable and citable, with a link back to the original.
+- [ ] An article in a knowledge base mapped to department X is visible only to users with access to department X.
 - [ ] Results from SharePoint, ServiceNow and manual uploads appear in one list, labelled by source.
 
 ## 5. Dependencies with Workstream B
 
 | A needs from B | When | B needs from A | When |
 |---|---|---|---|
-| F2 `logAudit` with `entityType`/`entityId` | week 2 (A1 audit events) | F1 predicate in place, so soft delete, supersede and `in_review` are filtered everywhere | week 1–2 |
+| F2 `logAudit` with `entityType`/`entityId` | week 2 (A1 uses today's `logAudit` until then; not blocking) | F1 predicate in place, so soft delete, supersede and `in_review` are filtered everywhere | week 1–2 |
 | F5 `getSetting` (`sharepoint.storeOriginals`, sync interval) | week 3 | F3 scheduler and job registry | week 3 (B's stale/review jobs from week 5) |
 | F4 `notify` (sync failure alerts to admins) | week 4 (optional) | `Document` field names agreed (`externalUrl`, `contentType`) | review, week 1 |
 
@@ -327,25 +362,36 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 |---------|-------|--------|----------|------------|---------|-----------|
 | `A-1` | Finalize this document (shared design + A1) | `TODO` | Johurul | — | | |
 | `A-2` | A2 · F1: consolidate the access predicate into `src/lib/access/documentAccess.js` (no behaviour change) + parity test | `TODO` | Johurul | `A-1` | | |
-| `A-3` | A1 · Spike: NextAuth dynamic per-org Entra provider in the App Router | `TODO` | Johurul | `A-1` | | |
+| `A-3` | A1 · Spike: register the KMS Sign-in app; sign in from the test tenant (redirect URIs, scopes, groups claim, `tid` → org) | `TODO` | Johurul | `A-1` | | |
 | `A-4` | A1 · `UserIdentity` migration; remove `PrismaAdapter` | `TODO` | Johurul | `A-3` | | |
-| `A-5` | A1 · Entra OIDC sign-in: SSO config API + admin page, `signIn` callback, JIT user, home realm discovery | `TODO` | Johurul | `A-4`, `B-2` | | |
+| `A-5` | A1 · Entra OIDC sign-in: SSO config API + admin page, `signIn` callback, JIT user, home realm discovery, `passwordLogin` rule | `TODO` | Johurul | `A-4` | | |
 | `A-6` | A1 · Group → role/department mapping, including group overage | `TODO` | Johurul | `A-5` | | |
 | `A-7` | A2 · F3: `ScheduledJob` migration, worker scheduler loop, job registry, admin page | `TODO` | Johurul | `A-1` | | |
 | `A-8` | A2 · Spike: SharePoint site-group expansion + `deltashowsharingchanges` in the test tenant | `TODO` | Johurul | `A-1` | | |
 | `A-9` | A2 · `DocumentAcl` migration + ACL capture in sync | `TODO` | Johurul | `A-2`, `A-8` | | |
-| `A-10` | A2 · F1 ACL clause + `resolvePrincipals` (cached) | `TODO` | Johurul | `A-6`, `A-9` | | |
+| `A-10` | A2 · F1 ACL clause + `resolvePrincipals` (cached) | `TODO` | Johurul | `A-9`, `A-21` | | |
 | `A-11` | A2 · Scheduled `sharepoint.sync`, permission-only re-sync, daily `acl-refresh` | `TODO` | Johurul | `A-7`, `A-9`, `B-4` | | |
 | `A-12` | A2 · End-to-end permission tests + 5,000-item load test | `TODO` | Johurul | `A-10`, `A-11` | | |
 | `A-13` | A3 · `externalUrl` + "Open in SharePoint" in the UI | `TODO` | Johurul | `A-9` | | |
 | `A-14` | A3 · No-copy mode + `getDocumentBytes` + preview endpoint | `TODO` | Johurul | `A-13`, `B-4` | | |
 | `A-15` | A3 · SharePoint site pages ingestion (`contentType: page`) | `TODO` | Johurul | `A-9` | | |
-| `A-16` | A1 · SAML 2.0 support (decide after NYPA's Q4 answer) | `TODO` | Johurul | `A-5` | | |
-| `A-17` | A4 · ServiceNow connector (developer instance) | `TODO` | Johurul | `A-9` | | |
-| `A-18` | A4 · Content Server connector: design now, build after award | `TODO` | Johurul | `A-9` | | |
+| `A-16` | A1 · SAML 2.0 via embedded SAML Jackson + `BoxyHQSAMLProvider` (required by RFP §6 S2) | `TODO` | Johurul | `A-5` | | |
+| `A-17` | A4 · ServiceNow connector, KB articles only, knowledge base → department (stretch, developer instance) | `TODO` | Johurul | `A-9` | | |
+| `A-18` | A4 · Content Server: design note in Phase 1; build after award (needs NYPA instance + network path) | `BLOCKED` | Johurul | NYPA | | |
 | `A-19` | Phase 1 integration & cross-testing (A + B together, all roles) | `TODO` | All 3 | `A-12`, `A-15`, `B-21` | | |
 | `A-20` | Update RTM status for E2, E12, E32 in the plan; re-score Phase 1 | `TODO` | Johurul | `A-19` | | |
+| `A-21` | A2 · Identity by verified email (`email_match` via Graph app-only) + re-check in `acl-refresh` | `TODO` | Johurul | `A-4` | | |
 
 ## 7. Implementation Notes
 
-Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: dynamic providers work, fallback not needed`).
+Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: Sign-in app works in the test tenant`).
+
+- `2026-10-15 · design review (Johurul):`
+  - **Sign-in uses a multi-tenant KMS app** instead of a customer-registered app per org. Removes dynamic per-org providers and per-org secrets. Customer-registered apps become a fallback (AS-3).
+  - **SAML 2.0 is required** (RFP §6 S2) and moves from week 6 to week 3. OIDC is still built first.
+  - **Per-file permissions don't depend on SSO.** Users are mapped to Entra by verified email (`email_match`) until they sign in with Microsoft. New task `A-21`; `A-10` no longer depends on `A-6`.
+  - **Content Server deferred to after award** (on-premises, no test instance, network path undecided). ServiceNow is a week-6 stretch, KB articles only.
+  - `A-5` no longer blocks on `B-2`: A1 uses today's `logAudit` and switches to the F2 fields when they land.
+- `2026-10-15 · Johurul:`
+  - **Separate Sign-in app** from the SharePoint connector app (AS-3): the connector app is admin-only and holds data permissions; the Sign-in app is used by every user and holds sign-in scopes only.
+  - **NYPA questions not sent.** Build on §2 assumptions; NYPA's design team reviews after award and we adjust then.
