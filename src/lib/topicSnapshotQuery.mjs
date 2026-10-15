@@ -14,7 +14,7 @@
 // snapshot rows, without a live join. Access is granted if the union of that footprint across
 // every snapshot ever captured for a `topicRef` shows at least one always-public document, or
 // the viewer belongs to at least one department that ever contributed — the same "any
-// accessible document" permissiveness used by getAccessibleRelatedDocuments/accessSql
+// accessible document" permissiveness used by getAccessibleRelatedDocuments/knowledgeAccessSql
 // elsewhere in this codebase, not a stricter "every department" rule.
 
 const DEFAULT_HISTORY_LIMIT = 104; // ~2 years of weekly snapshots

@@ -96,14 +96,16 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
   - `canAccessDocument(doc, ctx)` and `filterAccessibleDocuments(docs, ctx)`, the JS equivalents;
   - `resolvePrincipals(userId)`, which returns the user's Entra object ids (from `UserIdentity`, either source) plus transitive group ids, cached for 15 minutes.
 - **The predicate is:** today's rule (role, department, lifecycle, visibility) **AND** (the document has no `DocumentAcl` rows **OR** a row matches one of the user's principals).
-- **Places to refactor** (D1 in the implementation spec):
-  - `vectorSearch.js` (3 copies)
-  - `knowledgeContext.js` (`accessSql`)
-  - `expertDiscoveryQuery.mjs`
-  - `decisionIntelligence.js`
-  - `lessonsIntelligence.js`
-  - `src/lib/documentAccess.js`
-  - route-level checks in `api/documents/[id]/route.js` and the org repository route
+- **Places refactored in A-2:**
+  - `vectorSearch.js` (3 copies) and `decisionIntelligence.js` → `searchAccessSql`
+  - `knowledgeContext.js` / `knowledgeGraph.js` (`accessSql`) → `knowledgeAccessSql`
+  - chat workflow document (`api/org/[orgId]/chat`) → `searchAccessWhere`
+  - org repository listing → `repositoryAccessWhere`
+  - document page (`api/documents/[id]`) → `canViewDocument`
+  - interactions route → `canInteractWithDocument`
+  - `decisionAccess.js` → `canAccessDocument`
+  - `src/lib/documentAccess.js` (timelines) → moved as `filterAccessibleDocuments`; old file deleted
+- **Not moved:** `expertDiscoveryQuery.mjs` has a topic-level rule (viewer *and* expert must be connected to the document); A-10 adds the ACL clause there directly. `lessonsIntelligence.js` checks lessons, not documents, so it's out of F1.
 - **Delivery in two PRs:**
   1. **Refactor only, no behaviour change.** A parity test (`scripts/ekp/f1-access-parity.test.mjs`) runs every search and query path for each role on the seeded data and asserts identical results before and after.
   2. **Add the ACL clause** (in A2), once `DocumentAcl` exists.
@@ -360,8 +362,8 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
-| `A-1` | Finalize this document (shared design + A1) | `TODO` | Johurul | — | | |
-| `A-2` | A2 · F1: consolidate the access predicate into `src/lib/access/documentAccess.js` (no behaviour change) + parity test | `TODO` | Johurul | `A-1` | | |
+| `A-1` | Finalize this document (shared design + A1) | `DONE` | Johurul | — | 2026-10-13 | 2026-10-15 |
+| `A-2` | A2 · F1: consolidate the access predicate into `src/lib/access/documentAccess.js` (no behaviour change) + parity test | `REVIEW` | Johurul | `A-1` | 2026-10-15 | |
 | `A-3` | A1 · Spike: register the KMS Sign-in app; sign in from the test tenant (redirect URIs, scopes, groups claim, `tid` → org) | `TODO` | Johurul | `A-1` | | |
 | `A-4` | A1 · `UserIdentity` migration; remove `PrismaAdapter` | `TODO` | Johurul | `A-3` | | |
 | `A-5` | A1 · Entra OIDC sign-in: SSO config API + admin page, `signIn` callback, JIT user, home realm discovery, `passwordLogin` rule | `TODO` | Johurul | `A-4` | | |
@@ -395,3 +397,11 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
 - `2026-10-15 · Johurul:`
   - **Separate Sign-in app** from the SharePoint connector app (AS-3): the connector app is admin-only and holds data permissions; the Sign-in app is used by every user and holds sign-in scopes only.
   - **NYPA questions not sent.** Build on §2 assumptions; NYPA's design team reviews after award and we adjust then.
+- `2026-10-15 · A-2 (F1 refactor):`
+  - Moved every document-visibility rule into `src/lib/access/documentAccess.js`. Parity test `scripts/ekp/f1-access-parity.test.mjs` (`EKP_DB_TESTS=1 npm run ekp:f1:test`) compares each new function with a verbatim copy of the old code on a 270-document × 6-role seeded matrix (inside a rolled-back transaction) and on all existing org members. Both pass; a deliberate change makes it fail.
+  - **The old copies don't agree with each other.** Preserved as-is (no behaviour change); decide before A-10:
+    1. **dept_admin sees every department's documents, including drafts,** on the repository page and document page (`isOrgAdmin`), but only their own departments in chat. Likely a bug.
+    2. **Archived documents** are visible to members on the repository and document pages but never in search, chat or the graph.
+    3. **Timelines** check only the document's own department, not its project's department.
+    4. **Knowledge graph / related documents:** super_admin sees every document (drafts, private); uploaders always see their own. Search doesn't do either.
+    5. **Interactions:** the project owner can always record interactions on the project's documents.

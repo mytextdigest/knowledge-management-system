@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { accessSql } from "@/lib/knowledgeContext";
+import { knowledgeAccessSql } from "@/lib/access/documentAccess";
 
 export const GRAPH_DEFAULT_DEPTH = 2;
 export const GRAPH_NODE_LIMIT = 75;
@@ -13,7 +13,7 @@ const addEdge = (edges, sourceType, sourceId, targetType, targetId, type, proven
 };
 
 async function accessibleDocumentIds({ orgId, userId, isSuperAdmin }) {
-  const access = accessSql({ userId, isSuperAdmin, alias: "d" });
+  const access = knowledgeAccessSql({ userId, isSuperAdmin, alias: "d" });
   const rows = await prisma.$queryRaw`SELECT d.id FROM "Document" d WHERE d."orgId" = ${orgId} AND ${access}`;
   return rows.map((r) => r.id);
 }

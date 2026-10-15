@@ -2,34 +2,12 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAccessibleExpertsWithPrisma } from "@/lib/expertDiscoveryQuery.mjs";
 import { RELATIONSHIP_MIN_CONFIDENCE } from "./relationshipScoringPolicy.mjs";
+import { knowledgeAccessSql } from "@/lib/access/documentAccess";
 
 export const RELATED_DOCUMENT_MIN_WEIGHT = RELATIONSHIP_MIN_CONFIDENCE;
 
-export function accessSql({ userId, isSuperAdmin = false, alias = "d" }) {
-  const table = Prisma.raw(`"${alias}"`);
-  return Prisma.sql`(
-    ${isSuperAdmin}
-    OR (${table}.scope = 'repository' AND ${table}.lifecycle = 'published' AND (
-      ${table}."departmentId" IS NULL OR EXISTS (
-        SELECT 1 FROM "DepartmentMember" dm
-        WHERE dm."departmentId" = ${table}."departmentId" AND dm."userId" = ${userId}
-      )
-    ))
-    OR EXISTS (
-      SELECT 1 FROM "Project" p
-      WHERE p.id = ${table}."projectId" AND p.scope = 'org' AND (
-        ${isSuperAdmin} OR EXISTS (
-          SELECT 1 FROM "DepartmentMember" pm
-          WHERE pm."departmentId" = p."departmentId" AND pm."userId" = ${userId}
-        )
-      )
-    )
-    OR ${table}."userId" = ${userId}
-  )`;
-}
-
 export async function getAccessibleRelatedDocuments({ documentId, orgId, userId, isSuperAdmin = false, limit = 6 }) {
-  const access = accessSql({ userId, isSuperAdmin, alias: "related" });
+  const access = knowledgeAccessSql({ userId, isSuperAdmin, alias: "related" });
   return prisma.$queryRaw`
     SELECT related.id, related.filename, related.category, related."departmentId",
            dept.name AS "departmentName", r.type, r.weight, r.evidence
@@ -53,7 +31,7 @@ export async function getAccessibleExperts(args) {
 export async function expandWithRelatedDocuments({ rows, orgId, userId, isSuperAdmin = false, limit = 8 }) {
   const seedIds = [...new Set(rows.slice(0, 4).map((row) => row.document_id).filter(Boolean))];
   if (!seedIds.length) return rows.slice(0, limit);
-  const access = accessSql({ userId, isSuperAdmin, alias: "d" });
+  const access = knowledgeAccessSql({ userId, isSuperAdmin, alias: "d" });
   const related = await prisma.$queryRaw`
     SELECT DISTINCT ON (d.id) NULL::text AS id, NULL::text AS text, d.summary,
       NULL::int AS chunk_index, d.id AS document_id, NULL::jsonb AS metadata,
@@ -83,8 +61,8 @@ export async function expandWithRelatedDocuments({ rows, orgId, userId, isSuperA
 
 
 export async function getAccessibleOrgRelationships({ orgId, userId, isSuperAdmin = false, limit = 100 }) {
-  const fromAccess = accessSql({ userId, isSuperAdmin, alias: "a" });
-  const toAccess = accessSql({ userId, isSuperAdmin, alias: "b" });
+  const fromAccess = knowledgeAccessSql({ userId, isSuperAdmin, alias: "a" });
+  const toAccess = knowledgeAccessSql({ userId, isSuperAdmin, alias: "b" });
   const safeLimit = Prisma.raw(String(Math.max(1, Math.min(250, Number(limit) || 100))));
   const relationships = await prisma.$queryRaw`
     SELECT r.id, 'relationship'::text AS kind, r.type, r.weight, r.evidence,

@@ -39,8 +39,9 @@ test('document mutations use shared management policy and GET exposes real permi
 });
 
 test('repository list and detail visibility are aligned for promoted projects', () => {
-  const text = read('src/app/api/org/[orgId]/repository/route.js');
-  assert.match(text, /departmentId:\s*\{ in: userDeptIds \}/);
+  // The rule moved to the F1 central access module (A-2).
+  assert.match(read('src/app/api/org/[orgId]/repository/route.js'), /repositoryAccessWhere/);
+  assert.match(read('src/lib/access/documentAccess.js'), /project: \{ scope: "org", orgId, departmentId:\s*\{ in: userDeptIds \} \}/);
 });
 
 test('spreadsheet viewer and attachment download are available', () => {

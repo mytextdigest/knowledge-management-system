@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { computeBM25, tokenize } from "@/lib/keywordSearch";
 import { scopeSql } from "@/lib/vectorSearch";
+import { searchAccessSql } from "@/lib/access/documentAccess";
 import { STATUS_LABELS, certaintyRank } from "@/lib/decisionStatus";
 
 // Decision Extraction v2: "pending" (awaiting reviewer) and "rejected" (not a
@@ -41,31 +42,12 @@ export function isDecisionQuestion(question) {
 // visible only if its source document is a published repository document in
 // a department the user belongs to (or an unassigned department), or is
 // attached to an org-scope project whose department the user belongs to.
-// Kept as one fragment so the repository surface can never drift from what
+// It is the same search policy chat retrieval uses (F1, src/lib/access/
+// documentAccess.js), so the repository surface can never drift from what
 // chat grounding already allows. See REQUIREMENTS_DECISION_INTELLIGENCE_REPOSITORY.md's
 // Non-Functional Requirements.
 function decisionAccessSql({ orgId, userId, isSuperAdmin }) {
-  return Prisma.sql`
-    (
-      (d.scope = 'repository'
-       AND d.lifecycle = 'published'
-       AND (${isSuperAdmin} OR d."departmentId" IS NULL OR dm."userId" IS NOT NULL))
-      OR
-      EXISTS (
-        SELECT 1 FROM "Project" p
-        WHERE p.id = d."projectId"
-          AND p.scope = 'org'
-          AND p."orgId" = ${orgId}
-          AND (
-            ${isSuperAdmin}
-            OR EXISTS (
-              SELECT 1 FROM "DepartmentMember" pm
-              WHERE pm."departmentId" = p."departmentId" AND pm."userId" = ${userId}
-            )
-          )
-      )
-    )
-  `;
+  return searchAccessSql({ userId, orgId, isSuperAdmin });
 }
 
 /**

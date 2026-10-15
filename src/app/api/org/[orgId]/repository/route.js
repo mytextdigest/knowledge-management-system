@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isOrgAdmin } from "@/lib/orgGuard";
 import { orgSearch } from "@/lib/vectorSearch";
+import { repositoryAccessWhere } from "@/lib/access/documentAccess";
 import { resolveOpenAIKey } from "@/utils/key_helper";
 
 const PAGE_SIZE = 20;
@@ -45,34 +46,9 @@ export async function GET(req, { params }) {
   });
   const userDeptIds = memberships.map((m) => m.departmentId);
 
-  // Source A: documents directly scoped to the org repository
-  // Org admins can see every department's docs; everyone else only sees
-  // org-wide docs (no dept) or docs in their own depts
-  const sourceA = isOrgAdmin(role)
-    ? { scope: "repository", orgId }
-    : {
-        scope: "repository",
-        orgId,
-        OR: [
-          { departmentId: null },
-          { departmentId: { in: userDeptIds } },
-        ],
-      };
-
-  // Source B: documents from projects promoted to org scope.
-  // Keep listing visibility aligned with the document detail route: for
-  // non-admins, org promotion does not bypass the project's department gate.
-  const sourceB = isOrgAdmin(role)
-    ? { project: { scope: "org", orgId } }
-    : {
-        project: {
-          scope: "org",
-          orgId,
-          departmentId: { in: userDeptIds },
-        },
-      };
-
-  const andConditions = [{ OR: [sourceA, sourceB] }];
+  // Repository documents plus documents of org-scope projects, limited to the
+  // user's departments unless they're an org admin (F1 browse policy).
+  const andConditions = [repositoryAccessWhere({ orgId, role, userDeptIds })];
 
   // Non-admins cannot see draft docs
   if (lifecycle === "suggested_review") {

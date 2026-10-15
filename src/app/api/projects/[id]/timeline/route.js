@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { resolveOrgRole } from "@/lib/orgGuard";
-import { filterAccessibleDocuments } from "@/lib/documentAccess";
+import { filterAccessibleDocuments } from "@/lib/access/documentAccess";
 
 // FR-P2-7: simple ordered timeline of decision dates extracted for this
 // project's documents (see worker/index.js's processSummarizationJob).

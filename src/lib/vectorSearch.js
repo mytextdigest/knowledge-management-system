@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { computeBM25, tokenize } from "@/lib/keywordSearch";
+import { searchAccessSql } from "@/lib/access/documentAccess";
 
 export function scopeSql({ scope = "organization", departmentId = null, userId = null }) {
   if (scope === "department") {
@@ -89,25 +90,7 @@ export async function orgSearch(
     WHERE d."orgId" = ${orgId}
       AND c.embedding_vec IS NOT NULL
       ${scopeFilter}
-      AND (
-        (d.scope = 'repository'
-         AND d.lifecycle = 'published'
-         AND (${isSuperAdmin} OR d."departmentId" IS NULL OR dm."userId" IS NOT NULL))
-        OR
-        EXISTS (
-          SELECT 1 FROM "Project" p
-          WHERE p.id = d."projectId"
-            AND p.scope = 'org'
-            AND p."orgId" = ${orgId}
-            AND (
-              ${isSuperAdmin}
-              OR EXISTS (
-                SELECT 1 FROM "DepartmentMember" pm
-                WHERE pm."departmentId" = p."departmentId" AND pm."userId" = ${userId}
-              )
-            )
-        )
-      )
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
     ORDER BY distance ASC
     LIMIT ${Prisma.raw(String(limit))}
   `;
@@ -159,25 +142,7 @@ export async function orgKeywordSearch(
     WHERE d."orgId" = ${orgId}
       ${scopeFilter}
       AND (${Prisma.join(termFilters, " OR ")})
-      AND (
-        (d.scope = 'repository'
-         AND d.lifecycle = 'published'
-         AND (${isSuperAdmin} OR d."departmentId" IS NULL OR dm."userId" IS NOT NULL))
-        OR
-        EXISTS (
-          SELECT 1 FROM "Project" p
-          WHERE p.id = d."projectId"
-            AND p.scope = 'org'
-            AND p."orgId" = ${orgId}
-            AND (
-              ${isSuperAdmin}
-              OR EXISTS (
-                SELECT 1 FROM "DepartmentMember" pm
-                WHERE pm."departmentId" = p."departmentId" AND pm."userId" = ${userId}
-              )
-            )
-        )
-      )
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
     LIMIT ${Prisma.raw(String(candidatePoolSize))}
   `;
 
@@ -237,25 +202,7 @@ export async function orgFallbackTextSearch(
     WHERE d."orgId" = ${orgId}
       ${scopeFilter}
       AND (${Prisma.join(termFilters, " OR ")})
-      AND (
-        (d.scope = 'repository'
-         AND d.lifecycle = 'published'
-         AND (${isSuperAdmin} OR d."departmentId" IS NULL OR dm."userId" IS NOT NULL))
-        OR
-        EXISTS (
-          SELECT 1 FROM "Project" p
-          WHERE p.id = d."projectId"
-            AND p.scope = 'org'
-            AND p."orgId" = ${orgId}
-            AND (
-              ${isSuperAdmin}
-              OR EXISTS (
-                SELECT 1 FROM "DepartmentMember" pm
-                WHERE pm."departmentId" = p."departmentId" AND pm."userId" = ${userId}
-              )
-            )
-        )
-      )
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
     LIMIT ${Prisma.raw(String(limit))}
   `;
 }
