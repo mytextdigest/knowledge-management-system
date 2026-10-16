@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { resolveProjectManagementAccess } from "@/lib/projectManagementPolicy";
 
 export async function GET(req, { params }) {
   try {
@@ -12,15 +13,15 @@ export async function GET(req, { params }) {
     if (!projectId)
       return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
 
-    // verify project belongs to user
-    const project = await prisma.project.findFirst({
-      where: { id: projectId, user: { email: session.user.email } },
-    });
+    const { project, user: actingUser, canManage } =
+      await resolveProjectManagementAccess(session.user.email, projectId);
     if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    // latest conversation for project
+    // Project chat is intentionally per-user. Admins may manage a colleague's
+    // project, but they load their own conversation rather than another user's.
     const conv = await prisma.projectConversation.findFirst({
-      where: { projectId },
+      where: { projectId, userId: actingUser.id },
       orderBy: { createdAt: "desc" },
     });
 
