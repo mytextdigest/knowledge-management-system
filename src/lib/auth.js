@@ -1,11 +1,20 @@
-import CredentialsProvider from "next-auth/providers/credentials";
-import { PrismaAdapter } from "@next-auth/prisma-adapter";
+import CredentialsProviderModule from "next-auth/providers/credentials";
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 
+// next-auth's providers are CommonJS; the bundler unwraps `default`, plain
+// Node (node --test) doesn't.
+const interop = (m) => m.default ?? m;
+const CredentialsProvider = interop(CredentialsProviderModule);
+
+// The single NextAuth configuration: used by the route handler
+// (src/app/api/auth/[...nextauth]/route.js) and by getServerSession callers.
+//
+// No database adapter: sessions are JWTs, and users are created by our own
+// sign-up flow (and, for Microsoft sign-in, by the signIn callback), so
+// NextAuth's Account/Session/VerificationToken tables are never needed.
 export const authOptions = {
-  adapter: PrismaAdapter(prisma),
   session: {
     strategy: "jwt"
   },
@@ -13,7 +22,7 @@ export const authOptions = {
     CredentialsProvider({
       name: "Credentials",
       credentials: {
-        email: { label: "Email", type: "email" },
+        email: { label: "Email", type: "text" },
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
@@ -21,10 +30,15 @@ export const authOptions = {
           where: { email: credentials.email }
         });
 
-        if (!user || !user.password) return null;
+        if (!user) throw new Error("No user found");
+        if (!user.password) throw new Error("Invalid password");
 
-        const valid = await bcrypt.compare(credentials.password, user.password);
-        if (!valid) return null;
+        const isValid = await bcrypt.compare(credentials.password, user.password);
+        if (!isValid) throw new Error("Invalid password");
+
+        if (!user.emailVerified) {
+          throw new Error("EMAIL_NOT_VERIFIED");
+        }
 
         return user;
       }
@@ -62,13 +76,33 @@ export const authOptions = {
     })
   ],
   callbacks: {
+    async jwt({ token, user }) {
+      if (user) token.id = user.id;
+      return token;
+    },
     async session({ session, token }) {
-      if (token?.sub) {
-        session.user.id = token.sub; // 🔴 THIS IS REQUIRED
-      }
+      const id = token?.id ?? token?.sub;
+      if (id) session.user.id = id;
       return session;
+    },
+    async redirect({ url, baseUrl }) {
+      // 1. Allow relative URLs
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+
+      // 2. Only allow production domain
+      try {
+        const host = new URL(url).host;
+        if (host === process.env.NEXTAUTH_URL?.replace(/^https?:\/\//, "")) return url;
+      } catch {}
+
+      // Fallback
+      return baseUrl;
     }
-  }
+  },
+  pages: {
+    signIn: "/auth/signin",
+    newUser: "/auth/signup",
+  },
 };
 
 
