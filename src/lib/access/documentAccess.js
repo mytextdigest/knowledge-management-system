@@ -16,15 +16,17 @@
 //     search, still only sees published repository documents.
 //
 //   Browse (repository listing, document page, timelines):
-//     org admins (super_admin and dept_admin) see everything; everyone else
-//     sees non-draft documents in no department or a department they belong to.
+//     super_admin sees everything. Everyone else sees non-draft documents in
+//     no department or a department they belong to; a dept_admin also sees
+//     drafts in the departments they administer (DepartmentMember.role
+//     "admin"), never in other departments.
 //
-// Known differences between the old copies are listed in WS_A §7 (A-2 note).
-// They are preserved here, not fixed, so this refactor changes no behaviour.
+// Other differences between the old copies are listed in WS_A §7 (A-2 note)
+// and preserved here.
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isOrgAdmin } from "@/lib/orgGuard";
+import { isSuperAdmin } from "@/lib/orgGuard";
 
 // --- SQL --------------------------------------------------------------------
 
@@ -98,16 +100,27 @@ export function searchAccessWhere({ userId, orgId, isSuperAdmin = false }) {
   };
 }
 
-// Prisma `where` for the org repository listing (browse policy, without the
-// lifecycle part, which the route combines with its lifecycle filter).
-export function repositoryAccessWhere({ orgId, role, userDeptIds }) {
-  if (isOrgAdmin(role)) {
+// Prisma `where` for the org repository listing (browse policy). userDeptIds
+// are the user's departments; adminDeptIds the ones they administer.
+export function repositoryAccessWhere({ orgId, role, userDeptIds, adminDeptIds = [] }) {
+  if (isSuperAdmin(role)) {
     return { OR: [{ scope: "repository", orgId }, { project: { scope: "org", orgId } }] };
   }
+  const draftAllowed = role === "dept_admin" && adminDeptIds.length
+    ? [
+        { departmentId: { in: adminDeptIds } },
+        { departmentId: null, project: { departmentId: { in: adminDeptIds } } },
+      ]
+    : [];
   return {
-    OR: [
-      { scope: "repository", orgId, OR: [{ departmentId: null }, { departmentId: { in: userDeptIds } }] },
-      { project: { scope: "org", orgId, departmentId: { in: userDeptIds } } },
+    AND: [
+      {
+        OR: [
+          { scope: "repository", orgId, OR: [{ departmentId: null }, { departmentId: { in: userDeptIds } }] },
+          { project: { scope: "org", orgId, departmentId: { in: userDeptIds } } },
+        ],
+      },
+      { OR: [{ lifecycle: { not: "draft" } }, ...draftAllowed] },
     ],
   };
 }
@@ -120,6 +133,43 @@ async function isDepartmentMember(db, departmentId, userId) {
     select: { id: true },
   });
   return Boolean(membership);
+}
+
+async function isDepartmentAdmin(db, departmentId, userId) {
+  const membership = await db.departmentMember.findUnique({
+    where: { departmentId_userId: { departmentId, userId } },
+    select: { role: true },
+  });
+  return membership?.role === "admin";
+}
+
+// The department that governs a document: its own, else its project's.
+function effectiveDepartmentId(document) {
+  return document.departmentId ?? document.project?.departmentId ?? null;
+}
+
+// Department ids a user administers, for repositoryAccessWhere.
+export async function getAdminDepartmentIds(userId, { db = prisma } = {}) {
+  const rows = await db.departmentMember.findMany({
+    where: { userId, role: "admin" },
+    select: { departmentId: true },
+  });
+  return rows.map((r) => r.departmentId);
+}
+
+/**
+ * Who may manage a document (correct its classification, review duplicate
+ * signals): the uploader, super_admin, or a dept_admin who administers the
+ * document's department. A dept_admin never manages other departments'
+ * documents, nor documents with no department. `document` needs userId,
+ * departmentId and `project.departmentId`.
+ */
+export async function canManageDocument(document, { userId, role, db = prisma }) {
+  if (document.userId === userId || isSuperAdmin(role)) return true;
+  if (role !== "dept_admin") return false;
+  const departmentId = effectiveDepartmentId(document);
+  if (!departmentId) return false;
+  return isDepartmentAdmin(db, departmentId, userId);
 }
 
 /**
@@ -175,9 +225,11 @@ export async function canInteractWithDocument(document, { userId, isSuperAdmin =
  * `document` needs lifecycle, departmentId and `project.departmentId`.
  */
 export async function canViewDocument(document, { userId, role, db = prisma }) {
-  if (isOrgAdmin(role)) return true;
-  if (document.lifecycle === "draft") return false;
-  const departmentId = document.departmentId ?? document.project?.departmentId ?? null;
+  if (isSuperAdmin(role)) return true;
+  const departmentId = effectiveDepartmentId(document);
+  if (document.lifecycle === "draft") {
+    return role === "dept_admin" && Boolean(departmentId) && isDepartmentAdmin(db, departmentId, userId);
+  }
   if (!departmentId) return true;
   return isDepartmentMember(db, departmentId, userId);
 }
@@ -188,7 +240,7 @@ export async function canViewDocument(document, { userId, role, db = prisma }) {
  * Uses the document's own departmentId only (not its project's).
  */
 export async function filterAccessibleDocuments(documents, { userId, role, db = prisma }) {
-  if (isOrgAdmin(role)) return documents;
+  if (isSuperAdmin(role)) return documents;
 
   const deptIds = [
     ...new Set(
@@ -201,14 +253,17 @@ export async function filterAccessibleDocuments(documents, { userId, role, db = 
   const memberships = deptIds.length
     ? await db.departmentMember.findMany({
         where: { departmentId: { in: deptIds }, userId },
-        select: { departmentId: true },
+        select: { departmentId: true, role: true },
       })
     : [];
   const memberDeptIds = new Set(memberships.map((m) => m.departmentId));
+  const adminDeptIds = new Set(
+    role === "dept_admin" ? memberships.filter((m) => m.role === "admin").map((m) => m.departmentId) : []
+  );
 
   return documents.filter((d) => {
     if (d.userId === userId) return true;
-    if (d.lifecycle === "draft") return false;
+    if (d.lifecycle === "draft") return adminDeptIds.has(d.departmentId);
     if (!d.departmentId) return true;
     return memberDeptIds.has(d.departmentId);
   });

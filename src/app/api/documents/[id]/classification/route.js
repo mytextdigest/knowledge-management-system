@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { resolveOrgRole, isOrgAdmin } from "@/lib/orgGuard";
+import { resolveOrgRole } from "@/lib/orgGuard";
+import { canManageDocument } from "@/lib/access/documentAccess";
 
 async function resolveManagedDocument(id, email) {
   const doc = await prisma.document.findUnique({
     where: { id },
-    select: { id: true, userId: true, orgId: true, departmentId: true, project: { select: { orgId: true } } },
+    select: { id: true, userId: true, orgId: true, departmentId: true, project: { select: { orgId: true, departmentId: true } } },
   });
   if (!doc) return null;
   const orgId = doc.orgId || doc.project?.orgId;
   const { user, role } = await resolveOrgRole(email, orgId || "");
-  if (!user || (!isOrgAdmin(role) && doc.userId !== user.id)) return null;
+  if (!user || !(await canManageDocument(doc, { userId: user.id, role }))) return null;
   return { doc, user, role, orgId };
 }
 

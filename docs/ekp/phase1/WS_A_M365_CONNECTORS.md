@@ -400,8 +400,13 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
 - `2026-10-15 · A-2 (F1 refactor):`
   - Moved every document-visibility rule into `src/lib/access/documentAccess.js`. Parity test `scripts/ekp/f1-access-parity.test.mjs` (`EKP_DB_TESTS=1 npm run ekp:f1:test`) compares each new function with a verbatim copy of the old code on a 270-document × 6-role seeded matrix (inside a rolled-back transaction) and on all existing org members. Both pass; a deliberate change makes it fail.
   - **The old copies don't agree with each other.** Preserved as-is (no behaviour change); decide before A-10:
-    1. **dept_admin sees every department's documents, including drafts,** on the repository page and document page (`isOrgAdmin`), but only their own departments in chat. Likely a bug.
+    1. ~~**dept_admin sees every department's documents, including drafts,** on the repository page and document page (`isOrgAdmin`), but only their own departments in chat.~~ **Fixed 2026-10-16** (see below).
     2. **Archived documents** are visible to members on the repository and document pages but never in search, chat or the graph.
     3. **Timelines** check only the document's own department, not its project's department.
     4. **Knowledge graph / related documents:** super_admin sees every document (drafts, private); uploaders always see their own. Search doesn't do either.
     5. **Interactions:** the project owner can always record interactions on the project's documents.
+- `2026-10-16 · A-2 follow-up (dept_admin fix):`
+  - **Rule now:** super_admin sees every document. A dept_admin sees what a member sees, plus drafts in the departments they administer (`DepartmentMember.role = "admin"`), never other departments' drafts.
+  - **Applied to:** repository listing and its search (it passed `isOrgAdmin` as `isSuperAdmin`), document page, timelines, and the classification and duplicate-review routes (new `canManageDocument`: uploader, super_admin, or admin of the document's department).
+  - **Also fixed:** `?lifecycle=draft` on the repository listing let members list drafts; the draft rule now lives in `repositoryAccessWhere`, so filters only narrow.
+  - The parity test checks dept_admin against the new rule (including "no drafts from a department they don't administer") and every other role against the old code.

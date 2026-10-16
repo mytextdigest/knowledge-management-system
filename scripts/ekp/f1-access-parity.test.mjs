@@ -4,6 +4,10 @@
 // The LEGACY_* functions below are verbatim copies of the pre-refactor code
 // (git 7a87edf). Do not "fix" them; they are the reference.
 //
+// One intended change since A-2: the dept_admin fix (A-2 follow-up, WS_A §7).
+// For dept_admin the browse functions are checked against EXPECTED_* (the new
+// rule written independently below); every other role must still match legacy.
+//
 // SQL and Prisma-where predicates run against the database inside a
 // transaction that is always rolled back, over a seeded matrix of
 // scope × lifecycle × department × project × uploader, for every role.
@@ -21,6 +25,7 @@ import {
   canAccessDocument,
   canInteractWithDocument,
   canViewDocument,
+  canManageDocument,
   filterAccessibleDocuments,
 } from "../../src/lib/access/documentAccess.js";
 import { isOrgAdmin } from "../../src/lib/orgGuard.js";
@@ -188,6 +193,31 @@ async function LEGACY_filterAccessibleDocuments(db, documents, { userId, role })
   });
 }
 
+// src/app/api/documents/[id]/classification and duplicates routes
+function LEGACY_canManage(doc, userId, role) {
+  return isOrgAdmin(role) || doc.userId === userId;
+}
+
+// --- Expected dept_admin behaviour (the fix) -----------------------------------
+
+const effectiveDept = (doc) => doc.departmentId ?? doc.project?.departmentId ?? null;
+
+function EXPECTED_deptAdmin({ doc, userId, orgId, userDepts, adminDepts }) {
+  const eff = effectiveDept(doc);
+  const draftOk = doc.lifecycle !== "draft" || adminDepts.has(eff);
+  const inRepository =
+    (doc.scope === "repository" && (doc.departmentId === null || userDepts.has(doc.departmentId))) ||
+    (doc.project?.scope === "org" && doc.project.orgId === orgId && userDepts.has(doc.project.departmentId));
+  return {
+    repository: inRepository && draftOk,
+    view: doc.lifecycle === "draft" ? adminDepts.has(eff) : eff === null || userDepts.has(eff),
+    timeline:
+      doc.userId === userId ||
+      (doc.lifecycle === "draft" ? adminDepts.has(doc.departmentId) : doc.departmentId === null || userDepts.has(doc.departmentId)),
+    manage: doc.userId === userId || adminDepts.has(eff),
+  };
+}
+
 // --- Seed -------------------------------------------------------------------
 
 const ROLLBACK = Symbol("rollback");
@@ -202,7 +232,8 @@ async function seed(tx, tag) {
 
   const people = [
     ["superAdmin", "super_admin", []],
-    ["deptAdminA", "dept_admin", [[deptA, "admin"]]],
+    // Admin of A, plain member of B: must never see B's drafts.
+    ["deptAdminA", "dept_admin", [[deptA, "admin"], [deptB, "member"]]],
     ["employeeA", "employee", [[deptA, "member"]]],
     ["employeeB", "employee", [[deptB, "member"]]],
     ["employeeNone", "employee", []],
@@ -215,7 +246,7 @@ async function seed(tx, tag) {
     await tx.organizationMember.create({ data: { orgId: org.id, userId: user.id, role } });
     for (const [dept, deptRole] of depts) {
       await tx.departmentMember.create({ data: { departmentId: dept.id, userId: user.id, role: deptRole } });
-      memberships.push({ departmentId: dept.id, userId: user.id });
+      memberships.push({ departmentId: dept.id, userId: user.id, role: deptRole });
     }
     users[key] = { ...user, role };
   }
@@ -244,8 +275,8 @@ async function seed(tx, tag) {
   const documents = await tx.document.findMany({
     where: { orgId: org.id },
     select: {
-      id: true, userId: true, scope: true, lifecycle: true, departmentId: true, projectId: true,
-      project: { select: { userId: true, scope: true, departmentId: true } },
+      id: true, filename: true, userId: true, scope: true, lifecycle: true, departmentId: true, projectId: true,
+      project: { select: { userId: true, scope: true, departmentId: true, orgId: true } },
     },
   });
 
@@ -254,16 +285,17 @@ async function seed(tx, tag) {
 
 // In-memory stand-in for the two Prisma calls the JS checks make.
 function fakeDb({ memberships, projects }) {
-  const isMember = (departmentId, userId) =>
-    memberships.some((m) => m.departmentId === departmentId && m.userId === userId);
   return {
     departmentMember: {
       async findUnique({ where }) {
         const { departmentId, userId } = where.departmentId_userId;
-        return isMember(departmentId, userId) ? { id: "m", departmentId } : null;
+        return memberships.find((m) => m.departmentId === departmentId && m.userId === userId) ?? null;
       },
       async findMany({ where }) {
-        return where.departmentId.in.filter((id) => isMember(id, where.userId)).map((departmentId) => ({ departmentId }));
+        return memberships.filter((m) =>
+          m.userId === where.userId &&
+          (!where.departmentId || where.departmentId.in.includes(m.departmentId)) &&
+          (!where.role || m.role === where.role));
       },
     },
     project: {
@@ -337,22 +369,47 @@ test("F1 central access matches every legacy copy on a seeded matrix", { skip: !
           }
         }
 
-        const legacyRepo = await tx.document.findMany({ where: LEGACY_repositoryWhere({ orgId: org.id, role: user.role, userDeptIds }), select: { id: true } });
-        const repo = await tx.document.findMany({ where: repositoryAccessWhere({ orgId: org.id, role: user.role, userDeptIds }), select: { id: true } });
-        assert.deepEqual(ids(repo), ids(legacyRepo), `repository where differs for ${user.name}`);
-
+        const adminDeptIds = memberships.filter((m) => m.userId === user.id && m.role === "admin").map((m) => m.departmentId);
+        const repo = ids(await tx.document.findMany({ where: { orgId: org.id, ...repositoryAccessWhere({ orgId: org.id, role: user.role, userDeptIds, adminDeptIds }) }, select: { id: true } }));
+        const timeline = ids(await filterAccessibleDocuments(documents, { userId: user.id, role: user.role, db }));
+        const views = new Map();
+        const manages = new Map();
         for (const doc of documents) {
-          assert.equal(
-            await canViewDocument(doc, { userId: user.id, role: user.role, db }),
-            await LEGACY_canViewDetail(db, doc, user.id, user.role),
-            `canViewDocument differs for ${user.name} on ${doc.id}`
-          );
+          views.set(doc.id, await canViewDocument(doc, { userId: user.id, role: user.role, db }));
+          manages.set(doc.id, await canManageDocument(doc, { userId: user.id, role: user.role, db }));
         }
-        assert.deepEqual(
-          ids(await filterAccessibleDocuments(documents, { userId: user.id, role: user.role, db })),
-          ids(await LEGACY_filterAccessibleDocuments(db, documents, { userId: user.id, role: user.role })),
-          `filterAccessibleDocuments differs for ${user.name}`
-        );
+
+        if (user.role === "dept_admin") {
+          const userDepts = new Set(userDeptIds);
+          const adminDepts = new Set(adminDeptIds);
+          const expected = new Map(documents.map((doc) => [doc.id, EXPECTED_deptAdmin({ doc, userId: user.id, orgId: org.id, userDepts, adminDepts })]));
+          assert.deepEqual(repo, documents.filter((d) => expected.get(d.id).repository).map((d) => d.id).sort(), "dept_admin repository listing");
+          assert.deepEqual(timeline, documents.filter((d) => expected.get(d.id).timeline).map((d) => d.id).sort(), "dept_admin timelines");
+          for (const doc of documents) {
+            assert.equal(views.get(doc.id), expected.get(doc.id).view, `dept_admin document page on ${doc.filename}`);
+            assert.equal(manages.get(doc.id), expected.get(doc.id).manage, `dept_admin manage on ${doc.filename}`);
+          }
+          // The bug itself: no draft from a department they don't administer.
+          const deptB = memberships.find((m) => m.userId === user.id && m.role === "member").departmentId;
+          const leaked = documents.filter((d) => d.lifecycle === "draft" && effectiveDept(d) === deptB && (repo.includes(d.id) || views.get(d.id)));
+          assert.equal(leaked.length, 0, "dept_admin sees drafts of a department they don't administer");
+          assert.ok(documents.some((d) => d.lifecycle === "draft" && views.get(d.id)), "dept_admin still sees drafts in their own department");
+          continue;
+        }
+
+        // Every other role: unchanged from legacy (the repository route used to
+        // add the draft filter itself for non-admins).
+        const legacyRepoWhere = LEGACY_repositoryWhere({ orgId: org.id, role: user.role, userDeptIds });
+        const legacyRepo = ids(await tx.document.findMany({
+          where: { orgId: org.id, AND: [legacyRepoWhere, ...(isOrgAdmin(user.role) ? [] : [{ lifecycle: { not: "draft" } }])] },
+          select: { id: true },
+        }));
+        assert.deepEqual(repo, legacyRepo, `repository where differs for ${user.name}`);
+        assert.deepEqual(timeline, ids(await LEGACY_filterAccessibleDocuments(db, documents, { userId: user.id, role: user.role })), `filterAccessibleDocuments differs for ${user.name}`);
+        for (const doc of documents) {
+          assert.equal(views.get(doc.id), await LEGACY_canViewDetail(db, doc, user.id, user.role), `canViewDocument differs for ${user.name} on ${doc.id}`);
+          assert.equal(manages.get(doc.id), LEGACY_canManage(doc, user.id, user.role), `canManageDocument differs for ${user.name} on ${doc.id}`);
+        }
       }
 
       throw ROLLBACK;

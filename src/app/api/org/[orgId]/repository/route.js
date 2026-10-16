@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
-import { resolveOrgRole, isOrgAdmin } from "@/lib/orgGuard";
+import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { orgSearch } from "@/lib/vectorSearch";
 import { repositoryAccessWhere } from "@/lib/access/documentAccess";
 import { resolveOpenAIKey } from "@/utils/key_helper";
@@ -42,22 +42,20 @@ export async function GET(req, { params }) {
   // Resolve user's department memberships for RBAC
   const memberships = await prisma.departmentMember.findMany({
     where: { userId: user.id },
-    select: { departmentId: true },
+    select: { departmentId: true, role: true },
   });
   const userDeptIds = memberships.map((m) => m.departmentId);
+  const adminDeptIds = memberships.filter((m) => m.role === "admin").map((m) => m.departmentId);
 
-  // Repository documents plus documents of org-scope projects, limited to the
-  // user's departments unless they're an org admin (F1 browse policy).
-  const andConditions = [repositoryAccessWhere({ orgId, role, userDeptIds })];
+  // Repository documents plus documents of org-scope projects in the user's
+  // departments (all for super_admin). Drafts only for super_admin and for a
+  // dept_admin in the departments they administer (F1 browse policy).
+  const andConditions = [repositoryAccessWhere({ orgId, role, userDeptIds, adminDeptIds })];
 
-  // Non-admins cannot see draft docs
   if (lifecycle === "suggested_review") {
     andConditions.push({ lifecycleSuggestion: { not: null } });
-    if (!isOrgAdmin(role)) andConditions.push({ lifecycle: { not: "draft" } });
   } else if (lifecycle) {
     andConditions.push({ lifecycle });
-  } else if (!isOrgAdmin(role)) {
-    andConditions.push({ lifecycle: { not: "draft" } });
   }
 
   if (category) andConditions.push({ category });
@@ -123,7 +121,7 @@ export async function GET(req, { params }) {
           userId: user.id,
           orgId,
           limit: 200,
-          isSuperAdmin: isOrgAdmin(role),
+          isSuperAdmin: isSuperAdmin(role),
           scope: deptFilter ? "department" : "organization",
           departmentId: deptFilter,
         });
