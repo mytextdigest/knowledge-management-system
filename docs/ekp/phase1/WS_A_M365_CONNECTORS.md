@@ -193,24 +193,29 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
    - optional claims `email`, and `groupMembershipClaims: "SecurityGroup"` so tokens carry group ids.
 2. **Static provider:** one `AzureADProvider` (`id: "azure-ad"`, `tenantId: "organizations"`, client id/secret from new `ENTRA_SSO_CLIENT_ID` / `ENTRA_SSO_CLIENT_SECRET` env). Personal Microsoft accounts are excluded, as in `msGraph.js`.
 3. **Per-org SSO configuration:**
-   - `OrgIntegration` with `provider: "entra_sso"`; `scopeConfig` holds `{ tenantId, allowedDomains[], groupRoleMap, protocol: "oidc" | "saml", passwordLogin: "admins_only" | "all" }`.
+   - `OrgIntegration` with `provider: "entra_sso"`; `scopeConfig` holds `{ tenantId, allowedDomains[], groupRoleMap, protocol: "oidc" | "saml", passwordLogin: "admins_only" | "all", provisioning: "auto" | "invite_only" }`.
+   - **Registration flow:** a KMS super_admin clicks "Connect Microsoft" → Microsoft's admin-consent page for the KMS Sign-in app (needs an Entra admin of that tenant) → back to KMS with the `tenant`. KMS then signs the admin in and reads the tenant's **verified domains** (Graph `/organization`, allowed by `User.Read`). The admin picks `allowedDomains` from that list only, so an org can never claim a domain it doesn't own.
+   - **One tenant maps to one KMS org.** Connecting a tenant already used by another org is refused.
+   - `provisioning: "auto"` (default): any user of the tenant who signs in joins the org as `employee`. `"invite_only"`: only users with a pending invite or existing membership get in. The customer can also limit who may sign in through "Assignment required" on the enterprise app in Entra.
    - `tenantId` is filled in automatically when an admin of that tenant completes the Sign-in app's admin-consent flow (`/adminconsent` returns `tenant`). It must equal the tenant of the org's SharePoint integration when both are enabled; the settings page shows a warning if they differ.
    - In their tenant, the customer can set "Assignment required" on the KMS Sign-in enterprise app to limit who can sign in, and apply Conditional Access (MFA, compliant device) to it. Neither affects SharePoint sync.
    - Admin UI: Settings → Single sign-on (super_admin only), with a "Test sign-in" button.
 4. **Home realm discovery:**
    - The login page asks for the email first.
-   - If its domain matches an org's `allowedDomains`, the page shows "Continue with Microsoft". Otherwise it shows the password form.
+   - If its domain matches an org's `allowedDomains`, the user is sent straight to Microsoft (already signed in to Microsoft → no prompt, just their MFA policy). Otherwise it shows the password form.
+   - A plain "Sign in with Microsoft" button is also shown for users who don't type an email first.
+   - **Sign-up:** an email on an SSO domain is sent to Microsoft instead of creating a password account. Other emails sign up as today.
 5. **`signIn` callback** (same code for OIDC and SAML):
-   - Find the org whose `entra_sso` config has the token's `tid`. **No match → reject** (stops any other Microsoft tenant from signing in).
+   - Find the org whose `entra_sso` config has the token's `tid`. **No match → reject** with "Your organization hasn't set up Microsoft sign-in for KMS. Sign in with your email and password, or ask your administrator." The user isn't blocked from KMS, only from the Microsoft button.
    - Find `UserIdentity` by (`entra`, `tid`, `oid`).
-   - If there's none, match an existing `User` by email (`email` claim, lower-cased; `preferred_username` only if it's not a `#EXT#` guest UPN) and link it. An existing `email_match` identity for the same `oid` is upgraded to `source: "sso"`.
+   - If there's none, match an existing `User` by email (`email` claim, lower-cased; `preferred_username` only if it's not a `#EXT#` guest UPN) and link it, **but only if the email's domain is in the org's `allowedDomains`** (verified for that tenant). Entra's `email` attribute can be set to any value by a tenant admin, so linking on email alone would let another tenant take over an account ("nOAuth"). Otherwise create a new user. An existing `email_match` identity for the same `oid` is upgraded to `source: "sso"`.
    - If there's no user, create one just in time, with `emailVerified: true` and no password.
    - Ensure an `OrganizationMember` row exists. Update `lastLoginAt`.
    - Audit-log `auth.sso_login` and `auth.sso_user_created` with today's `logAudit`; switch to `entityType`/`entityId` when B-2 lands.
 6. **Role mapping:**
    - `groupRoleMap: [{ groupId, role, departmentIds[] }]`, applied at each login from the token's `groups` claim.
    - **The highest mapped role wins.**
-   - **If no group matches, the existing manual role is kept**, and new users become `member`.
+   - **If no group matches, the existing manual role is kept**, and new users become `employee` (KMS's default org role).
    - **Group overage:** if a user is in more than 200 groups, Entra omits the claim, so fetch the groups via Graph `/me/transitiveMemberOf` using the sign-in access token.
 7. **Password login for SSO orgs:** `passwordLogin: "admins_only"` (default once SSO is on) blocks password/OTP for members and keeps it for super_admins as break-glass.
 8. **Session:** the JWT carries `userId` and `entraOid` so that A2's `resolvePrincipals` doesn't need a lookup.
@@ -239,7 +244,9 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 - [ ] The same user signs in through SAML and lands on the same KMS user.
 - [ ] An existing password user with the same email signs in with Microsoft and is linked, not duplicated.
 - [ ] A user in a mapped Entra group gets the mapped role and departments. Removing them from the group downgrades them at the next login.
-- [ ] A token from a tenant with no `entra_sso` config is rejected.
+- [ ] A token from a tenant with no `entra_sso` config is rejected with the "not set up" message; that user can still sign in with a password.
+- [ ] A user whose Entra `email` is outside the org's verified domains is not linked to an existing KMS account with that email.
+- [ ] Signing up with an email on an SSO domain goes to Microsoft; other emails sign up with a password as before.
 - [ ] With `passwordLogin: "admins_only"`, a member can't use a password; a super_admin can.
 - [ ] Every SSO login and every user creation is in the audit log.
 - [ ] Password and OTP login still work for orgs without SSO (regression).
