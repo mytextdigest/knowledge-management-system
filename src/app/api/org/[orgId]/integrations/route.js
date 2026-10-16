@@ -26,7 +26,7 @@ export async function GET(req, { params }) {
   });
   const byProvider = Object.fromEntries(rows.map((r) => [r.provider, r]));
 
-  const integrations = KNOWN_PROVIDERS.map(({ provider, displayName }) => {
+  const connectors = KNOWN_PROVIDERS.map(({ provider, displayName }) => {
     const row = byProvider[provider];
     return {
       provider,
@@ -38,5 +38,20 @@ export async function GET(req, { params }) {
     };
   });
 
-  return NextResponse.json({ integrations });
+  // Microsoft sign-in (EKP A-5) lives in its own table, not OrgIntegration.
+  const sso = await prisma.orgSsoConfig.findUnique({
+    where: { orgId },
+    select: { enabled: true, tenantName: true, allowedDomains: true },
+  });
+  const microsoftSignIn = {
+    provider: "microsoft-sso",
+    displayName: "Microsoft sign-in",
+    connected: Boolean(sso),
+    status: sso ? "connected" : "not_connected",
+    summary: sso
+      ? `${sso.tenantName || "Microsoft organization"} · ${sso.enabled ? sso.allowedDomains.join(", ") : "turned off"}`
+      : "Let employees sign in with their Microsoft work account",
+  };
+
+  return NextResponse.json({ integrations: [microsoftSignIn, ...connectors] });
 }

@@ -1114,7 +1114,7 @@ export default function OrgSettingsPage() {
         {activeTab === 'integrations' && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Connect external platforms to automatically bring their Knowledge into this org's repository.
+              Set up Microsoft sign-in, and connect external platforms to bring their knowledge into this org's repository.
             </p>
 
             {integrationsError ? (
@@ -1153,7 +1153,9 @@ export default function OrgSettingsPage() {
                           </span>
                         </div>
                         <p className="text-xs text-gray-500 mt-0.5">
-                          {integ.connected
+                          {integ.summary
+                            ? integ.summary
+                            : integ.connected
                             ? `${integ.siteCount} site${integ.siteCount === 1 ? '' : 's'}${integ.lastSyncAt ? ` · last synced ${new Date(integ.lastSyncAt).toLocaleDateString()}` : ''}`
                             : integ.status === 'disconnected'
                             ? 'Sync paused — reconnect to resume'

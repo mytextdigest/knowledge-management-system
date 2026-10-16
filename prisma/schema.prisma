@@ -829,6 +829,10 @@ model OrgSsoConfig {
   tenantId       String   @unique @map("tenant_id")
   protocol       String   @default("oidc") // "oidc" | "saml"
   enabled        Boolean  @default(true)
+  tenantName      String?  @map("tenant_name")
+  // The tenant's verified domains, read from Graph /organization at connect
+  // time. allowedDomains must be a subset.
+  verifiedDomains String[] @default([]) @map("verified_domains")
   // Chosen from the tenant's verified domains only.
   allowedDomains String[] @default([]) @map("allowed_domains")
   // [{ groupId, role, departmentIds[] }]
