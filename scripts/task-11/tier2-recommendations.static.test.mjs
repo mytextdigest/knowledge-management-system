@@ -21,8 +21,11 @@ test("11-B/11-C document interaction schema and best-effort RBAC-safe write path
   assert.match(schema, /@@index\(\[userId, createdAt\]\)/);
   assert.match(page, /\/interactions/);
   assert.match(page, /keepalive: true/);
+  // The access rule moved to the F1 central access module (A-2).
+  const access = read("src/lib/access/documentAccess.js");
   assert.match(route, /isSuperAdmin/);
-  assert.match(route, /doc\.project\.scope === "org"/);
+  assert.match(route, /canInteractWithDocument/);
+  assert.match(access, /document\.project\.scope === "org"/);
   assert.doesNotMatch(route, /isOrgAdmin/);
 });
 

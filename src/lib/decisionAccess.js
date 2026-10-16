@@ -1,38 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { canManageDepartment } from "@/lib/orgGuard";
+import { canAccessDocument } from "@/lib/access/documentAccess";
 
-// Mirrors the read-access rule in src/lib/decisionIntelligence.js's
-// decisionAccessSql (kept as separate JS here since the detail route already
-// has the document loaded via Prisma and doesn't need a second raw query): a
-// decision is visible only if its source document is a published repository
-// document in a department the user belongs to (or an unassigned
-// department), or is attached to an org-scope project whose department the
-// user belongs to. isSuperAdmin bypasses both.
+// Read access to a decision is read access to its source document under the
+// search policy (F1, src/lib/access/documentAccess.js), the same rule
+// decisionIntelligence.js's decisionAccessSql applies in SQL.
 export async function canAccessDecisionDocument({ document, userId, isSuperAdmin }) {
-  if (isSuperAdmin) return true;
-
-  if (document.scope === "repository" && document.lifecycle === "published") {
-    if (!document.departmentId) return true;
-    const member = await prisma.departmentMember.findUnique({
-      where: { departmentId_userId: { departmentId: document.departmentId, userId } },
-    });
-    return Boolean(member);
-  }
-
-  if (document.projectId) {
-    const project = await prisma.project.findUnique({
-      where: { id: document.projectId },
-      select: { scope: true, departmentId: true },
-    });
-    if (project?.scope === "org" && project.departmentId) {
-      const member = await prisma.departmentMember.findUnique({
-        where: { departmentId_userId: { departmentId: project.departmentId, userId } },
-      });
-      return Boolean(member);
-    }
-  }
-
-  return false;
+  return canAccessDocument(document, { userId, isSuperAdmin });
 }
 
 // Open Question 2 (REQUIREMENTS_DECISION_INTELLIGENCE_REPOSITORY.md), resolved:

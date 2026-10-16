@@ -96,14 +96,16 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
   - `canAccessDocument(doc, ctx)` and `filterAccessibleDocuments(docs, ctx)`, the JS equivalents;
   - `resolvePrincipals(userId)`, which returns the user's Entra object ids (from `UserIdentity`, either source) plus transitive group ids, cached for 15 minutes.
 - **The predicate is:** today's rule (role, department, lifecycle, visibility) **AND** (the document has no `DocumentAcl` rows **OR** a row matches one of the user's principals).
-- **Places to refactor** (D1 in the implementation spec):
-  - `vectorSearch.js` (3 copies)
-  - `knowledgeContext.js` (`accessSql`)
-  - `expertDiscoveryQuery.mjs`
-  - `decisionIntelligence.js`
-  - `lessonsIntelligence.js`
-  - `src/lib/documentAccess.js`
-  - route-level checks in `api/documents/[id]/route.js` and the org repository route
+- **Places refactored in A-2:**
+  - `vectorSearch.js` (3 copies) and `decisionIntelligence.js` → `searchAccessSql`
+  - `knowledgeContext.js` / `knowledgeGraph.js` (`accessSql`) → `knowledgeAccessSql`
+  - chat workflow document (`api/org/[orgId]/chat`) → `searchAccessWhere`
+  - org repository listing → `repositoryAccessWhere`
+  - document page (`api/documents/[id]`) → `canViewDocument`
+  - interactions route → `canInteractWithDocument`
+  - `decisionAccess.js` → `canAccessDocument`
+  - `src/lib/documentAccess.js` (timelines) → moved as `filterAccessibleDocuments`; old file deleted
+- **Not moved:** `expertDiscoveryQuery.mjs` has a topic-level rule (viewer *and* expert must be connected to the document); A-10 adds the ACL clause there directly. `lessonsIntelligence.js` checks lessons, not documents, so it's out of F1.
 - **Delivery in two PRs:**
   1. **Refactor only, no behaviour change.** A parity test (`scripts/ekp/f1-access-parity.test.mjs`) runs every search and query path for each role on the seeded data and asserts identical results before and after.
   2. **Add the ACL clause** (in A2), once `DocumentAcl` exists.
@@ -191,24 +193,29 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
    - optional claims `email`, and `groupMembershipClaims: "SecurityGroup"` so tokens carry group ids.
 2. **Static provider:** one `AzureADProvider` (`id: "azure-ad"`, `tenantId: "organizations"`, client id/secret from new `ENTRA_SSO_CLIENT_ID` / `ENTRA_SSO_CLIENT_SECRET` env). Personal Microsoft accounts are excluded, as in `msGraph.js`.
 3. **Per-org SSO configuration:**
-   - `OrgIntegration` with `provider: "entra_sso"`; `scopeConfig` holds `{ tenantId, allowedDomains[], groupRoleMap, protocol: "oidc" | "saml", passwordLogin: "admins_only" | "all" }`.
+   - `OrgIntegration` with `provider: "entra_sso"`; `scopeConfig` holds `{ tenantId, allowedDomains[], groupRoleMap, protocol: "oidc" | "saml", passwordLogin: "admins_only" | "all", provisioning: "auto" | "invite_only" }`.
+   - **Registration flow:** a KMS super_admin clicks "Connect Microsoft" → Microsoft's admin-consent page for the KMS Sign-in app (needs an Entra admin of that tenant) → back to KMS with the `tenant`. KMS then signs the admin in and reads the tenant's **verified domains** (Graph `/organization`, allowed by `User.Read`). The admin picks `allowedDomains` from that list only, so an org can never claim a domain it doesn't own.
+   - **One tenant maps to one KMS org.** Connecting a tenant already used by another org is refused.
+   - `provisioning: "auto"` (default): any user of the tenant who signs in joins the org as `employee`. `"invite_only"`: only users with a pending invite or existing membership get in. The customer can also limit who may sign in through "Assignment required" on the enterprise app in Entra.
    - `tenantId` is filled in automatically when an admin of that tenant completes the Sign-in app's admin-consent flow (`/adminconsent` returns `tenant`). It must equal the tenant of the org's SharePoint integration when both are enabled; the settings page shows a warning if they differ.
    - In their tenant, the customer can set "Assignment required" on the KMS Sign-in enterprise app to limit who can sign in, and apply Conditional Access (MFA, compliant device) to it. Neither affects SharePoint sync.
    - Admin UI: Settings → Single sign-on (super_admin only), with a "Test sign-in" button.
 4. **Home realm discovery:**
    - The login page asks for the email first.
-   - If its domain matches an org's `allowedDomains`, the page shows "Continue with Microsoft". Otherwise it shows the password form.
+   - If its domain matches an org's `allowedDomains`, the user is sent straight to Microsoft (already signed in to Microsoft → no prompt, just their MFA policy). Otherwise it shows the password form.
+   - A plain "Sign in with Microsoft" button is also shown for users who don't type an email first.
+   - **Sign-up:** an email on an SSO domain is sent to Microsoft instead of creating a password account. Other emails sign up as today.
 5. **`signIn` callback** (same code for OIDC and SAML):
-   - Find the org whose `entra_sso` config has the token's `tid`. **No match → reject** (stops any other Microsoft tenant from signing in).
+   - Find the org whose `entra_sso` config has the token's `tid`. **No match → reject** with "Your organization hasn't set up Microsoft sign-in for KMS. Sign in with your email and password, or ask your administrator." The user isn't blocked from KMS, only from the Microsoft button.
    - Find `UserIdentity` by (`entra`, `tid`, `oid`).
-   - If there's none, match an existing `User` by email (`email` claim, lower-cased; `preferred_username` only if it's not a `#EXT#` guest UPN) and link it. An existing `email_match` identity for the same `oid` is upgraded to `source: "sso"`.
+   - If there's none, match an existing `User` by email (`email` claim, lower-cased; `preferred_username` only if it's not a `#EXT#` guest UPN) and link it, **but only if the email's domain is in the org's `allowedDomains`** (verified for that tenant). Entra's `email` attribute can be set to any value by a tenant admin, so linking on email alone would let another tenant take over an account ("nOAuth"). Otherwise create a new user. An existing `email_match` identity for the same `oid` is upgraded to `source: "sso"`.
    - If there's no user, create one just in time, with `emailVerified: true` and no password.
    - Ensure an `OrganizationMember` row exists. Update `lastLoginAt`.
    - Audit-log `auth.sso_login` and `auth.sso_user_created` with today's `logAudit`; switch to `entityType`/`entityId` when B-2 lands.
 6. **Role mapping:**
    - `groupRoleMap: [{ groupId, role, departmentIds[] }]`, applied at each login from the token's `groups` claim.
    - **The highest mapped role wins.**
-   - **If no group matches, the existing manual role is kept**, and new users become `member`.
+   - **If no group matches, the existing manual role is kept**, and new users become `employee` (KMS's default org role).
    - **Group overage:** if a user is in more than 200 groups, Entra omits the claim, so fetch the groups via Graph `/me/transitiveMemberOf` using the sign-in access token.
 7. **Password login for SSO orgs:** `passwordLogin: "admins_only"` (default once SSO is on) blocks password/OTP for members and keeps it for super_admins as break-glass.
 8. **Session:** the JWT carries `userId` and `entraOid` so that A2's `resolvePrincipals` doesn't need a lookup.
@@ -237,7 +244,9 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 - [ ] The same user signs in through SAML and lands on the same KMS user.
 - [ ] An existing password user with the same email signs in with Microsoft and is linked, not duplicated.
 - [ ] A user in a mapped Entra group gets the mapped role and departments. Removing them from the group downgrades them at the next login.
-- [ ] A token from a tenant with no `entra_sso` config is rejected.
+- [ ] A token from a tenant with no `entra_sso` config is rejected with the "not set up" message; that user can still sign in with a password.
+- [ ] A user whose Entra `email` is outside the org's verified domains is not linked to an existing KMS account with that email.
+- [ ] Signing up with an email on an SSO domain goes to Microsoft; other emails sign up with a password as before.
 - [ ] With `passwordLogin: "admins_only"`, a member can't use a password; a super_admin can.
 - [ ] Every SSO login and every user creation is in the audit log.
 - [ ] Password and OTP login still work for orgs without SSO (regression).
@@ -360,8 +369,8 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
-| `A-1` | Finalize this document (shared design + A1) | `TODO` | Johurul | — | | |
-| `A-2` | A2 · F1: consolidate the access predicate into `src/lib/access/documentAccess.js` (no behaviour change) + parity test | `TODO` | Johurul | `A-1` | | |
+| `A-1` | Finalize this document (shared design + A1) | `DONE` | Johurul | — | 2026-10-13 | 2026-10-15 |
+| `A-2` | A2 · F1: consolidate the access predicate into `src/lib/access/documentAccess.js` (no behaviour change) + parity test | `REVIEW` | Johurul | `A-1` | 2026-10-15 | |
 | `A-3` | A1 · Spike: register the KMS Sign-in app; sign in from the test tenant (redirect URIs, scopes, groups claim, `tid` → org) | `TODO` | Johurul | `A-1` | | |
 | `A-4` | A1 · `UserIdentity` migration; remove `PrismaAdapter` | `TODO` | Johurul | `A-3` | | |
 | `A-5` | A1 · Entra OIDC sign-in: SSO config API + admin page, `signIn` callback, JIT user, home realm discovery, `passwordLogin` rule | `TODO` | Johurul | `A-4` | | |
@@ -395,3 +404,16 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
 - `2026-10-15 · Johurul:`
   - **Separate Sign-in app** from the SharePoint connector app (AS-3): the connector app is admin-only and holds data permissions; the Sign-in app is used by every user and holds sign-in scopes only.
   - **NYPA questions not sent.** Build on §2 assumptions; NYPA's design team reviews after award and we adjust then.
+- `2026-10-15 · A-2 (F1 refactor):`
+  - Moved every document-visibility rule into `src/lib/access/documentAccess.js`. Parity test `scripts/ekp/f1-access-parity.test.mjs` (`EKP_DB_TESTS=1 npm run ekp:f1:test`) compares each new function with a verbatim copy of the old code on a 270-document × 6-role seeded matrix (inside a rolled-back transaction) and on all existing org members. Both pass; a deliberate change makes it fail.
+  - **The old copies don't agree with each other.** Preserved as-is (no behaviour change); decide before A-10:
+    1. ~~**dept_admin sees every department's documents, including drafts,** on the repository page and document page (`isOrgAdmin`), but only their own departments in chat.~~ **Fixed 2026-10-16** (see below).
+    2. **Archived documents** are visible to members on the repository and document pages but never in search, chat or the graph.
+    3. **Timelines** check only the document's own department, not its project's department.
+    4. **Knowledge graph / related documents:** super_admin sees every document (drafts, private); uploaders always see their own. Search doesn't do either.
+    5. **Interactions:** the project owner can always record interactions on the project's documents.
+- `2026-10-16 · A-2 follow-up (dept_admin fix):`
+  - **Rule now:** super_admin sees every document. A dept_admin sees what a member sees, plus drafts in the departments they administer (`DepartmentMember.role = "admin"`), never other departments' drafts.
+  - **Applied to:** repository listing and its search (it passed `isOrgAdmin` as `isSuperAdmin`), document page, timelines, and the classification and duplicate-review routes (new `canManageDocument`: uploader, super_admin, or admin of the document's department).
+  - **Also fixed:** `?lifecycle=draft` on the repository listing let members list drafts; the draft rule now lives in `repositoryAccessWhere`, so filters only narrow.
+  - The parity test checks dept_admin against the new rule (including "no drafts from a department they don't administer") and every other role against the old code.

@@ -2,15 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-
-async function hasDepartmentAccess(userId, departmentId) {
-  if (!departmentId) return true;
-  const membership = await prisma.departmentMember.findUnique({
-    where: { departmentId_userId: { departmentId, userId } },
-    select: { id: true },
-  });
-  return Boolean(membership);
-}
+import { canInteractWithDocument } from "@/lib/access/documentAccess";
 
 export async function POST(req, { params }) {
   const session = await getServerSession();
@@ -63,15 +55,7 @@ export async function POST(req, { params }) {
   // org-level admin as implicitly able to view every department/project.
   // This prevents forged interaction events for documents the caller cannot
   // actually reach through normal product surfaces.
-  let canAccess = doc.userId === user.id || isSuperAdmin(role);
-  if (!canAccess && doc.scope === "repository" && doc.lifecycle === "published") {
-    canAccess = await hasDepartmentAccess(user.id, doc.departmentId);
-  }
-  if (!canAccess && doc.project) {
-    canAccess = doc.project.userId === user.id || (
-      doc.project.scope === "org" && await hasDepartmentAccess(user.id, doc.project.departmentId)
-    );
-  }
+  const canAccess = await canInteractWithDocument(doc, { userId: user.id, isSuperAdmin: isSuperAdmin(role) });
   if (!canAccess) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   await prisma.documentInteraction.create({

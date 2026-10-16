@@ -43,7 +43,7 @@ test(
     assert.match(lib, /getAccessibleOrgRelationships/);
     assert.match(lib, /DocumentConflict/);
     assert.match(lib, /kind/);
-    assert.match(lib, /accessSql/);
+    assert.match(lib, /knowledgeAccessSql/);
     assert.match(route, /resolveOrgRole/);
   }
 );

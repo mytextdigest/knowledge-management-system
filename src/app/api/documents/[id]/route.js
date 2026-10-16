@@ -3,8 +3,8 @@ import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { generateSignedUrl, generateSignedDownloadUrl } from "@/lib/s3SignedUrl";
 import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
-import { resolveOrgRole, isOrgAdmin, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
-import { filterAccessibleDocuments } from "@/lib/documentAccess";
+import { resolveOrgRole, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
+import { canViewDocument, filterAccessibleDocuments } from "@/lib/access/documentAccess";
 import { getAccessibleRelatedDocuments, getAccessibleExperts } from "@/lib/knowledgeContext";
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 import { canReviewDecision } from "@/lib/decisionAccess";
@@ -64,16 +64,8 @@ export async function GET(req, { params }) {
     role = resolved.role;
     if (!role) return NextResponse.json(null, { status: 404 });
 
-    if (!isOrgAdmin(role)) {
-      if (doc.lifecycle === "draft") return NextResponse.json(null, { status: 404 });
-
-      const departmentId = doc.departmentId ?? doc.project?.departmentId ?? null;
-      if (departmentId) {
-        const membership = await prisma.departmentMember.findUnique({
-          where: { departmentId_userId: { departmentId, userId: user.id } },
-        });
-        if (!membership) return NextResponse.json(null, { status: 404 });
-      }
+    if (!(await canViewDocument(doc, { userId: user.id, role }))) {
+      return NextResponse.json(null, { status: 404 });
     }
   }
 

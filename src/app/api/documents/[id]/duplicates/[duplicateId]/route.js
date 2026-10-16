@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { resolveOrgRole, isOrgAdmin } from "@/lib/orgGuard";
+import { resolveOrgRole } from "@/lib/orgGuard";
+import { canManageDocument } from "@/lib/access/documentAccess";
 
 export async function PATCH(req, { params }) {
   const session = await getServerSession();
@@ -14,11 +15,11 @@ export async function PATCH(req, { params }) {
 
   const doc = await prisma.document.findUnique({
     where: { id },
-    select: { userId: true, orgId: true, project: { select: { orgId: true } } },
+    select: { userId: true, orgId: true, departmentId: true, project: { select: { orgId: true, departmentId: true } } },
   });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const { user, role } = await resolveOrgRole(session.user.email, doc.orgId || doc.project?.orgId || "");
-  if (!user || (!isOrgAdmin(role) && doc.userId !== user.id)) {
+  if (!user || !(await canManageDocument(doc, { userId: user.id, role }))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

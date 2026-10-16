@@ -12,7 +12,9 @@ test("related-document route grants full bypass only to super_admin", async () =
 });
 
 test("context SQL protects drafts, department documents, and private ownership", async () => {
-  const source = await read("src/lib/knowledgeContext.js");
+  // The access SQL moved to the F1 central access module (A-2).
+  assert.match(await read("src/lib/knowledgeContext.js"), /knowledgeAccessSql/);
+  const source = await read("src/lib/access/documentAccess.js");
   assert.match(source, /lifecycle = 'published'/);
   assert.match(source, /DepartmentMember/);
   assert.match(source, /"userId" = \$\{userId\}/);

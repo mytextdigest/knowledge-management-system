@@ -10,6 +10,7 @@ import { getRecentMemory, recordMemoryTopics } from "@/lib/orgMemberMemory";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 import { classifyWorkflowRequest, formatWorkflowInstruction, getWorkflowSteps } from "@/lib/workflowAssistance";
+import { searchAccessWhere } from "@/lib/access/documentAccess";
 import { isDecisionQuestion, getDecisionEvidence, formatDecisionContext, DECISION_INSTRUCTION } from "@/lib/decisionIntelligence";
 import { isLessonQuestion, getLessonEvidence, formatLessonContext, LESSON_INSTRUCTION } from "@/lib/lessonsIntelligence";
 
@@ -289,24 +290,7 @@ export async function POST(req, { params }) {
       where: {
         id: activeWorkflowDocumentId,
         orgId,
-        OR: [
-          {
-            scope: "repository",
-            lifecycle: "published",
-            ...(isSuperAdmin(role)
-              ? {}
-              : { OR: [{ departmentId: null }, { department: { members: { some: { userId: user.id } } } }] }),
-          },
-          {
-            project: {
-              scope: "org",
-              orgId,
-              ...(isSuperAdmin(role)
-                ? {}
-                : { department: { members: { some: { userId: user.id } } } }),
-            },
-          },
-        ],
+        ...searchAccessWhere({ userId: user.id, orgId, isSuperAdmin: isSuperAdmin(role) }),
       },
       select: { id: true, filename: true, filePath: true, summary: true, content: true },
     });
