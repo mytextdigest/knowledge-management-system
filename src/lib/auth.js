@@ -1,12 +1,34 @@
 import CredentialsProviderModule from "next-auth/providers/credentials";
+import AzureADProviderModule from "next-auth/providers/azure-ad";
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
+import { resolveEntraSignIn, SsoError } from "@/lib/sso/entra";
 
 // next-auth's providers are CommonJS; the bundler unwraps `default`, plain
 // Node (node --test) doesn't.
 const interop = (m) => m.default ?? m;
 const CredentialsProvider = interop(CredentialsProviderModule);
+const AzureADProvider = interop(AzureADProviderModule);
+
+// Microsoft sign-in (EKP A1) through the multi-tenant "KMS Sign-in" Entra app.
+// "organizations" accepts work accounts from any tenant; resolveEntraSignIn
+// then admits only tenants an org has connected (OrgSsoConfig).
+const microsoftProviders = process.env.ENTRA_SSO_CLIENT_ID
+  ? [
+      AzureADProvider({
+        clientId: process.env.ENTRA_SSO_CLIENT_ID,
+        clientSecret: process.env.ENTRA_SSO_CLIENT_SECRET,
+        tenantId: "organizations",
+        authorization: { params: { scope: "openid profile email User.Read" } },
+        // The default profile() downloads the user's photo into the JWT
+        // cookie; we only need the identity.
+        profile(profile) {
+          return { id: profile.oid ?? profile.sub, name: profile.name, email: profile.email, image: null };
+        },
+      }),
+    ]
+  : [];
 
 // The single NextAuth configuration: used by the route handler
 // (src/app/api/auth/[...nextauth]/route.js) and by getServerSession callers.
@@ -73,11 +95,29 @@ export const authOptions = {
 
         return user;
       }
-    })
+    }),
+    ...microsoftProviders
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async signIn({ user, account, profile }) {
+      if (account?.provider !== "azure-ad") return true;
+      try {
+        const { user: kmsUser } = await resolveEntraSignIn(profile);
+        // NextAuth builds the token from this object after signIn returns:
+        // swap the Microsoft id for the KMS user.
+        user.id = kmsUser.id;
+        user.email = kmsUser.email;
+        user.name = kmsUser.name ?? user.name;
+        return true;
+      } catch (err) {
+        if (err instanceof SsoError) return `/auth/signin?error=${err.code}`;
+        console.error("Microsoft sign-in failed:", err);
+        return "/auth/signin?error=SsoFailed";
+      }
+    },
+    async jwt({ token, user, account, profile }) {
       if (user) token.id = user.id;
+      if (account?.provider === "azure-ad") token.entraOid = profile?.oid;
       return token;
     },
     async session({ session, token }) {

@@ -372,9 +372,9 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 |---------|-------|--------|----------|------------|---------|-----------|
 | `A-1` | Finalize this document (shared design + A1) | `DONE` | Johurul | — | 2026-10-13 | 2026-10-15 |
 | `A-2` | A2 · F1: consolidate the access predicate into `src/lib/access/documentAccess.js` (no behaviour change) + parity test | `REVIEW` | Johurul | `A-1` | 2026-10-15 | |
-| `A-3` | A1 · Spike: register the KMS Sign-in app; sign in from the test tenant (redirect URIs, scopes, groups claim, `tid` → org) | `IN_PROGRESS` | Johurul | `A-1` | 2026-10-16 | |
+| `A-3` | A1 · Spike: register the KMS Sign-in app; sign in from the test tenant (redirect URIs, scopes, groups claim, `tid` → org) | `REVIEW` | Johurul | `A-1` | 2026-10-16 | |
 | `A-4` | A1 · `UserIdentity` + `OrgSsoConfig` migration; one NextAuth config, remove `PrismaAdapter` | `DONE` | Johurul | `A-3` | 2026-10-16 | 2026-10-16 |
-| `A-5` | A1 · Entra OIDC sign-in: SSO config API + admin page, `signIn` callback, JIT user, home realm discovery, `passwordLogin` rule | `TODO` | Johurul | `A-4` | | |
+| `A-5` | A1 · Entra OIDC sign-in: SSO config API + admin page, `signIn` callback, JIT user, home realm discovery, `passwordLogin` rule | `IN_PROGRESS` | Johurul | `A-4` | 2026-10-16 | |
 | `A-6` | A1 · Group → role/department mapping, including group overage | `TODO` | Johurul | `A-5` | | |
 | `A-7` | A2 · F3: `ScheduledJob` migration, worker scheduler loop, job registry, admin page | `TODO` | Johurul | `A-1` | | |
 | `A-8` | A2 · Spike: SharePoint site-group expansion + `deltashowsharingchanges` in the test tenant | `TODO` | Johurul | `A-1` | | |
@@ -422,3 +422,8 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
   - **Two NextAuth configs existed** (the route handler had its own copy). The live handler lacked the `otp` provider, so the "existing email" one-time-code login couldn't work. Now one config in `src/lib/auth.js`; both adapter packages removed.
   - **SSO settings live in a new `OrgSsoConfig` table**, not `OrgIntegration` (which requires an access token and can't index `tenantId` inside JSON). `tenantId` is unique, enforcing one tenant ↔ one org.
   - **Spike result for A-3:** the installed `openid-client` 5.7.1 replaces `{tenantid}` in the multi-tenant issuer with the token's `tid`, so `AzureADProvider` with `tenantId: "organizations"` validates tokens from any tenant without a workaround.
+- `2026-10-16 · A-3 / A-5 (part 1):`
+  - **Done:** "Sign in with Microsoft" button (shown only when `ENTRA_SSO_CLIENT_ID` is set), `AzureADProvider` (`organizations`, photo download disabled so the JWT cookie stays small), and `resolveEntraSignIn` in `src/lib/sso/entra.js`: tenant must be connected, email must be on an allowed domain, user created or linked, joins as `employee` or with a pending invite's role and departments, `invite_only` honoured, `email_match` identities upgraded to `sso`, audit-logged. Tests: `scripts/ekp/a1-entra-signin.test.mjs` (10 cases, rolled-back transaction).
+  - **Dev setup:** `scripts/ekp/connect-entra-tenant.mjs` connects a tenant until the admin page exists. The NGI test tenant is connected to org "NGI" (`cmsgu4ezz0000l404xf9nel8h`, domain `nextgenerationinnovation.onmicrosoft.com`).
+  - **Remaining in A-5:** Settings → Single sign-on page with admin consent and verified-domain picker, email-first redirect, sign-up redirect for SSO domains, `passwordLogin` enforcement.
+  - **Open:** B2B guests (contractors) whose email domain isn't the tenant's are refused for now (AS-7). Decide how to admit them safely in A-5.

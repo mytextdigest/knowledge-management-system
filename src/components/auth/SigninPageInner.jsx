@@ -1,13 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signIn } from "next-auth/react";
+import { getProviders, signIn } from "next-auth/react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Mail, Lock, EyeOff, Eye } from "lucide-react";
+
+// Errors NextAuth passes back as ?error=<code>, incl. Microsoft sign-in
+// refusals from src/lib/sso/entra.js.
+const SIGNIN_ERRORS = {
+  SsoNotConfigured:
+    "Your organization hasn't set up Microsoft sign-in for KMS. Sign in with your email and password, or ask your administrator.",
+  SsoDomainNotAllowed:
+    "Your Microsoft account's email isn't on a domain your organization has enabled for KMS. Ask your administrator.",
+  SsoNoEmail: "Your Microsoft account has no email address KMS can use. Ask your administrator.",
+  SsoNotInvited: "Your organization only lets invited people into KMS. Ask your administrator for an invite.",
+  SsoFailed: "Microsoft sign-in failed. Please try again.",
+  OAuthSignin: "Couldn't start Microsoft sign-in. Please try again.",
+  OAuthCallback: "Microsoft sign-in failed. Please try again.",
+  AccessDenied: "Sign-in was denied.",
+};
 
 export default function SigninPageInner() {
   const router = useRouter();
@@ -19,6 +34,16 @@ export default function SigninPageInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [microsoftEnabled, setMicrosoftEnabled] = useState(false);
+
+  useEffect(() => {
+    getProviders().then((providers) => setMicrosoftEnabled(Boolean(providers?.["azure-ad"]))).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const code = searchParams.get("error");
+    if (code) setError(SIGNIN_ERRORS[code] || "Sign-in failed. Please try again.");
+  }, [searchParams]);
 
   const handleSignin = async (e) => {
     e.preventDefault();
@@ -151,6 +176,24 @@ export default function SigninPageInner() {
                 {loading ? "Signing in..." : "Sign In"}
               </Button>
             </form>
+
+            {microsoftEnabled && (
+              <>
+                <div className="flex items-center gap-3 my-4">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-xs text-muted-foreground">or</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => signIn("azure-ad", { callbackUrl })}
+                >
+                  Sign in with Microsoft
+                </Button>
+              </>
+            )}
 
             <p className="text-sm text-center mt-4 text-muted-foreground">
               Don’t have an account?{" "}
