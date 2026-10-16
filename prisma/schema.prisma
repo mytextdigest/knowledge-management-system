@@ -38,6 +38,30 @@ model User {
   documentInteractions DocumentInteraction[]
   lessonsAuthored   Lesson[]
   decisionsReviewed Decision[] @relation("DecisionReviewedBy")
+  identities        UserIdentity[]
+}
+
+// EKP Workstream A (A1/A2): a KMS user's Microsoft (Entra ID) identity. The
+// object id is what SharePoint permissions are checked against.
+// source "sso" comes from a signed sign-in token; "email_match" from looking
+// up the user's verified email in the org's tenant (A-21). See
+// docs/ekp/phase1/WS_A_M365_CONNECTORS.md §3.1.
+model UserIdentity {
+  id          String    @id @default(cuid())
+  userId      String
+  provider    String // "entra"
+  source      String // "sso" | "email_match"
+  tenantId    String    @map("tenant_id")
+  externalId  String    @map("external_id") // Entra object id (oid)
+  email       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastLoginAt DateTime? @map("last_login_at")
+  verifiedAt  DateTime? @map("verified_at") // last email_match re-check
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, tenantId, externalId])
+  @@index([userId])
 }
 
 model OtpToken {
@@ -81,6 +105,7 @@ model Organization {
   knowledgeGaps     KnowledgeGap[]
   repositoryTopics  Topic[]
   integrations      OrgIntegration[]
+  ssoConfig         OrgSsoConfig?
   documentInteractions DocumentInteraction[]
   lessons           Lesson[]
   topicSnapshots    TopicSnapshot[]
@@ -793,6 +818,28 @@ model KnowledgeGap {
 }
 
 // Rank 3 — Automated Knowledge Ingestion Pipeline (Task 7-A)
+
+// EKP Workstream A (A1): an org's Microsoft sign-in setup. One Microsoft
+// tenant maps to exactly one KMS org (tenantId is unique), and sign-in looks
+// orgs up by the token's tid. See WS_A_M365_CONNECTORS.md A1.
+model OrgSsoConfig {
+  id             String   @id @default(cuid())
+  orgId          String   @unique
+  provider       String   @default("entra")
+  tenantId       String   @unique @map("tenant_id")
+  protocol       String   @default("oidc") // "oidc" | "saml"
+  enabled        Boolean  @default(true)
+  // Chosen from the tenant's verified domains only.
+  allowedDomains String[] @default([]) @map("allowed_domains")
+  // [{ groupId, role, departmentIds[] }]
+  groupRoleMap   Json?    @map("group_role_map")
+  passwordLogin  String   @default("admins_only") @map("password_login") // "admins_only" | "all"
+  provisioning   String   @default("auto") // "auto" | "invite_only"
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
 
 model OrgIntegration {
   id        String @id @default(cuid())

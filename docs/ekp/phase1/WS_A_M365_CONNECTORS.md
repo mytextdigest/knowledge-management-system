@@ -164,7 +164,8 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 | `DocumentAcl` | A2 | `documentId`, `principalType` (user / group / tenant), `principalId`, `source`. Indexed on `documentId` and `principalId`. |
 | `Document.externalUrl` | A3 | Graph `webUrl` |
 | `Document.contentType` | A3 | `file` (default) / `page` / `article` |
-| `OrgIntegration` rows with `provider: "entra_sso"`, `"servicenow"` | A1, A4 | Uses the existing table (`@@unique([orgId, provider])`). `entra_sso` stores no secret (KMS Sign-in app credentials are in env). ServiceNow credentials encrypted with `src/lib/crypto.js`. |
+| `OrgSsoConfig` | A1 | One row per org; `tenantId` unique (one tenant ↔ one org, indexed lookup by the token's `tid`). Stores no secret (KMS Sign-in app credentials are in env). Migration `20261016000000_ekp_user_identity_sso_config`. |
+| `OrgIntegration` row with `provider: "servicenow"` | A4 | Uses the existing table. Credentials encrypted with `src/lib/crypto.js`. |
 | SAML Jackson tables | A1 (SAML) | Created by `@boxyhq/saml-jackson` itself, **in a separate Postgres schema `jackson`**, not in Prisma's schema, so `prisma migrate diff` doesn't report them as drift. |
 
 **One migration per PR, merged one at a time** (plan §4.3). B also adds `Document` fields, so agree on all `Document` field names in the review of both documents.
@@ -193,7 +194,7 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
    - optional claims `email`, and `groupMembershipClaims: "SecurityGroup"` so tokens carry group ids.
 2. **Static provider:** one `AzureADProvider` (`id: "azure-ad"`, `tenantId: "organizations"`, client id/secret from new `ENTRA_SSO_CLIENT_ID` / `ENTRA_SSO_CLIENT_SECRET` env). Personal Microsoft accounts are excluded, as in `msGraph.js`.
 3. **Per-org SSO configuration:**
-   - `OrgIntegration` with `provider: "entra_sso"`; `scopeConfig` holds `{ tenantId, allowedDomains[], groupRoleMap, protocol: "oidc" | "saml", passwordLogin: "admins_only" | "all", provisioning: "auto" | "invite_only" }`.
+   - Stored in `OrgSsoConfig` (`orgId`, unique `tenantId`, `protocol: "oidc" | "saml"`, `allowedDomains[]`, `groupRoleMap`, `passwordLogin: "admins_only" | "all"`, `provisioning: "auto" | "invite_only"`, `enabled`). Not `OrgIntegration`: that table requires an access token and can't index the tenant id inside its JSON.
    - **Registration flow:** a KMS super_admin clicks "Connect Microsoft" → Microsoft's admin-consent page for the KMS Sign-in app (needs an Entra admin of that tenant) → back to KMS with the `tenant`. KMS then signs the admin in and reads the tenant's **verified domains** (Graph `/organization`, allowed by `User.Read`). The admin picks `allowedDomains` from that list only, so an org can never claim a domain it doesn't own.
    - **One tenant maps to one KMS org.** Connecting a tenant already used by another org is refused.
    - `provisioning: "auto"` (default): any user of the tenant who signs in joins the org as `employee`. `"invite_only"`: only users with a pending invite or existing membership get in. The customer can also limit who may sign in through "Assignment required" on the enterprise app in Entra.
@@ -206,7 +207,7 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
    - A plain "Sign in with Microsoft" button is also shown for users who don't type an email first.
    - **Sign-up:** an email on an SSO domain is sent to Microsoft instead of creating a password account. Other emails sign up as today.
 5. **`signIn` callback** (same code for OIDC and SAML):
-   - Find the org whose `entra_sso` config has the token's `tid`. **No match → reject** with "Your organization hasn't set up Microsoft sign-in for KMS. Sign in with your email and password, or ask your administrator." The user isn't blocked from KMS, only from the Microsoft button.
+   - Find the org whose `OrgSsoConfig.tenantId` is the token's `tid`. **No match → reject** with "Your organization hasn't set up Microsoft sign-in for KMS. Sign in with your email and password, or ask your administrator." The user isn't blocked from KMS, only from the Microsoft button.
    - Find `UserIdentity` by (`entra`, `tid`, `oid`).
    - If there's none, match an existing `User` by email (`email` claim, lower-cased; `preferred_username` only if it's not a `#EXT#` guest UPN) and link it, **but only if the email's domain is in the org's `allowedDomains`** (verified for that tenant). Entra's `email` attribute can be set to any value by a tenant admin, so linking on email alone would let another tenant take over an account ("nOAuth"). Otherwise create a new user. An existing `email_match` identity for the same `oid` is upgraded to `source: "sso"`.
    - If there's no user, create one just in time, with `emailVerified: true` and no password.
@@ -244,7 +245,7 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 - [ ] The same user signs in through SAML and lands on the same KMS user.
 - [ ] An existing password user with the same email signs in with Microsoft and is linked, not duplicated.
 - [ ] A user in a mapped Entra group gets the mapped role and departments. Removing them from the group downgrades them at the next login.
-- [ ] A token from a tenant with no `entra_sso` config is rejected with the "not set up" message; that user can still sign in with a password.
+- [ ] A token from a tenant with no `OrgSsoConfig` is rejected with the "not set up" message; that user can still sign in with a password.
 - [ ] A user whose Entra `email` is outside the org's verified domains is not linked to an existing KMS account with that email.
 - [ ] Signing up with an email on an SSO domain goes to Microsoft; other emails sign up with a password as before.
 - [ ] With `passwordLogin: "admins_only"`, a member can't use a password; a super_admin can.
@@ -371,8 +372,8 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 |---------|-------|--------|----------|------------|---------|-----------|
 | `A-1` | Finalize this document (shared design + A1) | `DONE` | Johurul | — | 2026-10-13 | 2026-10-15 |
 | `A-2` | A2 · F1: consolidate the access predicate into `src/lib/access/documentAccess.js` (no behaviour change) + parity test | `REVIEW` | Johurul | `A-1` | 2026-10-15 | |
-| `A-3` | A1 · Spike: register the KMS Sign-in app; sign in from the test tenant (redirect URIs, scopes, groups claim, `tid` → org) | `TODO` | Johurul | `A-1` | | |
-| `A-4` | A1 · `UserIdentity` migration; remove `PrismaAdapter` | `TODO` | Johurul | `A-3` | | |
+| `A-3` | A1 · Spike: register the KMS Sign-in app; sign in from the test tenant (redirect URIs, scopes, groups claim, `tid` → org) | `IN_PROGRESS` | Johurul | `A-1` | 2026-10-16 | |
+| `A-4` | A1 · `UserIdentity` + `OrgSsoConfig` migration; one NextAuth config, remove `PrismaAdapter` | `DONE` | Johurul | `A-3` | 2026-10-16 | 2026-10-16 |
 | `A-5` | A1 · Entra OIDC sign-in: SSO config API + admin page, `signIn` callback, JIT user, home realm discovery, `passwordLogin` rule | `TODO` | Johurul | `A-4` | | |
 | `A-6` | A1 · Group → role/department mapping, including group overage | `TODO` | Johurul | `A-5` | | |
 | `A-7` | A2 · F3: `ScheduledJob` migration, worker scheduler loop, job registry, admin page | `TODO` | Johurul | `A-1` | | |
@@ -417,3 +418,7 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
   - **Applied to:** repository listing and its search (it passed `isOrgAdmin` as `isSuperAdmin`), document page, timelines, and the classification and duplicate-review routes (new `canManageDocument`: uploader, super_admin, or admin of the document's department).
   - **Also fixed:** `?lifecycle=draft` on the repository listing let members list drafts; the draft rule now lives in `repositoryAccessWhere`, so filters only narrow.
   - The parity test checks dept_admin against the new rule (including "no drafts from a department they don't administer") and every other role against the old code.
+- `2026-10-16 · A-4:`
+  - **Two NextAuth configs existed** (the route handler had its own copy). The live handler lacked the `otp` provider, so the "existing email" one-time-code login couldn't work. Now one config in `src/lib/auth.js`; both adapter packages removed.
+  - **SSO settings live in a new `OrgSsoConfig` table**, not `OrgIntegration` (which requires an access token and can't index `tenantId` inside JSON). `tenantId` is unique, enforcing one tenant ↔ one org.
+  - **Spike result for A-3:** the installed `openid-client` 5.7.1 replaces `{tenantid}` in the multi-tenant issuer with the token's `tid`, so `AzureADProvider` with `tenantId: "organizations"` validates tokens from any tenant without a workaround.
