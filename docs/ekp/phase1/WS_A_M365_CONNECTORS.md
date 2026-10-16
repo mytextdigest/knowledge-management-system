@@ -372,7 +372,7 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 |---------|-------|--------|----------|------------|---------|-----------|
 | `A-1` | Finalize this document (shared design + A1) | `DONE` | Johurul | — | 2026-10-13 | 2026-10-15 |
 | `A-2` | A2 · F1: consolidate the access predicate into `src/lib/access/documentAccess.js` (no behaviour change) + parity test | `REVIEW` | Johurul | `A-1` | 2026-10-15 | |
-| `A-3` | A1 · Spike: register the KMS Sign-in app; sign in from the test tenant (redirect URIs, scopes, groups claim, `tid` → org) | `REVIEW` | Johurul | `A-1` | 2026-10-16 | |
+| `A-3` | A1 · Spike: register the KMS Sign-in app; sign in from the test tenant (redirect URIs, scopes, groups claim, `tid` → org) | `DONE` | Johurul | `A-1` | 2026-10-16 | 2026-10-16 |
 | `A-4` | A1 · `UserIdentity` + `OrgSsoConfig` migration; one NextAuth config, remove `PrismaAdapter` | `DONE` | Johurul | `A-3` | 2026-10-16 | 2026-10-16 |
 | `A-5` | A1 · Entra OIDC sign-in: SSO config API + admin page, `signIn` callback, JIT user, home realm discovery, `passwordLogin` rule | `IN_PROGRESS` | Johurul | `A-4` | 2026-10-16 | |
 | `A-6` | A1 · Group → role/department mapping, including group overage | `TODO` | Johurul | `A-5` | | |
@@ -427,3 +427,4 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
   - **Dev setup:** `scripts/ekp/connect-entra-tenant.mjs` connects a tenant until the admin page exists. The NGI test tenant is connected to org "NGI" (`cmsgu4ezz0000l404xf9nel8h`, domain `nextgenerationinnovation.onmicrosoft.com`).
   - **Remaining in A-5:** Settings → Single sign-on page with admin consent and verified-domain picker, email-first redirect, sign-up redirect for SSO domains, `passwordLogin` enforcement.
   - **Open:** B2B guests (contractors) whose email domain isn't the tenant's are refused for now (AS-7). Decide how to admit them safely in A-5.
+- `2026-10-16 · A-3 verified:` `dev@nextgenerationinnovation.onmicrosoft.com` signed in with Microsoft on localhost. A KMS user was created (no password, email verified), the `sso` identity was linked to the NGI test tenant, the user joined org NGI as `employee`, and `auth.sso_user_created` was audit-logged.
