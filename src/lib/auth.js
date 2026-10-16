@@ -4,6 +4,7 @@ import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { resolveEntraSignIn, SsoError } from "@/lib/sso/entra";
+import { isPasswordLoginAllowed } from "@/lib/sso/discovery";
 
 // next-auth's providers are CommonJS; the bundler unwraps `default`, plain
 // Node (node --test) doesn't.
@@ -62,6 +63,9 @@ export const authOptions = {
           throw new Error("EMAIL_NOT_VERIFIED");
         }
 
+        // The org has made Microsoft the only way in for this email's domain.
+        if (!(await isPasswordLoginAllowed(user))) throw new Error("USE_MICROSOFT");
+
         return user;
       }
     }),
@@ -90,6 +94,7 @@ export const authOptions = {
           where: { email: credentials.email }
         });
         if (!user) return null;
+        if (!(await isPasswordLoginAllowed(user))) throw new Error("USE_MICROSOFT");
 
         await prisma.otpToken.deleteMany({ where: { email: credentials.email } });
 

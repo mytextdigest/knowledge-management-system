@@ -19,6 +19,7 @@ const SIGNIN_ERRORS = {
   SsoNoEmail: "Your Microsoft account has no email address KMS can use. Ask your administrator.",
   SsoNotInvited: "Your organization only lets invited people into KMS. Ask your administrator for an invite.",
   SsoFailed: "Microsoft sign-in failed. Please try again.",
+  USE_MICROSOFT: "Your organization requires Microsoft sign-in for this email.",
   OAuthSignin: "Couldn't start Microsoft sign-in. Please try again.",
   OAuthCallback: "Microsoft sign-in failed. Please try again.",
   AccessDenied: "Sign-in was denied.",
@@ -35,6 +36,27 @@ export default function SigninPageInner() {
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [microsoftEnabled, setMicrosoftEnabled] = useState(false);
+  // Email-first: the email's domain uses Microsoft sign-in (EKP A-5).
+  const [microsoftEmail, setMicrosoftEmail] = useState(false);
+  const [usePasswordAnyway, setUsePasswordAnyway] = useState(false);
+  const microsoftMode = microsoftEnabled && microsoftEmail && !usePasswordAnyway;
+
+  const checkEmailDomain = async (value) => {
+    if (!microsoftEnabled || !value.includes("@")) return setMicrosoftEmail(false);
+    try {
+      const res = await fetch("/api/auth/sso-discovery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: value }),
+      });
+      setMicrosoftEmail(Boolean((await res.json()).microsoft));
+    } catch {
+      setMicrosoftEmail(false);
+    }
+  };
+
+  const continueWithMicrosoft = () =>
+    signIn("azure-ad", { callbackUrl }, email ? { login_hint: email } : undefined);
 
   useEffect(() => {
     getProviders().then((providers) => setMicrosoftEnabled(Boolean(providers?.["azure-ad"]))).catch(() => {});
@@ -48,6 +70,7 @@ export default function SigninPageInner() {
   const handleSignin = async (e) => {
     e.preventDefault();
     setError("");
+    if (microsoftMode) return continueWithMicrosoft();
     setLoading(true);
 
     const res = await signIn("credentials", {
@@ -64,7 +87,11 @@ export default function SigninPageInner() {
         router.push(`/auth/verify-otp?email=${encodeURIComponent(email)}`);
         return;
       }
-      setError(res.error);
+      if (res.error === "USE_MICROSOFT") {
+        setUsePasswordAnyway(false);
+        setMicrosoftEmail(true);
+      }
+      setError(SIGNIN_ERRORS[res.error] || res.error);
     } else {
       // Clear any remembered org from a previous account on this browser
       // before landing on the picker/redirect.
@@ -116,12 +143,29 @@ export default function SigninPageInner() {
                     required
                     placeholder="you@example.com"
                     className="pl-10"
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setMicrosoftEmail(false);
+                      setUsePasswordAnyway(false);
+                    }}
+                    onBlur={(e) => checkEmailDomain(e.target.value)}
                   />
                 </div>
               </div>
 
-              {/* Password */}
+              {microsoftMode ? (
+                <p className="text-sm text-muted-foreground">
+                  Your organization uses Microsoft sign-in.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setUsePasswordAnyway(true)}
+                    className="text-primary-600 hover:underline"
+                  >
+                    Administrators: use password instead
+                  </button>
+                </p>
+              ) : (
+              /* Password */
               <div>
                 <label className="text-sm font-medium text-foreground">
                   Password
@@ -161,6 +205,7 @@ export default function SigninPageInner() {
                   </button>
                 </div>
               </div>
+              )}
 
               {error && (
                 <p className="text-error-600 text-sm text-center">
@@ -173,11 +218,11 @@ export default function SigninPageInner() {
                 disabled={loading}
                 className="w-full bg-primary-600 hover:bg-primary-700 text-white"
               >
-                {loading ? "Signing in..." : "Sign In"}
+                {loading ? "Signing in..." : microsoftMode ? "Continue with Microsoft" : "Sign In"}
               </Button>
             </form>
 
-            {microsoftEnabled && (
+            {microsoftEnabled && !microsoftMode && (
               <>
                 <div className="flex items-center gap-3 my-4">
                   <div className="h-px flex-1 bg-border" />
@@ -188,7 +233,7 @@ export default function SigninPageInner() {
                   type="button"
                   variant="outline"
                   className="w-full"
-                  onClick={() => signIn("azure-ad", { callbackUrl })}
+                  onClick={continueWithMicrosoft}
                 >
                   Sign in with Microsoft
                 </Button>
