@@ -41,14 +41,23 @@ test("serialize hides nothing it shouldn't and reports not connected", () => {
   assert.equal(serializeSsoConfig({ ...config, tenantId: "t", orgId: "o", id: "i" }).orgId, undefined);
 });
 
-test("connect URL asks for org-wide admin approval with sign-in scopes only", async () => {
+test("connect uses the admin-consent endpoint, then signs in to that tenant", async () => {
   process.env.ENTRA_SSO_CLIENT_ID = "client-123";
   process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
-  const { buildSsoConnectUrl } = await import("../../src/lib/sso/entraAdmin.js");
-  const url = new URL(buildSsoConnectUrl({ state: "s" }));
-  assert.equal(url.origin + url.pathname, "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize");
-  assert.equal(url.searchParams.get("prompt"), "admin_consent");
-  assert.equal(url.searchParams.get("client_id"), "client-123");
-  assert.equal(url.searchParams.get("redirect_uri"), "http://localhost:3000/api/integrations/entra-sso/callback");
-  assert.equal(url.searchParams.get("scope"), "openid profile email User.Read");
+  const { buildAdminConsentUrl, buildTenantSignInUrl } = await import("../../src/lib/sso/entraAdmin.js");
+  const callback = "http://localhost:3000/api/integrations/entra-sso/callback";
+
+  const consent = new URL(buildAdminConsentUrl({ state: "s1" }));
+  assert.equal(consent.origin + consent.pathname, "https://login.microsoftonline.com/organizations/v2.0/adminconsent");
+  assert.equal(consent.searchParams.get("client_id"), "client-123");
+  assert.equal(consent.searchParams.get("redirect_uri"), callback);
+  assert.equal(consent.searchParams.get("scope"), "https://graph.microsoft.com/.default");
+  assert.equal(consent.searchParams.get("prompt"), null, "prompt=admin_consent is rejected by Microsoft (AADSTS901001)");
+
+  const signin = new URL(buildTenantSignInUrl({ state: "s2", tenantId: "tenant-abc" }));
+  assert.equal(signin.origin + signin.pathname, "https://login.microsoftonline.com/tenant-abc/oauth2/v2.0/authorize");
+  assert.equal(signin.searchParams.get("response_type"), "code");
+  assert.equal(signin.searchParams.get("redirect_uri"), callback);
+  assert.equal(signin.searchParams.get("scope"), "openid profile email User.Read");
+  assert.equal(signin.searchParams.get("prompt"), null);
 });

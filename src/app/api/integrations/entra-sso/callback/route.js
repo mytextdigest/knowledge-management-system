@@ -2,15 +2,17 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-import { decryptJson } from "@/lib/crypto";
-import { exchangeSsoCode, fetchTenantInfo } from "@/lib/sso/entraAdmin";
+import { decryptJson, encryptJson } from "@/lib/crypto";
+import { buildTenantSignInUrl, exchangeSsoCode, fetchTenantInfo } from "@/lib/sso/entraAdmin";
 import { CONNECT_STATE_MAX_AGE_MS } from "@/lib/sso/ssoSettings";
 import { logAudit } from "@/lib/auditLog";
 
-// EKP A-5: Microsoft returns here after the tenant admin approves the KMS
-// Sign-in app. Fixed path (registered on the Entra app); the org travels in
-// the encrypted `state`. The KMS user finishing the flow must be the
-// super_admin who started it.
+// EKP A-5: Microsoft returns here twice during "Connect Microsoft" (see
+// src/lib/sso/entraAdmin.js): after the tenant admin approves the KMS Sign-in
+// app (step "consent": tenant id, no code), then after signing in to that
+// tenant (step "signin": a code). Fixed path (registered on the Entra app);
+// the org travels in the encrypted `state`. The KMS user finishing the flow
+// must be the super_admin who started it.
 export async function GET(req) {
   const url = new URL(req.url);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -29,7 +31,6 @@ export async function GET(req) {
   const fail = (message) => NextResponse.redirect(`${page}?error=${encodeURIComponent(message)}`);
 
   if (oauthError) return fail(oauthError.split("\n")[0]);
-  if (!code) return fail("Microsoft didn't return an authorization code.");
   if (Date.now() - Number(state.issuedAt) > CONNECT_STATE_MAX_AGE_MS) {
     return fail("The connection request expired. Please try again.");
   }
@@ -41,11 +42,28 @@ export async function GET(req) {
     return fail("Only the super admin who started the connection can finish it.");
   }
 
+  // Hop 1 done: the app is approved for `tenant`; now sign in to it.
+  if (state.step === "consent") {
+    const consentedTenant = url.searchParams.get("tenant");
+    if (url.searchParams.get("admin_consent") !== "True" || !consentedTenant) {
+      return fail("Microsoft didn't confirm the organization-wide approval.");
+    }
+    const next = encryptJson({ ...state, step: "signin", tenantId: consentedTenant });
+    return NextResponse.redirect(buildTenantSignInUrl({ state: next, tenantId: consentedTenant }));
+  }
+
+  if (state.step !== "signin" || !state.tenantId) return fail("Invalid connection state. Please try again.");
+  if (!code) return fail("Microsoft didn't return an authorization code.");
+
   let tenant;
   try {
-    tenant = await fetchTenantInfo(await exchangeSsoCode(code));
+    tenant = await fetchTenantInfo(await exchangeSsoCode(code, state.tenantId));
   } catch (err) {
     return fail(err.message);
+  }
+  // The organization read with the token must be the one that approved.
+  if (tenant.tenantId !== state.tenantId) {
+    return fail("You signed in to a different Microsoft organization than the one that approved KMS.");
   }
 
   const takenBy = await prisma.orgSsoConfig.findUnique({ where: { tenantId: tenant.tenantId }, select: { orgId: true } });

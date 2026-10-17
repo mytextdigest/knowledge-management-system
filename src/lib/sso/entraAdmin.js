@@ -1,9 +1,13 @@
 // EKP Workstream A, A1 (A-5): connecting an org's Microsoft tenant for sign-in.
-// A KMS super_admin is sent to Microsoft with prompt=admin_consent; a tenant
-// admin approves the KMS Sign-in app for their whole organization, and we
-// read the tenant id, name and verified domains with the returned token.
+// Two hops through the same callback, one flow for the admin:
+//   1. "consent": Microsoft's admin-consent endpoint, where a tenant admin
+//      approves the KMS Sign-in app for the whole organization. Returns the
+//      tenant id but no token. (The authorize endpoint no longer accepts
+//      prompt=admin_consent.)
+//   2. "signin": a normal sign-in to that tenant, whose token reads the
+//      tenant's id, name and verified domains from Graph /organization.
 
-const AUTHORITY = "https://login.microsoftonline.com/organizations";
+const LOGIN = "https://login.microsoftonline.com";
 const SCOPE = "openid profile email User.Read";
 
 function requireEnv(name) {
@@ -17,21 +21,32 @@ export function ssoCallbackUrl() {
   return `${requireEnv("NEXT_PUBLIC_APP_URL")}/api/integrations/entra-sso/callback`;
 }
 
-export function buildSsoConnectUrl({ state }) {
+// Hop 1: approve the app's configured permissions (.default) org-wide.
+export function buildAdminConsentUrl({ state }) {
+  const params = new URLSearchParams({
+    client_id: requireEnv("ENTRA_SSO_CLIENT_ID"),
+    redirect_uri: ssoCallbackUrl(),
+    scope: "https://graph.microsoft.com/.default",
+    state,
+  });
+  return `${LOGIN}/organizations/v2.0/adminconsent?${params.toString()}`;
+}
+
+// Hop 2: sign in to the tenant that just approved the app.
+export function buildTenantSignInUrl({ state, tenantId }) {
   const params = new URLSearchParams({
     client_id: requireEnv("ENTRA_SSO_CLIENT_ID"),
     response_type: "code",
     response_mode: "query",
     redirect_uri: ssoCallbackUrl(),
     scope: SCOPE,
-    prompt: "admin_consent",
     state,
   });
-  return `${AUTHORITY}/oauth2/v2.0/authorize?${params.toString()}`;
+  return `${LOGIN}/${encodeURIComponent(tenantId)}/oauth2/v2.0/authorize?${params.toString()}`;
 }
 
-export async function exchangeSsoCode(code) {
-  const res = await fetch(`${AUTHORITY}/oauth2/v2.0/token`, {
+export async function exchangeSsoCode(code, tenantId) {
+  const res = await fetch(`${LOGIN}/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
