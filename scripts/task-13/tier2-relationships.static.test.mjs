@@ -71,7 +71,7 @@ test(
 
     assert.match(
       s,
-      /doc\.projectId\n\s*\? \{ OR: \[\{ projectId: doc\.projectId \}/
+      /doc\.projectId\s*\? \{ OR: \[\{ projectId: doc\.projectId \}/
     );
 
     assert.doesNotMatch(
