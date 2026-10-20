@@ -8,6 +8,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/auditLog";
+import { applyGroupGrants, computeGroupGrants, hasGroupOverage } from "@/lib/sso/groupMapping";
+import { getUserGroupIds } from "@/lib/sso/entraGraph";
 
 // Error codes shown on the sign-in page (?error=<code>).
 export const SSO_ERRORS = {
@@ -44,7 +46,10 @@ export function emailDomain(email) {
  * Throws SsoError with a SSO_ERRORS code when sign-in must be refused.
  * Returns { user, orgId, created }.
  */
-export async function resolveEntraSignIn(claims, { db = prisma, audit = logAudit } = {}) {
+export async function resolveEntraSignIn(
+  claims,
+  { db = prisma, audit = logAudit, fetchGroupIds = getUserGroupIds } = {}
+) {
   const tenantId = claims.tid;
   const objectId = claims.oid;
   if (!tenantId || !objectId) throw new SsoError(SSO_ERRORS.NOT_CONFIGURED);
@@ -111,13 +116,53 @@ export async function resolveEntraSignIn(claims, { db = prisma, audit = logAudit
     }
   }
 
+  // A-6: Entra group → role/department mapping, applied at every sign-in.
+  // Also runs when the map is now empty, to take back earlier grants.
+  const groupRoleMap = Array.isArray(config.groupRoleMap) ? config.groupRoleMap : [];
+  const previousGrants = identity?.userId === user.id ? identity.groupGrants : null;
+  let groupGrants = previousGrants ?? undefined;
+  let groupChanges = null;
+  if (groupRoleMap.length || previousGrants) {
+    let groupIds = Array.isArray(claims.groups) ? claims.groups : [];
+    let groupsKnown = true;
+    if (groupRoleMap.length && hasGroupOverage(claims)) {
+      try {
+        groupIds = await fetchGroupIds(tenantId, objectId);
+      } catch (err) {
+        // Don't block sign-in; keep the previous grants until groups can be read.
+        console.error("Couldn't read the user's Microsoft groups:", err.message);
+        groupsKnown = false;
+      }
+    }
+    if (groupsKnown) {
+      const result = await applyGroupGrants(db, {
+        orgId: config.orgId,
+        userId: user.id,
+        grants: computeGroupGrants(groupIds, groupRoleMap),
+        previous: previousGrants,
+      });
+      groupGrants = result.stored;
+      groupChanges = result.changes;
+    }
+  }
+
   // Link (or refresh) the identity. An existing email_match identity for the
   // same object id becomes "sso".
   await db.userIdentity.upsert({
     where: { provider_tenantId_externalId: identityKey },
-    update: { userId: user.id, source: "sso", email, lastLoginAt: new Date() },
-    create: { ...identityKey, userId: user.id, source: "sso", email, lastLoginAt: new Date() },
+    update: { userId: user.id, source: "sso", email, lastLoginAt: new Date(), groupGrants },
+    create: { ...identityKey, userId: user.id, source: "sso", email, lastLoginAt: new Date(), groupGrants },
   });
+
+  if (groupChanges && (groupChanges.roleTo || groupChanges.joined.length || groupChanges.left.length)) {
+    await audit({
+      orgId: config.orgId,
+      actorUserId: user.id,
+      targetUserId: user.id,
+      action: "auth.sso_group_mapping_applied",
+      metadata: groupChanges,
+    });
+  }
 
   await audit({
     orgId: config.orgId,

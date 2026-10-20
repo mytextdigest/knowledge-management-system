@@ -57,6 +57,11 @@ model UserIdentity {
   createdAt   DateTime  @default(now()) @map("created_at")
   lastLoginAt DateTime? @map("last_login_at")
   verifiedAt  DateTime? @map("verified_at") // last email_match re-check
+  // A-6: what Entra group mapping last granted this user in the tenant's
+  // org: { role, departmentIds } (departmentIds = memberships it created).
+  // Lets a sign-in take back exactly those grants when the user leaves a
+  // mapped group, without touching roles or memberships set by hand.
+  groupGrants Json?     @map("group_grants")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowLeft, KeyRound, Loader2, CheckCircle2, AlertCircle, Unplug } from 'lucide-react';
+import { ArrowLeft, KeyRound, Loader2, CheckCircle2, AlertCircle, Unplug, Search, Trash2, Plus } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
 
@@ -14,6 +14,13 @@ import { cn } from '@/lib/utils';
 const PROVISIONING_OPTIONS = [
   { value: 'auto', label: 'Anyone in the Microsoft organization', hint: 'They join this org as Employee on first sign-in (or with their invite\'s role).' },
   { value: 'invite_only', label: 'Invited people only', hint: 'Only existing members and people with a pending invite can get in.' },
+];
+
+const ROLE_OPTIONS = [
+  { value: 'super_admin', label: 'Super Admin' },
+  { value: 'dept_admin', label: 'Dept Admin' },
+  { value: 'employee', label: 'Employee' },
+  { value: 'guest', label: 'Guest' },
 ];
 
 const PASSWORD_OPTIONS = [
@@ -33,6 +40,7 @@ export default function MicrosoftSignInPage() {
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [departments, setDepartments] = useState([]);
 
   const load = async () => {
     setLoading(true);
@@ -47,6 +55,7 @@ export default function MicrosoftSignInPage() {
         provisioning: data.provisioning,
         passwordLogin: data.passwordLogin,
         enabled: data.enabled,
+        groupRoleMap: data.groupRoleMap || [],
       } : null);
     } catch (err) {
       setError(err.message);
@@ -57,6 +66,10 @@ export default function MicrosoftSignInPage() {
 
   useEffect(() => {
     load();
+    fetch(`/api/org/${orgId}/department`)
+      .then((r) => r.json())
+      .then((data) => Array.isArray(data) && setDepartments(data))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
@@ -73,6 +86,7 @@ export default function MicrosoftSignInPage() {
     draft.provisioning !== config.provisioning ||
     draft.passwordLogin !== config.passwordLogin ||
     draft.enabled !== config.enabled ||
+    JSON.stringify(draft.groupRoleMap) !== JSON.stringify(config.groupRoleMap || []) ||
     [...draft.allowedDomains].sort().join() !== [...config.allowedDomains].sort().join()
   );
 
@@ -209,6 +223,14 @@ export default function MicrosoftSignInPage() {
               </div>
             </section>
 
+            <GroupRoleMapping
+              orgId={orgId}
+              departments={departments}
+              map={draft.groupRoleMap}
+              onChange={(groupRoleMap) => setDraft((prev) => ({ ...prev, groupRoleMap }))}
+              connectHref={connectHref}
+            />
+
             <OptionGroup
               title="Who can join"
               options={PROVISIONING_OPTIONS}
@@ -280,3 +302,143 @@ function OptionGroup({ title, options, value, onChange }) {
     </section>
   );
 }
+
+// A-6: Entra security group → KMS role (+ departments), applied at each
+// Microsoft sign-in.
+function GroupRoleMapping({ orgId, departments, map, onChange, connectHref }) {
+  const [search, setSearch] = useState('');
+  const [results, setResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(null);
+
+  const runSearch = async () => {
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const res = await fetch(`/api/org/${orgId}/sso/groups?search=${encodeURIComponent(search)}`);
+      const data = await res.json();
+      if (!res.ok) throw Object.assign(new Error(data.error || 'Search failed.'), { needsReconnect: data.needsReconnect });
+      setResults(data.groups);
+    } catch (err) {
+      setSearchError({ message: err.message, needsReconnect: err.needsReconnect });
+      setResults(null);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const mapped = new Set(map.map((m) => m.groupId));
+  const update = (groupId, patch) => onChange(map.map((m) => (m.groupId === groupId ? { ...m, ...patch } : m)));
+  const toggleDept = (entry, deptId) =>
+    update(entry.groupId, {
+      departmentIds: entry.departmentIds.includes(deptId)
+        ? entry.departmentIds.filter((d) => d !== deptId)
+        : [...entry.departmentIds, deptId],
+    });
+
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Roles from Microsoft groups</h2>
+      <p className="text-xs text-gray-500">
+        Members of these Microsoft security groups get the role and departments below each time they sign in with
+        Microsoft. The highest role wins. Leaving a group takes back what it gave; roles you set by hand are never lowered.
+      </p>
+
+      {map.length > 0 && (
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+          {map.map((entry) => (
+            <div key={entry.groupId} className="px-4 py-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{entry.groupName}</p>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <select
+                    value={entry.role}
+                    onChange={(e) => update(entry.groupId, { role: e.target.value })}
+                    className="p-1.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm"
+                  >
+                    {ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                  <button
+                    onClick={() => onChange(map.filter((m) => m.groupId !== entry.groupId))}
+                    className="p-1.5 text-gray-400 hover:text-red-600"
+                    title="Remove mapping"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              {departments.length > 0 && entry.role !== 'super_admin' && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {departments.map((dept) => (
+                    <label key={dept.id} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={entry.departmentIds.includes(dept.id)}
+                        onChange={() => toggleDept(entry, dept.id)}
+                        className="h-3.5 w-3.5"
+                      />
+                      {dept.name}
+                    </label>
+                  ))}
+                </div>
+              )}
+              {entry.role === 'dept_admin' && entry.departmentIds.length === 0 && (
+                <p className="text-xs text-amber-700 dark:text-amber-300">Choose at least one department for Dept Admin.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && runSearch()}
+            placeholder="Find a Microsoft security group"
+            className="w-full pl-8 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm"
+          />
+        </div>
+        <button
+          onClick={runSearch}
+          disabled={searching}
+          className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-medium disabled:opacity-50"
+        >
+          {searching ? 'Searching…' : 'Search'}
+        </button>
+      </div>
+
+      {searchError && (
+        <p className="text-xs text-red-700 dark:text-red-300">
+          {searchError.message}{' '}
+          {searchError.needsReconnect && <a href={connectHref} className="underline">Reconnect</a>}
+        </p>
+      )}
+      {results && (
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700 max-h-64 overflow-y-auto">
+          {results.length === 0 ? (
+            <p className="px-4 py-3 text-xs text-gray-500">No security groups found.</p>
+          ) : results.map((group) => (
+            <div key={group.id} className="px-4 py-2 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{group.name}</p>
+                {group.description && <p className="text-xs text-gray-500 truncate">{group.description}</p>}
+              </div>
+              <button
+                disabled={mapped.has(group.id)}
+                onClick={() => onChange([...map, { groupId: group.id, groupName: group.name, role: 'employee', departmentIds: [] }])}
+                className="inline-flex items-center gap-1 text-sm text-primary-600 hover:underline disabled:text-gray-400 disabled:no-underline flex-shrink-0"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {mapped.has(group.id) ? 'Added' : 'Add'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+

@@ -37,7 +37,8 @@ export async function PATCH(req, { params }) {
   if (!config) return NextResponse.json({ error: "Microsoft sign-in isn't connected" }, { status: 404 });
 
   const body = await req.json().catch(() => ({}));
-  const { data, error } = validateSsoSettingsPatch(body, config);
+  const departments = await prisma.department.findMany({ where: { orgId }, select: { id: true } });
+  const { data, error } = validateSsoSettingsPatch(body, config, { departmentIds: departments.map((d) => d.id) });
   if (error) return NextResponse.json({ error }, { status: 400 });
 
   const updated = await prisma.orgSsoConfig.update({ where: { orgId }, data });

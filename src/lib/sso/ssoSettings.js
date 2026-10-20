@@ -1,6 +1,8 @@
 // EKP Workstream A, A1 (A-5): the editable part of an org's Microsoft sign-in
 // settings, validated in one place (used by PATCH /api/org/[orgId]/sso).
 
+import { validateGroupRoleMap } from "@/lib/sso/groupMapping";
+
 export const PROVISIONING = ["auto", "invite_only"];
 export const PASSWORD_LOGIN = ["admins_only", "all"];
 
@@ -8,10 +10,11 @@ export const PASSWORD_LOGIN = ["admins_only", "all"];
 export const CONNECT_STATE_MAX_AGE_MS = 10 * 60 * 1000;
 
 /**
- * Validate a settings patch against the stored config.
+ * Validate a settings patch against the stored config. `departmentIds` are
+ * the org's departments (for the group mapping).
  * Returns { data } with only the changed, valid fields, or { error }.
  */
-export function validateSsoSettingsPatch(body, config) {
+export function validateSsoSettingsPatch(body, config, { departmentIds = [] } = {}) {
   const data = {};
 
   if (body.allowedDomains !== undefined) {
@@ -29,6 +32,11 @@ export function validateSsoSettingsPatch(body, config) {
   if (body.passwordLogin !== undefined) {
     if (!PASSWORD_LOGIN.includes(body.passwordLogin)) return { error: "Invalid passwordLogin" };
     data.passwordLogin = body.passwordLogin;
+  }
+  if (body.groupRoleMap !== undefined) {
+    const { map, error } = validateGroupRoleMap(body.groupRoleMap, { departmentIds });
+    if (error) return { error };
+    data.groupRoleMap = map;
   }
   if (body.enabled !== undefined) {
     if (typeof body.enabled !== "boolean") return { error: "enabled must be true or false" };
@@ -56,6 +64,7 @@ export function serializeSsoConfig(config) {
     allowedDomains: config.allowedDomains,
     provisioning: config.provisioning,
     passwordLogin: config.passwordLogin,
+    groupRoleMap: Array.isArray(config.groupRoleMap) ? config.groupRoleMap : [],
     updatedAt: config.updatedAt,
   };
 }
