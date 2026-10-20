@@ -444,15 +444,15 @@ Phase 1 integration and cross-testing with Workstream A is task `A-19` (all 3).
 
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
-| `B-1` | Review this document (shared design + B0); confirm the split (§1.1) | `TODO` | Sandeep & Simran (reviewer: Johurul) | — | | |
-| `B-2` | B0 · F2: `AuditLog` entity fields migration, extended `logAudit`, event constants | `TODO` | Sandeep | `B-1` | | |
-| `B-3` | B0 · F2: document "History" tab + audit-log filters | `TODO` | Sandeep | `B-2` | | |
+| `B-1` | Review this document (shared design + B0); confirm the split (§1.1) | `TODO` | Sandeep & Simran (reviewer: Johurul) | — |Yes |Yes |
+| `B-2` | B0 · F2: `AuditLog` entity fields migration, extended `logAudit`, event constants | `TODO` | Sandeep | `B-1` |Yes |Yes |
+| `B-3` | B0 · F2: document "History" tab + audit-log filters | `TODO` | Sandeep | `B-2` |Yes |Yes |
 | `B-4` | B0 · F5: `OrgSetting` migration, registry, `getSetting`/`setSetting`, Settings → Governance page | `TODO` | Simran | `B-1` | | |
 | `B-5` | B0 · F5: move classification/duplicate thresholds from env to settings | `TODO` | Simran | `B-4` | | |
-| `B-6` | B1 · E23: audit on lifecycle, delete and replace routes | `TODO` | Sandeep | `B-2` | | |
-| `B-7` | B1 · E23: supersede (fields, API, banner) | `TODO` | Sandeep | `B-6`, `A-2` | | |
-| `B-8` | B1 · E23: `DocumentVersion` + versions tab + restore | `TODO` | Sandeep | `B-6` | | |
-| `B-9` | B1 · E23: soft delete + restore + purge job | `TODO` | Sandeep | `B-6`, `A-2`, `A-7` | | |
+| `B-6` | B1 · E23: audit on lifecycle, delete and replace routes | `TODO` | Sandeep | `B-2` |Yes |Yes|
+| `B-7` | B1 · E23: supersede (fields, API, banner) | `TODO` | Sandeep | `B-6`, `A-2` | Yes|Partial|
+| `B-8` | B1 · E23: `DocumentVersion` + versions tab + restore | `TODO` | Sandeep | `B-6` | Yes|Partial |
+| `B-9` | B1 · E23: soft delete + restore + purge job | `TODO` | Sandeep | `B-6`, `A-2`, `A-7` |Yes |Partial |
 | `B-10` | B1 · E24: `ownerId` + backfill, `DocumentSteward`, `defaultOwnerId`, ownership APIs and UI, bulk reassign | `TODO` | Simran | `B-2`, `B-4` | | |
 | `B-11` | B0 · F4: `Notification` models, `notify()`, bell, preferences | `TODO` | Simran | `B-1` | | |
 | `B-12` | B2 · E19: `summaryStatus`, summary approve/edit API, badge, "Summaries to review" | `TODO` | Simran | `B-10`, `B-11` | | |
