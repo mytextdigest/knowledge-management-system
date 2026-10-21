@@ -127,7 +127,7 @@ export async function resolveEntraSignIn(
     let groupsKnown = true;
     if (groupRoleMap.length && hasGroupOverage(claims)) {
       try {
-        groupIds = await fetchGroupIds(tenantId, objectId);
+        groupIds = await fetchGroupIds(tenantId, objectId, groupRoleMap.map((m) => m.groupId));
       } catch (err) {
         // Don't block sign-in; keep the previous grants until groups can be read.
         console.error("Couldn't read the user's Microsoft groups:", err.message);

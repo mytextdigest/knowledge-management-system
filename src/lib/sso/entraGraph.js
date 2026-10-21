@@ -60,15 +60,23 @@ export async function listTenantGroups(tenantId, search = "") {
   return (data.value || []).map((g) => ({ id: g.id, name: g.displayName, description: g.description || null }));
 }
 
-/** All group ids a user belongs to, directly or through other groups. */
-export async function getUserGroupIds(tenantId, objectId) {
+/**
+ * Which of `groupIds` the user belongs to, directly or through other groups.
+ * Checked group by group (the mapped groups only), because listing all of a
+ * user's groups needs a user-read permission the KMS Sign-in app doesn't have.
+ */
+export async function getUserGroupIds(tenantId, objectId, groupIds) {
+  const GUID = /^[0-9a-f-]{36}$/i;
+  if (!GUID.test(objectId)) throw new Error("Invalid Microsoft object id");
   const token = await appToken(tenantId);
-  const ids = [];
-  let next = `/users/${encodeURIComponent(objectId)}/transitiveMemberOf/microsoft.graph.group?$select=id&$top=999`;
-  while (next) {
-    const data = await graphGet(token, next);
-    ids.push(...(data.value || []).map((g) => g.id));
-    next = data["@odata.nextLink"] || null;
+  const member = [];
+  for (const groupId of groupIds.filter((id) => GUID.test(id))) {
+    const data = await graphGet(
+      token,
+      `/groups/${groupId}/transitiveMembers/microsoft.graph.user?$filter=id eq '${objectId}'&$count=true&$select=id`,
+      { ConsistencyLevel: "eventual" }
+    );
+    if (data.value?.length) member.push(groupId);
   }
-  return ids;
+  return member;
 }
