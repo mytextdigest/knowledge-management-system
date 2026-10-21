@@ -13,6 +13,13 @@ function formatInterval(minutes) {
   return 'Every day';
 }
 
+// Read a JSON body, or explain a failed response that has none (e.g. a 500).
+async function readJson(res) {
+  const data = await res.json().catch(() => null);
+  if (data) return data;
+  return { error: res.ok ? 'Unexpected empty response.' : `Server error (${res.status}). Check the server logs.` };
+}
+
 function formatWhen(value) {
   return value ? new Date(value).toLocaleString() : '—';
 }
@@ -27,7 +34,7 @@ export default function ScheduledJobsTab({ orgId }) {
     setError('');
     try {
       const res = await fetch(`/api/org/${orgId}/jobs`);
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error || 'Failed to load scheduled jobs.');
       setJobs(data.jobs);
       setIntervalChoices(data.intervalChoices);
@@ -47,7 +54,7 @@ export default function ScheduledJobsTab({ orgId }) {
     setError('');
     try {
       const res = await fetch(`/api/org/${orgId}/jobs/${job.id}${path}`, init);
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error || 'Request failed.');
       setJobs((prev) => prev.map((j) => (j.id === job.id ? data.job : j)));
     } catch (err) {
