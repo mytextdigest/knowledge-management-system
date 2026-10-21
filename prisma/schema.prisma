@@ -111,6 +111,7 @@ model Organization {
   repositoryTopics  Topic[]
   integrations      OrgIntegration[]
   ssoConfig         OrgSsoConfig?
+  scheduledJobs     ScheduledJob[]
   documentInteractions DocumentInteraction[]
   lessons           Lesson[]
   topicSnapshots    TopicSnapshot[]
@@ -880,12 +881,41 @@ model OrgIntegration {
   @@index([orgId])
 }
 
+// EKP Workstream A, F3: scheduled jobs, run by the worker's scheduler loop
+// (worker/scheduler.js). One row per job per org; handlers are registered in
+// src/lib/jobs/registry.js. See docs/ekp/phase1/WS_A_M365_CONNECTORS.md §3.3.
+model ScheduledJob {
+  id              String    @id @default(cuid())
+  key             String    @unique // "<name>:<orgId>" or "<name>:global"
+  name            String // handler key, e.g. "sharepoint.sync"
+  orgId           String?
+  intervalMinutes Int       @map("interval_minutes")
+  enabled         Boolean   @default(false)
+  nextRunAt       DateTime  @map("next_run_at")
+  lastRunAt       DateTime? @map("last_run_at")
+  lastStatus      String?   @map("last_status") // "ok" | "failed" | "running"
+  lastError       String?   @map("last_error")
+  lastDurationMs  Int?      @map("last_duration_ms")
+  lastResult      Json?     @map("last_result") // small summary returned by the handler
+  lockedUntil     DateTime? @map("locked_until")
+  // "Run now": runs at the next scheduler tick even if the job is disabled.
+  runRequestedAt  DateTime? @map("run_requested_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([enabled, nextRunAt])
+  @@index([orgId])
+}
+
 model SyncRun {
   id            String    @id @default(cuid())
   integrationId String    @map("integration_id")
   startedAt     DateTime  @default(now()) @map("started_at")
   finishedAt    DateTime? @map("finished_at")
   status        String    @default("running") // "running" | "completed" | "failed"
+  trigger       String    @default("manual") // "manual" | "scheduled" (EKP F3)
   filesFound    Int       @default(0) @map("files_found")
   filesFailed   Int       @default(0) @map("files_failed")
   error         String?

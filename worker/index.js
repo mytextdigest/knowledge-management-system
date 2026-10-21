@@ -20,6 +20,7 @@ import { decrypt, encrypt } from "../src/lib/crypto.js";
 import { getAppOnlyToken } from "../src/lib/msGraph.js";
 import { getConnector } from "../src/lib/connectors/index.js";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
+import { startScheduler } from "./scheduler.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
 const S3_BUCKET = process.env.S3_BUCKET;
@@ -951,5 +952,11 @@ async function mainLoop() {
     }
   }
 }
+
+// F3 scheduled jobs: handlers enqueue SQS work for the loop above.
+startScheduler(prisma, {
+  enqueue: (body) =>
+    sqs.send(new SendMessageCommand({ QueueUrl: QUEUE_URL, MessageBody: JSON.stringify(body) })),
+});
 
 mainLoop();

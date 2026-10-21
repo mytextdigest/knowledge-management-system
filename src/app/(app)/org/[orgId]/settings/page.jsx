@@ -6,9 +6,10 @@ import {
   Building2, Users, Key, Eye, EyeOff, Loader2,
   CheckCircle2, ArrowLeft, Mail, Shield, Layers,
   Plus, ChevronDown, ChevronUp, UserPlus, Trash2, ExternalLink,
-  ScrollText, Pencil, Check, X as XIcon, Plug, Unplug,
+  ScrollText, Pencil, Check, X as XIcon, Plug, Unplug, Clock,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
+import ScheduledJobsTab from '@/components/settings/ScheduledJobsTab';
 import { cn } from '@/lib/utils';
 
 const ROLE_LABELS = {
@@ -129,7 +130,7 @@ export default function OrgSettingsPage() {
       }
 
       const validTabs = settingsData.role === 'super_admin'
-        ? ['general', 'members', 'departments', 'apikey', 'integrations', 'audit']
+        ? ['general', 'members', 'departments', 'apikey', 'integrations', 'jobs', 'audit']
         : ['members', 'departments'];
       setActiveTab(
         validTabs.includes(requestedTab)
@@ -521,6 +522,7 @@ export default function OrgSettingsPage() {
     { id: 'departments', label: 'Departments', icon: Layers },
     ...(org?.role === 'super_admin' ? [{ id: 'apikey', label: 'API Key', icon: Key }] : []),
     ...(org?.role === 'super_admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
+    ...(org?.role === 'super_admin' ? [{ id: 'jobs', label: 'Scheduled Jobs', icon: Clock }] : []),
     ...(org?.role === 'super_admin' ? [{ id: 'audit', label: 'Audit Log', icon: ScrollText }] : []),
   ];
 
@@ -1174,6 +1176,12 @@ export default function OrgSettingsPage() {
                 ))}
               </div>
             )}
+          </motion.div>
+        )}
+
+        {activeTab === 'jobs' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+            <ScheduledJobsTab orgId={orgId} />
           </motion.div>
         )}
 

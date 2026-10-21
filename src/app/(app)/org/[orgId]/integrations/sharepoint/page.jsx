@@ -329,6 +329,7 @@ export default function SharePointIntegrationPage() {
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-xs text-gray-500">
                           {new Date(run.startedAt).toLocaleString()}
+                          {run.trigger === 'scheduled' ? ' · Scheduled' : ' · Manual'}
                         </span>
                         <span className={cn(
                           'text-xs font-medium px-2 py-0.5 rounded-full capitalize',
