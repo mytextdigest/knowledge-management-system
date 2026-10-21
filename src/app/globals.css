@@ -527,3 +527,29 @@ body {
   min-height: 0;
   overflow: hidden;
 }
+
+/* Invisible text overlay on top of PDF canvas pages (see PdfViewer.jsx) so
+   the rendered text can be selected/copied even though the page itself is pixels. */
+.pdfTextLayer {
+  overflow: hidden;
+  line-height: 1;
+  text-size-adjust: none;
+  opacity: 1;
+}
+
+.pdfTextLayer span,
+.pdfTextLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.pdfTextLayer ::selection {
+  background: rgba(37, 99, 235, 0.35);
+}
+
+.pdfTextLayer ::-moz-selection {
+  background: rgba(37, 99, 235, 0.35);
+}

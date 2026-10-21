@@ -12,7 +12,7 @@ import { Mail, Lock, EyeOff, Eye } from "lucide-react";
 export default function SigninPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
+  const callbackUrl = searchParams.get("callbackUrl") || "/welcome-back";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -41,6 +41,9 @@ export default function SigninPageInner() {
       }
       setError(res.error);
     } else {
+      // Clear any remembered org from a previous account on this browser
+      // before landing on the picker/redirect.
+      await fetch("/api/org/active", { method: "DELETE" }).catch(() => {});
       router.push(callbackUrl);
     }
   };

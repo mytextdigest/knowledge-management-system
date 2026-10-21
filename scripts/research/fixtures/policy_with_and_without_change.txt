@@ -1,0 +1,7 @@
+Expense Policy — Engineering Department
+
+Employee expense reports must be submitted within 30 days of the expense being incurred, with original receipts required for any single item over $25. Reimbursement is processed through the standard payroll cycle.
+
+Purchase orders are mandatory for any commitment over $1,000. Retroactive purchase orders are discouraged and require director-level sign-off.
+
+Effective Q3, the department raised the retroactive PO approval threshold from director-level to VP-level sign-off, after two retroactive POs were approved without adequate review in Q2. This change was made to tighten oversight on large after-the-fact commitments.
