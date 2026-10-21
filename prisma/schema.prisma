@@ -331,6 +331,13 @@ model Document {
   // "manual" (default) for everything uploaded through the existing upload flow.
   sourceProvider     String?   @default("manual") @map("source_provider")
   externalId         String?   @map("external_id")
+  // EKP Workstream A: link back to the original in the source system (A-13),
+  // what kind of item it is (A-15/A-17), and when its source permissions
+  // were last read (A-11). Per-file permissions live in DocumentAcl.
+  externalUrl        String?   @map("external_url")
+  contentType        String    @default("file") @map("content_type") // "file" | "page" | "article"
+  aclSyncedAt        DateTime? @map("acl_synced_at")
+  acl                DocumentAcl[]
   externalModifiedAt DateTime? @map("external_modified_at")
 
   chunks          Chunk[]
@@ -879,6 +886,26 @@ model OrgIntegration {
 
   @@unique([orgId, provider])
   @@index([orgId])
+}
+
+// EKP Workstream A (A-9/A-10): a source-system permission entry for one
+// document, e.g. a SharePoint file shared with a user or group. A document
+// with no rows is governed by KMS rules only; with rows, the user must also
+// match one (src/lib/access/documentAccess.js). principalId is an Entra
+// object id ("user"/"group"), a SharePoint site-group id ("site_group"), or a
+// tenant id ("tenant", e.g. "anyone in the organization" links).
+model DocumentAcl {
+  id            String   @id @default(cuid())
+  documentId    String   @map("document_id")
+  principalType String   @map("principal_type") // "user" | "group" | "site_group" | "tenant"
+  principalId   String   @map("principal_id")
+  source        String   @default("sharepoint")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, principalType, principalId])
+  @@index([principalId])
 }
 
 // EKP Workstream A, F3: scheduled jobs, run by the worker's scheduler loop
