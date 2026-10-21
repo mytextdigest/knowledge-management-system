@@ -453,17 +453,17 @@ Phase 1 integration and cross-testing with Workstream A is task `A-19` (all 3).
 | `B-7` | B1 · E23: supersede (fields, API, banner) | `TODO` | Sandeep | `B-6`, `A-2` | Yes|Partial|
 | `B-8` | B1 · E23: `DocumentVersion` + versions tab + restore | `TODO` | Sandeep | `B-6` | Yes|Partial |
 | `B-9` | B1 · E23: soft delete + restore + purge job | `TODO` | Sandeep | `B-6`, `A-2`, `A-7` |Yes |Partial |
-| `B-10` | B1 · E24: `ownerId` + backfill, `DocumentSteward`, `defaultOwnerId`, ownership APIs and UI, bulk reassign | `TODO` | Simran | `B-2`, `B-4` |Yes |Pending |
-| `B-11` | B0 · F4: `Notification` models, `notify()`, bell, preferences | `TODO` | Simran | `B-1` |Yes |Pending|
-| `B-12` | B2 · E19: `summaryStatus`, summary approve/edit API, badge, "Summaries to review" | `TODO` | Simran | `B-10`, `B-11` | | |
-| `B-13` | B2 · E21: `completeness.js`, publish gate (legacy route + Needs-Review confirm), badge | `TODO` | Simran | `B-4`, `B-12` | | |
+| `B-10` | B1 · E24: `ownerId` + backfill, `DocumentSteward`, `defaultOwnerId`, ownership APIs and UI, bulk reassign | `TODO` | Simran | `B-2`, `B-4` |Yes |Yes |
+| `B-11` | B0 · F4: `Notification` models, `notify()`, bell, preferences | `TODO` | Simran | `B-1` |Yes |Yes|
+| `B-12` | B2 · E19: `summaryStatus`, summary approve/edit API, badge, "Summaries to review" | `TODO` | Simran | `B-10`, `B-11` |Yes |Yes |
+| `B-13` | B2 · E21: `completeness.js`, publish gate (legacy route + Needs-Review confirm), badge | `TODO` | Simran | `B-4`, `B-12` | Yes| Yes|
 | `B-14` | B2 · F6: workflow models migration + `engine.js` + logic tests (incl. never self-approve) | `TODO` | Sandeep | `B-2`, `B-11` | | |
 | `B-15` | B2 · E22: `in_review` state, submit flow, Settings → Workflows admin UI | `TODO` | Sandeep | `B-13`, `B-14` | | |
-| `B-16` | B2 · E22: "My tasks" inbox + document workflow timeline | `TODO` | Simran | `B-14` | | |
+| `B-16` | B2 · E22: "My tasks" inbox + document workflow timeline | `TODO` | Simran | `B-14` |Yes |Yes |
 | `B-17` | B2 · E23.6: decommission approval via the engine | `TODO` | Sandeep | `B-9`, `B-14` | | |
 | `B-18` | B3 · E25: `ReviewPolicy`, `ReviewRecord`, `reviews.due-scan` job, outcomes, escalation | `TODO` | Sandeep | `B-14`, `A-7` | | |
-| `B-19` | B3 · E26: `stale.js` + `content.stale-scan` job + "May be outdated" badge | `TODO` | Simran | `B-18`, `A-7` | | |
-| `B-20` | B4 · E31: governance metrics API + admin page + CSV export | `TODO` | Simran | `B-15`, `B-18` | | |
+| `B-19` | B3 · E26: `stale.js` + `content.stale-scan` job + "May be outdated" badge | `TODO` | Simran | `B-18`, `A-7` |Yes |Pending |
+| `B-20` | B4 · E31: governance metrics API + admin page + CSV export | `TODO` | Simran | `B-15`, `B-18` |Yes |Pending |
 | `B-21` | End-to-end tests for B + regression run of the Met suites | `TODO` | Sandeep & Simran | `B-15`, `B-16`, `B-17`, `B-19`, `B-20` | | |
 | `B-22` | Update RTM status for E19, E21–E26, E31 in the plan | `TODO` | Sandeep & Simran | `B-21`, `A-19` | | |
 
