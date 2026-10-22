@@ -1,14 +1,34 @@
 import { prisma } from "@/lib/prisma";
+import { redactAuditValue } from "@/lib/audit/redact.mjs";
 
-// Records a security/administrative event (role grants, department
-// delete/rename, etc). Never throws — a failed audit write shouldn't
-// block the action it's describing.
-export async function logAudit({ orgId, actorUserId = null, targetUserId = null, action, metadata = null }) {
+// Backward compatible. Audit write failures must not block the original action.
+export async function logAudit({
+  orgId,
+  actorUserId = null,
+  targetUserId = null,
+  action,
+  entityType = null,
+  entityId = null,
+  before = null,
+  after = null,
+  metadata = null,
+}) {
   try {
     await prisma.auditLog.create({
-      data: { orgId, actorUserId, targetUserId, action, metadata },
+      data: {
+        orgId,
+        actorUserId,
+        targetUserId,
+        action,
+        entityType,
+        entityId,
+        before: redactAuditValue(before),
+        after: redactAuditValue(after),
+        metadata: redactAuditValue(metadata),
+      },
     });
   } catch (err) {
-    console.error("Failed to write audit log entry:", action, err);
+    // Avoid logging payloads: they may contain sensitive data.
+    console.error("Failed to write audit log entry:", action, err?.message ?? "unknown error");
   }
 }

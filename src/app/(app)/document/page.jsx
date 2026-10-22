@@ -2,6 +2,10 @@
 import { useEffect, useState, useRef, useCallback, useMemo, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from 'framer-motion';
+import AuditEventList from "@/components/governance/AuditEventList";
+import DocumentVersionsPanel from "@/components/governance/DocumentVersionsPanel";
+import DocumentOwnershipPanel from "@/components/governance/DocumentOwnershipPanel";
+import DocumentCompletenessBadge from "@/components/governance/DocumentCompletenessBadge";
 import Layout from '@/components/layout/Layout';
 import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -933,6 +937,21 @@ function DocumentContent() {
         </p>
       </div>
 
+      {doc?.scope === "repository" && doc?.orgId && (
+        <DocumentOwnershipPanel documentId={doc.id} orgId={doc.orgId} />
+      )}
+
+      {doc?.scope === "repository" && doc?.orgId && (
+        <DocumentCompletenessBadge documentId={doc.id} />
+      )}
+
+      {doc?.lifecycleSuggestion === 'archived' && <div role="status" className="mb-3 rounded border border-amber-400 bg-amber-50 p-3 text-amber-900">May be outdated — this document has been flagged for review.</div>}
+      {doc?.supersededById && (
+        <div role="status" className="rounded border border-amber-400 bg-amber-50 p-3 text-amber-900">
+          This document has been superseded. <a className="underline" href={`/document?id=${encodeURIComponent(doc.supersededById)}`}>Open the replacement document</a>.
+        </div>
+      )}
+
       {/* Document Content */}
       <div className="flex-1 min-h-0">
         <Card className="h-full relative">
@@ -985,6 +1004,12 @@ function DocumentContent() {
 
           {/* Tab Navigation */}
           <div className="flex space-x-1 mt-4">
+            <Button variant={activeTab === 'versions' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('versions')}>
+              <Clock className="w-4 h-4 mr-1" /> Versions
+            </Button>
+            <Button variant={activeTab === 'history' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('history')}>
+              <Clock className="w-4 h-4 mr-1" /> History
+            </Button>
             <Button
               variant={activeTab === 'chat' ? 'default' : 'ghost'}
               size="sm"
@@ -1056,7 +1081,11 @@ function DocumentContent() {
 
         <CardContent className="chat-card-content p-0">
           {/* Content Area - Chat, Summary, or Reading Guide */}
-          {activeTab === 'guide' ? (
+          {activeTab === 'versions' ? (
+            <div className="overflow-y-auto h-full"><DocumentVersionsPanel documentId={id} /></div>
+          ) : activeTab === 'history' ? (
+             <div className="p-4 overflow-y-auto h-full"><AuditEventList url={id ? `/api/documents/${encodeURIComponent(id)}/history` : null} title="Document history" documentMode /></div>
+           ) : activeTab === 'guide' ? (
             <div className="flex flex-col h-full">
               {/* Progress bar */}
               {totalPages > 0 && (

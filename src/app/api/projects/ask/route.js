@@ -76,12 +76,12 @@ export async function POST(req) {
 
     // 🟡 Debug: selected vs unselected docs for mention detection
     const selectedDocsRaw = await prisma.document.findMany({
-      where: { projectId, selected: 1 },
+      where: { projectId, selected: 1, deletedAt: null },
       select: { id: true, filename: true },
     });
 
     const unselectedDocsRaw = await prisma.document.findMany({
-      where: { projectId, selected: 0 },
+      where: { projectId, selected: 0, deletedAt: null },
       select: { id: true, filename: true },
     });
 
@@ -142,7 +142,7 @@ export async function POST(req) {
 
     // 4) Load selected documents only (enforce selected filter)
     const docs = await prisma.document.findMany({
-      where: { projectId, selected: 1 },
+      where: { projectId, selected: 1, deletedAt: null },
     });
 
     if (!docs.length) {

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { AUDIT_EVENTS } from "@/lib/audit/events";
+import { getSetting } from "@/lib/settings";
+import { calculatePurgeAfter } from "@/lib/lifecycle/softDelete.mjs";
 import { generateSignedUrl, generateSignedDownloadUrl } from "@/lib/s3SignedUrl";
-import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
 import { resolveOrgRole, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
 import { canViewDocument, filterAccessibleDocuments } from "@/lib/access/documentAccess";
 import { getAccessibleRelatedDocuments, getAccessibleExperts } from "@/lib/knowledgeContext";
@@ -45,7 +47,7 @@ export async function GET(req, { params }) {
     },
   });
 
-  if (!doc) return NextResponse.json(null, { status: 404 });
+  if (!doc || doc.deletedAt) return NextResponse.json(null, { status: 404 });
 
   const { user, role: ownerOrgRole } = await resolveOrgRole(
     session.user.email,
@@ -228,32 +230,48 @@ export async function DELETE(req, { params }) {
 
   const doc = await prisma.document.findUnique({
     where: { id },
-    include: {
-      topicDocument: { include: { topic: true } },
-    },
+    select: { id: true, orgId: true, project: { select: { orgId: true } }, lifecycle: true, deletedAt: true, filename: true },
   });
+  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (doc.deletedAt) return NextResponse.json({ error: "Document already deleted" }, { status: 409 });
 
-  // Adjust topic centroid before deleting (topic may be deleted if this was last doc)
-  if (doc.topicDocument) {
-    try {
-      const docEmbedding = await computeDocumentEmbedding(id);
-      await adjustTopicOnDocumentRemoval(
-        doc.topicDocument.topicId,
-        docEmbedding,
-        null
-      );
-    } catch (err) {
-      console.error("Failed to adjust topic centroid on document delete:", err.message);
-    }
+  const orgId = doc.orgId || doc.project?.orgId || null;
+  const retentionDays = orgId ? await getSetting(orgId, "retention.deletedDays") : 30;
+  const deletedAt = new Date();
+  const purgeAfter = calculatePurgeAfter(deletedAt, retentionDays);
+  const actor = await prisma.user.findUnique({ where: { email: session.user.email }, select: { id: true } });
+  try {
+    await prisma.$transaction(async (tx) => {
+      const changed = await tx.document.updateMany({
+        where: { id, deletedAt: null },
+        data: { deletedAt, deletedById: actor?.id ?? null, purgeAfter },
+      });
+      if (changed.count !== 1) throw new Error("ALREADY_DELETED");
+      const open = await tx.workflowInstance.findMany({ where: { documentId: id, status: "in_review" }, select: { id: true } });
+      if (open.length) {
+        const ids = open.map((instance) => instance.id);
+        await tx.workflowTask.updateMany({ where: { instanceId: { in: ids }, status: "pending" }, data: { status: "cancelled" } });
+        await tx.workflowInstance.updateMany({ where: { id: { in: ids }, status: "in_review" }, data: { status: "cancelled" } });
+        if (orgId) for (const instance of open) await tx.auditLog.create({ data: {
+          orgId, actorUserId: actor?.id ?? null, action: AUDIT_EVENTS.WORKFLOW_CANCELLED,
+          entityType: "workflow", entityId: instance.id,
+          before: { status: "in_review" }, after: { status: "cancelled", reason: "document_deleted" },
+        } });
+      }
+      if (orgId) await tx.auditLog.create({ data: {
+        orgId, actorUserId: actor?.id ?? null,
+        action: AUDIT_EVENTS.DOCUMENT_DELETED,
+        entityType: "document", entityId: id,
+        before: { deletedAt: null, lifecycle: doc.lifecycle },
+        after: { deletedAt: deletedAt.toISOString(), purgeAfter: purgeAfter?.toISOString() ?? null },
+        metadata: { deletionMode: "soft" },
+      } });
+    });
+  } catch (error) {
+    if (error?.message === "ALREADY_DELETED")
+      return NextResponse.json({ error: "Document already deleted" }, { status: 409 });
+    console.error("Soft delete failed:", error?.message);
+    return NextResponse.json({ error: "Could not delete document" }, { status: 500 });
   }
-
-  // Delete document and its relations
-  await prisma.$transaction(async (tx) => {
-    await tx.message.deleteMany({ where: { conversation: { documentId: id } } });
-    await tx.conversation.deleteMany({ where: { documentId: id } });
-    await tx.chunk.deleteMany({ where: { documentId: id } });
-    await tx.document.delete({ where: { id } });
-  });
-
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, deletedAt, purgeAfter });
 }

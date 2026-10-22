@@ -59,6 +59,7 @@ export function documentAccessSql({
   const own = includeOwn ? Prisma.sql`OR ${t}."userId" = ${userId}` : Prisma.empty;
 
   return Prisma.sql`(
+    ${t}."deletedAt" IS NULL AND (
     ${superAdminAll}
     (${t}.scope = 'repository'
      AND ${t}.lifecycle = 'published'
@@ -71,6 +72,7 @@ export function documentAccessSql({
         AND (${isSuperAdmin} OR ${departmentMemberSql(Prisma.sql`acc_p."departmentId"`, userId)})
     )
     ${own}
+    )
   )`;
 }
 
@@ -104,7 +106,7 @@ export function searchAccessWhere({ userId, orgId, isSuperAdmin = false }) {
 // are the user's departments; adminDeptIds the ones they administer.
 export function repositoryAccessWhere({ orgId, role, userDeptIds, adminDeptIds = [] }) {
   if (isSuperAdmin(role)) {
-    return { OR: [{ scope: "repository", orgId }, { project: { scope: "org", orgId } }] };
+    return { deletedAt: null, OR: [{ scope: "repository", orgId }, { project: { scope: "org", orgId } }] };
   }
   const draftAllowed = role === "dept_admin" && adminDeptIds.length
     ? [

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { getSetting } from "../src/lib/settings/index.js";
 
 export const CATEGORY_TAXONOMY = [
   "Policies",
@@ -148,9 +149,16 @@ export async function classifyDocument({ prisma, openai, documentId, filename, t
     departmentConfidence = Math.min(1, departmentConfidence + 0.05);
   }
 
-  const acceptedCategory = categoryConfidence >= DEFAULT_CATEGORY_THRESHOLD ? category : null;
+  // Governance settings override the original environment-backed defaults per org.
+  const categoryThreshold = effectiveOrgId
+    ? await getSetting(effectiveOrgId, "classification.categoryThreshold")
+    : DEFAULT_CATEGORY_THRESHOLD;
+  const departmentThreshold = effectiveOrgId
+    ? await getSetting(effectiveOrgId, "classification.departmentThreshold")
+    : DEFAULT_DEPARTMENT_THRESHOLD;
+  const acceptedCategory = categoryConfidence >= categoryThreshold ? category : null;
   const suggestedDepartmentId =
-    requestedDepartment && departmentConfidence >= DEFAULT_DEPARTMENT_THRESHOLD
+    requestedDepartment && departmentConfidence >= departmentThreshold
       ? requestedDepartment.id
       : null;
 
@@ -180,7 +188,7 @@ export async function classifyDocument({ prisma, openai, documentId, filename, t
   };
 }
 
-export async function detectDocumentDuplicates({ prisma, documentId, threshold = DEFAULT_DUPLICATE_THRESHOLD }) {
+export async function detectDocumentDuplicates({ prisma, documentId, threshold }) {
   const current = await prisma.document.findUnique({
     where: { id: documentId },
     select: {
@@ -197,6 +205,13 @@ export async function detectDocumentDuplicates({ prisma, documentId, threshold =
 
   const orgId = current.orgId || current.project?.orgId;
   if (!orgId) return [];
+  // Explicit threshold arguments (used by callers/tests) take precedence.
+  const effectiveThreshold = threshold === undefined
+    ? await getSetting(orgId, "duplicates.threshold")
+    : threshold;
+  if (typeof effectiveThreshold !== "number" || !Number.isFinite(effectiveThreshold) || effectiveThreshold < 0 || effectiveThreshold > 1) {
+    throw new Error("Invalid duplicate similarity threshold");
+  }
 
   const currentVector = averageEmbeddings(current.chunks.map((c) => c.embedding));
   if (!currentVector && !current.contentHash) return [];
@@ -237,7 +252,7 @@ export async function detectDocumentDuplicates({ prisma, documentId, threshold =
       const candidateVector = averageEmbeddings(candidate.chunks.map((c) => c.embedding));
       similarity = candidateVector ? cosineSimilarity(currentVector, candidateVector) : 0;
     }
-    if (similarity >= threshold) matches.push({ duplicateOfId: candidate.id, similarity });
+    if (similarity >= effectiveThreshold) matches.push({ duplicateOfId: candidate.id, similarity });
   }
 
   await prisma.documentDuplicate.deleteMany({

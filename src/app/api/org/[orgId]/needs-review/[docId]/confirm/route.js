@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { prisma } from "@/lib/prisma";
+import { notify } from "@/lib/notifications/notify";
+import { publishingCompleteness, PUBLISH_SELECT } from "@/lib/governance/publishGate";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 
 // FR-6 — Accept / Reassign / Create-Project. One endpoint, three shapes:
@@ -30,10 +32,10 @@ export async function POST(req, { params }) {
     where: { id: docId, orgId, scope: "repository" },
     select: {
       id: true, filename: true, filePath: true, departmentId: true, suggestedDepartmentId: true,
-      sourceProvider: true, lifecycle: true, classificationStatus: true, userId: true, visibility: true,
+      sourceProvider: true, lifecycle: true, classificationStatus: true, userId: true, ownerId: true, visibility: true, deletedAt: true,
     },
   });
-  if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!doc || doc.deletedAt) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (doc.lifecycle !== "draft" && doc.classificationStatus !== "needs_review") {
     return NextResponse.json({ error: "Document is not awaiting review" }, { status: 409 });
   }
@@ -55,10 +57,40 @@ export async function POST(req, { params }) {
     targetDepartmentId = departmentId;
   }
 
+  // Publishing is blocked until all organization-required metadata is complete.
+  // Evaluate against the confirmed department, not the unconfirmed suggestion.
+  const publishDoc = await prisma.document.findFirst({
+    where: { id: doc.id, orgId, scope: "repository", deletedAt: null },
+    select: PUBLISH_SELECT,
+  });
+  if (!publishDoc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const completeness = await publishingCompleteness({
+    ...publishDoc, departmentId: targetDepartmentId,
+  });
+  if (!completeness.complete) return NextResponse.json({
+    error: "Required metadata incomplete", completeness,
+  }, { status: 422 });
+
   // Atomic per the NFR: a project created but the document left unassigned
   // (or vice versa) must not happen — both succeed or neither does.
-  const [updatedDoc] = await prisma.$transaction(async (tx) => {
-    let projectId;
+  // Claim the review exactly once. updateMany's conditional write ensures a
+  // concurrent approval cannot create a second project or notification.
+  // Match both review signals to avoid overwriting another review decision.
+  let updatedDoc;
+  try {
+    updatedDoc = await prisma.$transaction(async (tx) => {
+      const claim = await tx.document.updateMany({
+        where: {
+          id: doc.id, orgId, scope: "repository", deletedAt: null,
+          lifecycle: doc.lifecycle,
+          classificationStatus: doc.classificationStatus,
+          OR: [{ lifecycle: "draft" }, { classificationStatus: "needs_review" }],
+        },
+        data: { lifecycle: "published", classificationStatus: "published" },
+      });
+      if (claim.count !== 1) return null;
+
+      let projectId;
     if (newProjectName?.trim()) {
       const project = await tx.project.create({
         data: {
@@ -84,8 +116,18 @@ export async function POST(req, { params }) {
       select: { id: true, filename: true, lifecycle: true, departmentId: true, projectId: true, scope: true },
     });
 
-    return [updated];
-  });
+      return updated;
+    });
+  } catch (error) {
+    // Prisma may surface a write conflict for simultaneous transactions.
+    if (error?.code === "P2034") {
+      return NextResponse.json({ error: "Document review changed; refresh and retry" }, { status: 409 });
+    }
+    throw error;
+  }
+  if (!updatedDoc) {
+    return NextResponse.json({ error: "Document review already resolved or changed" }, { status: 409 });
+  }
 
   // Safety net: FR-6 says confirming "kicks off chunk/embed/summarize for
   // connector-sourced documents that haven't yet run it" — the normal sync
@@ -113,6 +155,22 @@ export async function POST(req, { params }) {
         })
       );
     }
+  }
+
+  // Best-effort notification after confirmation. notify() rechecks current
+  // organization membership and in-app preferences. Never notify the actor.
+  // This is intentionally after the DB transaction and SQS safety net.
+  const recipients = [...new Set([doc.ownerId, doc.userId].filter(Boolean))]
+    .filter((recipientId) => recipientId !== user.id);
+  if (recipients.length) {
+    await notify({
+      orgId,
+      userIds: recipients,
+      type: "content.published",
+      title: "Document review approved",
+      body: "A document you own or uploaded has been approved for publication.",
+      link: `/document?id=${encodeURIComponent(doc.id)}`,
+    });
   }
 
   return NextResponse.json({ document: updatedDoc });

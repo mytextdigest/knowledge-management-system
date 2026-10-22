@@ -28,6 +28,7 @@ export async function GET(req, { params }) {
   const where = {
     orgId,
     scope: "repository",
+    deletedAt: null,
     OR: [{ lifecycle: "draft" }, { classificationStatus: "needs_review" }],
     ...(source ? { sourceProvider: source } : {}),
     ...(departmentId ? { departmentId } : {}),
