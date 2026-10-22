@@ -49,6 +49,35 @@ model User {
   documentInteractions DocumentInteraction[]
   lessonsAuthored   Lesson[]
   decisionsReviewed Decision[] @relation("DecisionReviewedBy")
+  identities        UserIdentity[]
+}
+
+// EKP Workstream A (A1/A2): a KMS user's Microsoft (Entra ID) identity. The
+// object id is what SharePoint permissions are checked against.
+// source "sso" comes from a signed sign-in token; "email_match" from looking
+// up the user's verified email in the org's tenant (A-21). See
+// docs/ekp/phase1/WS_A_M365_CONNECTORS.md §3.1.
+model UserIdentity {
+  id          String    @id @default(cuid())
+  userId      String
+  provider    String // "entra"
+  source      String // "sso" | "email_match"
+  tenantId    String    @map("tenant_id")
+  externalId  String    @map("external_id") // Entra object id (oid)
+  email       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastLoginAt DateTime? @map("last_login_at")
+  verifiedAt  DateTime? @map("verified_at") // last email_match re-check
+  // A-6: what Entra group mapping last granted this user in the tenant's
+  // org: { role, departmentIds } (departmentIds = memberships it created).
+  // Lets a sign-in take back exactly those grants when the user leaves a
+  // mapped group, without touching roles or memberships set by hand.
+  groupGrants Json?     @map("group_grants")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, tenantId, externalId])
+  @@index([userId])
 }
 
 model OtpToken {
@@ -100,6 +129,8 @@ model Organization {
   knowledgeGaps     KnowledgeGap[]
   repositoryTopics  Topic[]
   integrations      OrgIntegration[]
+  ssoConfig         OrgSsoConfig?
+  scheduledJobs     ScheduledJob[]
   documentInteractions DocumentInteraction[]
   lessons           Lesson[]
   topicSnapshots    TopicSnapshot[]
@@ -344,6 +375,13 @@ model Document {
   // "manual" (default) for everything uploaded through the existing upload flow.
   sourceProvider     String?   @default("manual") @map("source_provider")
   externalId         String?   @map("external_id")
+  // EKP Workstream A: link back to the original in the source system (A-13),
+  // what kind of item it is (A-15/A-17), and when its source permissions
+  // were last read (A-11). Per-file permissions live in DocumentAcl.
+  externalUrl        String?   @map("external_url")
+  contentType        String    @default("file") @map("content_type") // "file" | "page" | "article"
+  aclSyncedAt        DateTime? @map("acl_synced_at")
+  acl                DocumentAcl[]
   externalModifiedAt DateTime? @map("external_modified_at")
 
   chunks          Chunk[]
@@ -861,6 +899,32 @@ model KnowledgeGap {
 
 // Rank 3 — Automated Knowledge Ingestion Pipeline (Task 7-A)
 
+// EKP Workstream A (A1): an org's Microsoft sign-in setup. One Microsoft
+// tenant maps to exactly one KMS org (tenantId is unique), and sign-in looks
+// orgs up by the token's tid. See WS_A_M365_CONNECTORS.md A1.
+model OrgSsoConfig {
+  id             String   @id @default(cuid())
+  orgId          String   @unique
+  provider       String   @default("entra")
+  tenantId       String   @unique @map("tenant_id")
+  protocol       String   @default("oidc") // "oidc" | "saml"
+  enabled        Boolean  @default(true)
+  tenantName      String?  @map("tenant_name")
+  // The tenant's verified domains, read from Graph /organization at connect
+  // time. allowedDomains must be a subset.
+  verifiedDomains String[] @default([]) @map("verified_domains")
+  // Chosen from the tenant's verified domains only.
+  allowedDomains String[] @default([]) @map("allowed_domains")
+  // [{ groupId, role, departmentIds[] }]
+  groupRoleMap   Json?    @map("group_role_map")
+  passwordLogin  String   @default("admins_only") @map("password_login") // "admins_only" | "all"
+  provisioning   String   @default("auto") // "auto" | "invite_only"
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
 model OrgIntegration {
   id        String @id @default(cuid())
   orgId     String
@@ -891,12 +955,61 @@ model OrgIntegration {
   @@index([orgId])
 }
 
+// EKP Workstream A (A-9/A-10): a source-system permission entry for one
+// document, e.g. a SharePoint file shared with a user or group. A document
+// with no rows is governed by KMS rules only; with rows, the user must also
+// match one (src/lib/access/documentAccess.js). principalId is an Entra
+// object id ("user"/"group"), a SharePoint site-group id ("site_group"), or a
+// tenant id ("tenant", e.g. "anyone in the organization" links).
+model DocumentAcl {
+  id            String   @id @default(cuid())
+  documentId    String   @map("document_id")
+  principalType String   @map("principal_type") // "user" | "group" | "site_group" | "tenant"
+  principalId   String   @map("principal_id")
+  source        String   @default("sharepoint")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, principalType, principalId])
+  @@index([principalId])
+}
+
+// EKP Workstream A, F3: scheduled jobs, run by the worker's scheduler loop
+// (worker/scheduler.js). One row per job per org; handlers are registered in
+// src/lib/jobs/registry.js. See docs/ekp/phase1/WS_A_M365_CONNECTORS.md §3.3.
+model ScheduledJob {
+  id              String    @id @default(cuid())
+  key             String    @unique // "<name>:<orgId>" or "<name>:global"
+  name            String // handler key, e.g. "sharepoint.sync"
+  orgId           String?
+  intervalMinutes Int       @map("interval_minutes")
+  enabled         Boolean   @default(false)
+  nextRunAt       DateTime  @map("next_run_at")
+  lastRunAt       DateTime? @map("last_run_at")
+  lastStatus      String?   @map("last_status") // "ok" | "failed" | "running"
+  lastError       String?   @map("last_error")
+  lastDurationMs  Int?      @map("last_duration_ms")
+  lastResult      Json?     @map("last_result") // small summary returned by the handler
+  lockedUntil     DateTime? @map("locked_until")
+  // "Run now": runs at the next scheduler tick even if the job is disabled.
+  runRequestedAt  DateTime? @map("run_requested_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([enabled, nextRunAt])
+  @@index([orgId])
+}
+
 model SyncRun {
   id            String    @id @default(cuid())
   integrationId String    @map("integration_id")
   startedAt     DateTime  @default(now()) @map("started_at")
   finishedAt    DateTime? @map("finished_at")
   status        String    @default("running") // "running" | "completed" | "failed"
+  trigger       String    @default("manual") // "manual" | "scheduled" (EKP F3)
   filesFound    Int       @default(0) @map("files_found")
   filesFailed   Int       @default(0) @map("files_failed")
   error         String?
