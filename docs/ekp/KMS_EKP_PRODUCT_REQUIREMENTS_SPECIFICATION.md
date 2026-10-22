@@ -4,8 +4,8 @@
 |---|---|
 | **Product** | KMS (Knowledge Management System) |
 | **Document** | Product Requirements Specification (PRS), Enterprise Knowledge Platform |
-| **Version** | 1.0 (draft), 2026-10-11 |
-| **Source** | NYPA RFP Q26-7821RJM, Attachment 1 §2.1 *Enterprise KM Platform Capabilities* (identical to RFI Q26-7772RJM §3.1) |
+| **Version** | 1.1 (draft), 2026-10-22: NYPA's RFP Q&A answers added (§6) |
+| **Source** | NYPA RFP Q26-7821RJM, Attachment 1 §2.1 *Enterprise KM Platform Capabilities* (identical to RFI Q26-7772RJM §3.1) · NYPA's answers to vendor questions: `docs/ekp/Attachment 5 - Q+A format NYPA Response.xlsx` (cited as "Q&A #n") |
 | **Related** | `docs/ekp/EKP_IMPLEMENTATION_PLAN.md` (phases, workstreams, workflow) · `docs/NYPA_RFP_Q26-7821_KMS_GAP_ANALYSIS.md` (current status) |
 
 
@@ -66,6 +66,8 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
 | **Member** | All employees | Search, ask questions, browse, upload, follow topics. |
 | **Guest** | Limited or external users | Read-only access to what they're permitted to see. |
 
+**NYPA's user numbers (Q&A #8, #69, #191):** about 2,600 users in total, about 200 KM power users (creators/editors), 5 KM team members and about 20 owners/administrators. NYPA and Canals share one Entra tenant. The KM team is the product owner and decides what is retained, archived or retired (Q&A #164, #166).
+
 **Universal rule:** every requirement must respect role and document-level permissions. A user must never see, receive in an answer, or be cited content they can't access in KMS or in the source system.
 
 
@@ -125,7 +127,7 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
 - **Acceptance criteria:**
   - An org admin changes the welcome text, featured items, quick links, widgets and logo in settings, and all users see the change without a deployment.
   - A member who lacks access to a featured document doesn't see it.
-- **Dependencies / notes:** Branding pairs with RFP §6 A7 (NYPA look and feel).
+- **Dependencies / notes:** Branding pairs with RFP §6 A7 (NYPA look and feel). NYPA says Sitecore is not part of the knowledge ecosystem and a SharePoint Online or Teams-based portal with NYPA's look and feel is acceptable (Q&A #70, #130, #153). NYPA and Canals content does not need to be kept separate (Q&A #110), so E1.5 is a "should" for presentation only, not for isolation.
 
 #### E2: Unified, permission-respecting search across repositories
 - **RFP text:** "Enables unified search across key repositories: SharePoint (mandatory), Content Server (target capability), ServiceNow (target capability), which respects original permissions."
@@ -139,13 +141,18 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E2.5** Sync must run on a configurable schedule as well as on demand, incrementally (only changed items).
   - **E2.6** Admins must be able to choose which sites/libraries (or equivalents) are connected, and map them to KMS departments.
   - **E2.7** Each connector must report sync status: last run, items found, items failed, errors.
-  - **E2.8** Connectors for **OpenText Content Server** and **ServiceNow** should meet E2.1–E2.7 (awaiting NYPA).
+  - **E2.8** Connectors for **OpenText Content Server** and **ServiceNow** should meet E2.1–E2.7. NYPA confirms both can be **added after launch** (Q&A #66).
 - **Acceptance criteria:**
   - In a test SharePoint tenant, a file shared with User A but not User B appears in A's search and chat results and never in B's, including as a citation.
   - Removing A's access in SharePoint removes the file from A's results after the next sync.
   - Scheduled sync runs without manual action, and the sync history shows each run.
   - Content Server and ServiceNow: the same tests pass in a test instance of each.
-- **Dependencies / notes:** E32 (Microsoft sign-in). Awaiting NYPA: SharePoint Online vs. on-premises, per-file vs. site-level at go-live, Content Server version and API, ServiceNow modules. **Assumption until NYPA answers:** SharePoint Online with per-file permissions.
+- **Dependencies / notes:** E32 (Microsoft sign-in). NYPA's answers (see §6.2):
+  - **SharePoint:** SharePoint Online in a **GCC** M365 tenant (not GCC High), identity is Entra ID (Q&A #108, #179). In scope at go-live: the Enterprise Knowledge Base (EKB) site (~1,000 documents and ~300 videos) plus 7 other sites (~150 items), about 1,500 files in total and growing (Q&A #132). NYPA will choose which subsets are indexed (Q&A #94). Content stays in place; no bulk migration (Q&A #58, #160).
+  - **Permissions:** whether the solution reads sources with an application identity or as the signed-in user will be decided with NYPA's architecture and cyber teams during design (Q&A #179). The EKB is open to all users and no CEII is in scope (Q&A #102, #140), but we keep **per-file permissions** because the RFP text requires "respects original permissions".
+  - **Content Server:** CE 25.4 in NYPA's private cloud; a connector can be installed inside NYPA's network; OpenText Core is in use (Q&A #114, #161). About 500K knowledge assets in scope, not the 3 million records the RFI mentioned (Q&A #17). Storage is about 5 TB, growing to about 10 TB by year 3 (Q&A #92). How permissions are managed (AD groups or Content Server groups) is unanswered (Q&A #133).
+  - **ServiceNow:** "Australia" release. The main Knowledge Base is open to all users; no script-based user criteria (Q&A #126, #161).
+  - **Freshness:** NYPA gave two answers: "scheduled indexing should be ok" (Q&A #46) and "near real time, under 5 minutes" (Q&A #99). See NFR-6.
 
 #### E3: Semantic/hybrid search with ontology-driven results
 - **RFP text:** "Leverage semantic/hybrid search combining keyword and ontology-driven results."
@@ -216,7 +223,9 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E8.2** Every answer must cite its sources, and each citation must open the source.
   - **E8.3** If the content doesn't support an answer, the system must say so instead of inventing one.
   - **E8.4** Every question, its cited sources and denied attempts must be logged.
-- **Acceptance criteria:** met today. Must remain true once per-file source permissions (E2) are added.
+  - **E8.5** Admins should be able to set up **topic-scoped assistants** that answer only from a chosen subset of content (e.g. a topic, term or collection), alongside the org-wide assistant used by the KM team.
+- **Acceptance criteria:** met today for E8.1–E8.4. Must remain true once per-file source permissions (E2) are added.
+- **Dependencies / notes:** E8.5 comes from NYPA: "Topic based agents should focus on a subset of content related to the topic. However, an agent on all content would be valuable for KM administrative purposes" (Q&A #98).
 
 #### E9: Follow-up questions and conversational refinement (Met)
 - **RFP text:** "Support follow-up questions and conversational refinement (e.g., 'Show me the latest version')."
@@ -244,9 +253,13 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
 - **Functional requirements:**
   - **E11.1** The system must ingest, index and cite **PPTX** (slide text and speaker notes, cited per slide).
   - **E11.2** The system must ingest **images** (PNG, JPG) using OCR and an AI-generated description.
-  - **E11.3** The system must ingest **video and audio** by transcription. Citations must link to the timestamp.
+  - **E11.3** The system must ingest **video and audio** (MP4, MP3). Citations must link to the timestamp. When a transcript file exists for a recording, the system must use it; otherwise it transcribes the audio.
   - **E11.4** Unsupported formats must be rejected with a clear message, not fail silently.
-- **Acceptance criteria:** a PPTX, an image and a short video are each uploaded, appear in search, and can be cited in an answer with the right slide or timestamp.
+  - **E11.5** The system must ingest **VTT transcripts** (and Word transcripts) as timestamped text and link them to their recording when both are present.
+  - **E11.6** The system must handle files up to **8 GB** (large videos) without loading the whole file into memory.
+  - **E11.7** Video segmentation should produce a list of topic segments with start and end times that link into the recording.
+- **Acceptance criteria:** a PPTX, an image, a short video and a video with a VTT transcript are each uploaded, appear in search, and can be cited in an answer with the right slide or timestamp.
+- **Dependencies / notes:** This is NYPA's main content. The in-scope SharePoint files are mostly **PPT, PDF and MP4** (Q&A #44, #132). NYPA lists the file types as "MS Office files, PDF, mp3/mp4, VTT, potentially others" (Q&A #185). There are about 300 hours of recordings today, growing by about 120 hours a year (Q&A #62). Recordings are mostly Teams, some Zoom. Transcripts usually reach SharePoint as VTT or Word files. Recordings stay in the organizer's OneDrive unless moved to SharePoint (Q&A #18, #159). NYPA accepts working from existing transcripts rather than producing our own, and accepts the segment list in E11.7 as video segmentation (Q&A #18). Videos rarely exceed 3–4 GB but can reach 8 GB (Q&A #188). **OCR:** NYPA expects OCR on images, which are mostly unprocessed today (Q&A #96, #97, #115). One earlier answer said "No" to full OCR and transcription for Content Server (Q&A #34); the later answers take precedence.
 
 #### E12: Site pages, wikis and knowledge articles
 - **RFP text:** "Supports site pages, wikis and knowledge articles within connected systems."
@@ -257,6 +270,7 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E12.3** Pages and articles must be searchable, citable and shown with their source type and a link back to the original.
   - **E12.4** Permissions must be enforced the same way as files (E2.2).
 - **Acceptance criteria:** a SharePoint site page and a ServiceNow KB article each appear in search and can be cited with a link to the original.
+- **Dependencies / notes:** ServiceNow scope is the Knowledge Base only, open to all users (Q&A #126). NYPA has no other intranet repositories beyond M365, Content Server, ServiceNow and SharePoint (Q&A #190). Structured SQL data is out of scope (Q&A #184).
 
 #### E13: Indexing, previews and thumbnails
 - **RFP text:** "Allows indexing and previews of common file types, and thumbnails for visual content."
@@ -292,18 +306,19 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E15.6** Auto-discovered topics should be offered to admins as candidate terms (human approval required).
   - **E15.7** Changes to term sets must be audit-logged.
 - **Acceptance criteria:** an admin builds a 3-level term set with synonyms. New documents are auto-tagged from it. Searching a synonym finds the tagged documents (with E3).
-- **Dependencies / notes:** Unblocks E3, E4, E16 and E21. Migrate the existing 7 categories into a default term set.
+- **Dependencies / notes:** Unblocks E3, E4, E16 and E21. Migrate the existing 7 categories into a default term set. Size to NYPA's taxonomy: about **2,600 terms in 8 levels** (Q&A #17, #177). The taxonomy covers both NYPA and Canals concepts. NYPA wants us to leverage and enhance it, not design a new one (Q&A #186, #207).
 
 #### E16: Integration with NYPA/Canals' taxonomy/ontology tool
 - **RFP text:** "Integrates with NYPA/Canal's current taxonomy/ontology tool for controlled vocabularies."
 - **Priority:** Must · **Status:** Gap. Not built.
 - **Functional requirements:**
   - **E16.1** The system must import term sets from an external taxonomy/ontology source into the E15 model, preserving hierarchy, synonyms and IDs.
-  - **E16.2** The import must support a standard exchange format (SKOS RDF and CSV at minimum) and should support a direct connector to NYPA's tool (awaiting NYPA).
+  - **E16.2** The import must support standard exchange formats (**SKOS as RDF/XML and Turtle (TTL)**, and CSV) and should support a direct connector to Progress Semaphore's API or to the SharePoint term store.
   - **E16.3** Re-sync must update changed terms and flag removed ones without breaking document tags.
   - **E16.4** Externally managed term sets must be read-only in KMS (the external tool is the master).
-- **Acceptance criteria:** a SKOS export from a taxonomy tool is imported, documents are tagged with its terms, and a re-import with changes updates them correctly.
-- **Dependencies / notes:** E15. Awaiting NYPA: which tool NYPA uses.
+  - **E16.5** For SharePoint-synced documents, the connector should import the **existing managed-metadata tags** (term-store values already on the item) as document tags, instead of only re-classifying the document.
+- **Acceptance criteria:** a SKOS export (RDF/XML or TTL) from a taxonomy tool is imported, documents are tagged with its terms, and a re-import with changes updates them correctly. A synced SharePoint item that already has managed-metadata values arrives with those terms attached.
+- **Dependencies / notes:** E15. NYPA's tool is **Progress Semaphore**, including Classification Server. Its model is synced into the SharePoint term store. It can be reached by API and exported as SKOS/RDF/TTL (Q&A #59, #113, #128, #177). Semaphore already auto-classifies about **250,000 items across 60 SharePoint sites and 200 libraries** (Q&A #128), so many documents already carry terms. Semaphore's future is undecided: its contract runs to the end of 2026, and NYPA asks vendors to evaluate it alongside alternatives (Q&A #60, #113, #200). KMS must work with Semaphore and also be able to act as the taxonomy master if NYPA chooses that.
 
 #### E17: Knowledge-graph-enriched search, navigation and conversational querying (Met)
 - **RFP text:** "Integration with Knowledge Graphs to support: graph-enriched search to boost results based on relationships, graph-enriched navigation for advanced discovery, and graph-enriched conversational querying to enhance accuracy and relevance of responses."
@@ -314,6 +329,7 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E17.3** Conversational answers must draw on graph relationships. *(Exists.)*
   - **E17.4** Once E15 exists, taxonomy terms should become graph nodes, linking documents through shared terms.
 - **Acceptance criteria:** met today. E17.4 is an enhancement.
+- **Dependencies / notes:** NYPA expects no knowledge-graph use cases beyond taxonomy-driven search, navigation and content discovery. An embedded or a standalone graph is acceptable, and no downstream system consumes the graph (Q&A #116, #193). No further graph work is needed for the RFP beyond E17.4.
 
 ### 4.6 Content Ingestion
 
@@ -334,8 +350,9 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E19.1** At ingest, the system must generate a brief description (2–3 sentences) and a longer summary. *(Exists.)*
   - **E19.2** Generated descriptions must start in a **pending review** state, visibly marked as AI-generated.
   - **E19.3** The owner or a reviewer must be able to approve, edit or regenerate the description. The approver, time and any edits are recorded.
-  - **E19.4** Admins should be able to configure whether description approval is required before publishing (links to E21).
+  - **E19.4** Admins should be able to configure whether description approval is required before publishing (links to E21), **per department or category**, so critical content can require approval while other content doesn't.
 - **Acceptance criteria:** a new document shows a "pending review" AI description, and a reviewer edits and approves it, with the change recorded in the audit log.
+- **Dependencies / notes:** NYPA: "Some level of human review should be required for any/all AI-generated content, but it shouldn't need to be overly burdensome. Greater scrutiny should be required of more highly technical and critical knowledge content" (Q&A #195). This applies to E19, E20 and E22. Keep review quick (one-click approve, bulk approve) and put stricter rules on critical content.
 
 #### E20: Auto-classification / auto-tagging with human review (Met)
 - **RFP text:** "At content ingest/update, enables autoclassification/auto-tagging, with human-in-the-loop review."
@@ -384,6 +401,7 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E23.5** Every lifecycle action (publish, archive, retire, supersede, restore, delete, version change) must write an audit entry: actor, action, document, timestamp, and before/after state.
   - **E23.6** Decommission actions should be able to require approval through E22-style workflows.
 - **Acceptance criteria:** archiving, superseding and deleting a document each appear in the audit log with actor and timestamp, and a superseded document's page links to its replacement.
+- **Dependencies / notes:** NYPA has no official retention schedule for knowledge ("life of org"). It does not need retention enforcement, legal hold or records-request handling (Q&A #181, #187). The E23.4 retention period is only the window for restoring soft-deleted items. It should allow "never purge". The KM team decides what is retained, archived, restricted or retired (Q&A #166).
 
 #### E24: Configurable ownership and stewardship
 - **RFP text:** "Enables configurable ownership and stewardship assignment."
@@ -417,6 +435,7 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E26.3** A stale document must automatically create a review task for its owner (E25), with a notification.
   - **E26.4** Stale documents should be visibly marked in search and answers (feeds E10 explainability).
 - **Acceptance criteria:** a document meeting the staleness rule automatically generates a review task for its owner within one scheduled run, without manual action.
+- **Dependencies / notes:** NYPA confirms the solution "should be able to facilitate content reviews for staleness" and allow metadata enrichment of content (Q&A #194). Content remediation itself (cleanup, taxonomy alignment) is done by NYPA, not the vendor (Q&A #104, #105).
 
 #### E27: Duplicate and near-duplicate detection (Met)
 - **RFP text:** "Detects duplicate documents; flags related/near-duplicate documents."
@@ -426,6 +445,7 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E27.2** Near-duplicates and related documents must be flagged for review.
   - **E27.3** Duplicate detection must work across source systems (an upload vs. a SharePoint copy).
 - **Acceptance criteria:** met today for uploads. Verify E27.3 once more connectors land.
+- **Dependencies / notes:** NYPA says duplicate content "is not believed to be an issue" (Q&A #194). Keep E27 working, but don't add more work here.
 
 ### 4.9 Analytics and Dashboards
 
@@ -490,8 +510,13 @@ All dashboards must:
   - **E32.4** Previews of M365 items should be fetched from M365 on demand when no local copy is kept.
   - **E32.5** Edits must happen in M365. KMS picks them up on the next sync (E2.4).
   - **E32.6** Writing KMS tags back to SharePoint managed metadata may be supported.
+  - **E32.7** KMS search and cited answers should be available to **Microsoft 365 Copilot Chat** through an API, an MCP server or a Copilot connector, enforcing the calling user's permissions.
 - **Acceptance criteria:** a user signs in with Microsoft, finds a SharePoint document, opens it in SharePoint from KMS, edits it there, and sees the update in KMS after the next sync.
 - **Dependencies / notes:** E2. Supports RFP §6 S2 (Active Directory integration) and S9 (US data residency).
+  - **Tenant:** NYPA's M365 G5 tenant is **GCC** (not GCC High), so Microsoft Graph and sign-in use the standard commercial endpoints. NYPA's Azure is believed to be Commercial (Q&A #108). Moving NYPA data between GCC and Commercial environments must be explicitly approved and documented (Q&A #180).
+  - **Licences:** NYPA has Copilot and SharePoint Premium under its GCC licence (Q&A #63). Pay-as-you-go SharePoint Premium (Syntex) processing is not permitted (Q&A #129), so KMS can't rely on it for extraction or tagging. Power Apps Premium is not assigned to creators or admins (Q&A #134).
+  - **E32.7 (Copilot):** NYPA uses M365 Copilot Chat (with no custom Copilot Studio agents in production) and wants retrieved content available to it "through API's/MCP/connectors". NYPA's M365 Governance Review Team approves connection patterns (Q&A #47). Only a limited number of users have M365 Copilot (for Work); everyone has Copilot (for web) (Q&A #111). Copilot already reaches all M365 content a user can access (Q&A #150), so KMS's value there is its curated, governed, cited answers.
+  - **Sign-in protocol:** NYPA hasn't said whether SAML 2.0 or OIDC is preferred. Keep both (Workstream A, AS-4).
 
 
 ## 5. Non-Functional Requirements
@@ -503,32 +528,77 @@ These apply to all 32 requirements. Targets marked *(proposed)* need team agreem
 | NFR-1 | Security | Permissions are enforced server-side in every API, search query, answer, preview, dashboard and export. Never only in the UI. |
 | NFR-2 | Security | Every state change (publish, approve, delete, reassign, configuration change) is recorded in the audit log. |
 | NFR-3 | Configurability | Thresholds, term sets, workflows, review policies, required fields and landing-page content are editable in admin settings, not code or environment variables (RFP §6 A1). |
-| NFR-4 | Performance | Search results p95 ≤ 2 s. First token of an answer p95 ≤ 4 s *(proposed)*. |
-| NFR-5 | Throughput | Ingestion and classification sustain at least 500 documents in 30 minutes (the benchmark from RFP §2.2). |
-| NFR-6 | Freshness | Source-system changes, including permission changes, reflected within one sync interval. Default ≤ 60 minutes *(proposed)*. |
-| NFR-7 | Data residency | Content, indexes and AI processing stay in the continental US (RFP §6 S9). |
+| NFR-4 | Performance | Search results p95 ≤ 2 s. First token of an answer p95 ≤ 4 s *(proposed)*. NYPA's stated limit is under 10 s for search and AI answers (Q&A #48). |
+| NFR-5 | Throughput | Ingestion and classification sustain at least 500 documents in 30 minutes. NYPA confirms this is a **firm minimum**, matching what they do today (Q&A #65). |
+| NFR-6 | Freshness | Source-system changes, including permission changes, reflected within one sync interval. Default ≤ 60 minutes *(proposed)*. The interval must be configurable **down to 5 minutes**, because NYPA answered both "scheduled indexing should be ok" (Q&A #46) and "near real time, under 5 minutes" (Q&A #99). |
+| NFR-7 | Data residency | Content, indexes and AI processing stay in the continental US (RFP §6 S9). NYPA permits no offshore resources, including staff who can access NYPA data (Q&A #71–#73). |
 | NFR-8 | Usability | All features work in current Chrome and Edge. Admin settings need no technical knowledge. |
 | NFR-9 | Quality | Each requirement ships with automated tests (`node --test`), including permission tests for a member and a guest. |
+| NFR-10 | Scale | Sized for about 2,600 users with **100 concurrent users at peak** (Q&A #48, #69), about 1,500 SharePoint files at go-live growing 10–20% a year, and up to about 500K Content Server assets (about 5–10 TB) once that connector is added (Q&A #17, #92, #93). |
+| NFR-11 | AI data use | NYPA content must never be used to train a vendor's models without explicit authorization. This must be enforced contractually and technically (Q&A #180). Each AI provider and hosting model is approved case by case. NYPA has no mandated AI service, such as Azure OpenAI (Q&A #32, #64). |
+| NFR-12 | Data portability | All data and metadata can be exported in standard, non-proprietary formats. KMS is documented with architecture diagrams, ERDs and OpenAPI specifications. Proprietary elements are identified (Q&A #155). |
+| NFR-13 | Language | English only (Q&A #103). |
 
 
 ## 6. Assumptions and Open Questions
 
-**Assumptions (until NYPA answers otherwise):**
-- NYPA uses **SharePoint Online** (M365), and per-file permissions are required.
-- Microsoft sign-in is through **Entra ID**. NYPA registers the KMS application after award.
-- Test instances of Content Server and ServiceNow are provided after award.
-- NYPA's taxonomy tool can export SKOS or CSV.
+### 6.1 Assumptions
 
-**Open questions (sent to NYPA, due 14 Oct):**
+Updated 2026-10-22 from NYPA's answers to other vendors' RFP questions. NYPA confirmed that its RFI answers remain valid (Q&A #107, #183).
 
-| # | Question | Affects |
-|---|---|---|
-| Q1 | Is per-file permission inheritance required at go-live? | E2 |
-| Q2 | SharePoint Online only, or on-premises too? | E2, E12, E32 |
-| Q3 | Are Content Server and ServiceNow needed at go-live? | E2, E12 |
-| Q4 | SAML 2.0 or OIDC preferred? | E32 |
-| Q5 | Which taxonomy/ontology tool does NYPA use? | E16 |
-| Q6 | Which ServiceNow modules should be searchable? | E2, E12 |
+| Assumption | Status |
+|---|---|
+| NYPA uses **SharePoint Online** (M365), and per-file permissions are required. | SharePoint Online **confirmed** (GCC tenant). Per-file is kept by our choice (see Q1). |
+| Microsoft sign-in is through **Entra ID**. NYPA registers the KMS application after award. | **Confirmed.** NYPA and Canals share one tenant (Q&A #179). |
+| Test instances of Content Server and ServiceNow are provided after award. | Partly confirmed: non-production environments exist, and NYPA would consider giving vendors access for testing (Q&A #136). |
+| NYPA's taxonomy tool can export SKOS or CSV. | **Confirmed:** SKOS/RDF/TTL (Q&A #113). |
+
+### 6.2 Answers to our open questions
+
+We didn't send these questions ourselves. Other vendors asked equivalent questions, and NYPA's answers are below.
+
+| # | Question | NYPA's answer | Affects |
+|---|---|---|---|
+| Q1 | Is per-file permission inheritance required at go-live? | **Not answered directly.** Whether to read sources with an application identity or as the signed-in user will be decided with NYPA's architecture and cyber teams during design (Q&A #179). The EKB is open to all users (Q&A #102). **Decision:** keep per-file permissions. | E2 |
+| Q2 | SharePoint Online only, or on-premises too? | **SharePoint Online**, GCC tenant (Q&A #108). | E2, E12, E32 |
+| Q3 | Are Content Server and ServiceNow needed at go-live? | **No, they can be added later** (Q&A #66). | E2, E12 |
+| Q4 | SAML 2.0 or OIDC preferred? | **Not answered.** Entra ID is the identity provider (Q&A #179). Keep both. | E32 |
+| Q5 | Which taxonomy/ontology tool does NYPA use? | **Progress Semaphore**: ~2,600 terms, 8 levels, synced to the SharePoint term store, API access, SKOS/RDF/TTL export (Q&A #59, #113, #177). | E15, E16 |
+| Q6 | Which ServiceNow modules should be searchable? | **Knowledge Base**, open to all users, no script-based user criteria (Q&A #126). | E2, E12 |
+
+### 6.3 Other NYPA notes that affect the product
+
+**Scope and approach**
+- NYPA is seeking a **technology solution**, not a broader KM programme (Q&A #204). Both a COTS product and a custom solution are acceptable (Q&A #211). A SharePoint/M365-based or a new platform are both acceptable (Q&A #54, #199).
+- The existing SharePoint setup "is functional and can be integrated with and/or enhanced" rather than rebuilt (Q&A #206).
+- Out of scope: structured SQL data (Q&A #184); languages other than English (Q&A #103); vendor-led content remediation, taxonomy development, metadata mapping and migration, which NYPA does itself (Q&A #104, #105); and business-process or workflow-development services (Q&A #41).
+
+**Deployment and operations (Workstream G)**
+- **Hosting:** vendor-managed SaaS with logical separation, hosted in the US, with **SOC 2 Type II**, is acceptable (Q&A #19). Single-cloud SaaS is acceptable (Q&A #152). PaaS in NYPA's own Azure subscription is also acceptable (Q&A #109). Alternative deployment options may be priced (Q&A #29). Cloud hosting and licences must be included in the price (Q&A #68).
+- **Environments:** four are required: Development, Test, QA and Production (Q&A #67).
+- **Recovery:** recovery time and recovery point objectives (RTO/RPO) are 48 hours (Q&A #100, #101).
+- **SOC 2 Type II** must be submitted with the proposal. A penetration test alone is not a substitute (Q&A #33, #143, #156).
+- **Open source:** components are reviewed and approved case by case, so keep a software bill of materials (SBOM) (Q&A #192).
+- **After launch:** NYPA's IT team runs the solution, and the vendor handles complex (level 3) issues (Q&A #81, #138, #182).
+- **Training:** a train-the-trainer model for the KM team, IT owners and admins (about 3 IT support staff, 6 admins and 200 everyday users to reach) (Q&A #80, #141).
+
+**Demo and dates**
+- The proposal deadline moved to **4 Nov 2026** (Q&A #82, #147, #148).
+- A **working demo** is required within two weeks of notification. NYPA data isn't needed, but the demo must not be slides or screenshots and must be consistent with NYPA's government-restricted status (Q&A #84, #173). Build the demo data to match NYPA's content: an EKB-like library of PPT, PDF and MP4 files with VTT transcripts, and an 8-level SKOS taxonomy.
+- The project starts in January with "an expedited timeline". It is a fixed-price, 3-year term, and EKP is priced and evaluated separately from Semantic and LLMT (Q&A #13, #77, #78, #119).
+
+**Related capabilities outside §2.1 (useful for reuse)**
+- Recommendations should be pushed into **Teams channels or groups** (Q&A #189, Lessons Learned scope). E6 recommendations could feed this.
+- About 350 lessons learned are stored in the SharePoint EKB, and all 2,600 users may contribute (Q&A #57, #142).
+- Knowledge-transfer events: about 60 a year, rising to about 120, each 1–3 hours or longer (Q&A #17, #117).
+
+**Unanswered or contradictory (don't build on these yet)**
+- Accessibility standard (WCAG / Section 508) (Q&A #131).
+- How Content Server permissions are managed (AD vs. Content Server groups) (Q&A #133).
+- Azure landing zone and networking (Q&A #137); Teams app and Power Platform DLP policies (Q&A #135).
+- Whether LLM endpoints are provided by NYPA or the vendor (Q&A #106).
+- Freshness: "scheduled is ok" vs. "under 5 minutes" (see NFR-6).
+- OCR: "No" (Q&A #34) vs. "Yes, OCR all images and video" (Q&A #96, #115). We follow the later answers.
 
 
 ## 7. Traceability
