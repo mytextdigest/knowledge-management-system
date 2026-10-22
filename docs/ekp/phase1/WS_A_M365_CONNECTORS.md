@@ -394,7 +394,7 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 | `A-5`  | A1 · Entra OIDC sign-in: SSO config API + admin page, `signIn` callback, JIT user, home realm discovery, `passwordLogin` rule | `DONE` | Johurul  | `A-4`                      | 2026-10-16 | 2026-10-19 |
 | `A-6`  | A1 · Group → role/department mapping, including group overage                                                                    | `DONE`        | Johurul  | `A-5`                      | 2026-10-20 | 2026-10-21 |
 | `A-7`  | A2 · F3: `ScheduledJob` migration, worker scheduler loop, job registry, admin page                                              | `DONE`        | Johurul  | `A-1`                      | 2026-10-21 | 2026-10-21 |
-| `A-8`  | A2 · Spike: SharePoint site-group expansion + `deltashowsharingchanges` in the test tenant                                      | `IN_PROGRESS`        | Johurul  | `A-1`                      | 2026-10-21 | |
+| `A-8`  | A2 · Spike: SharePoint site-group expansion + `deltashowsharingchanges` in the test tenant                                      | `DONE`        | Johurul  | `A-1`                      | 2026-10-21 | 2026-10-22 |
 | `A-9`  | A2 · `DocumentAcl` migration + ACL capture in sync                                                                              | `TODO`        | Johurul  | `A-2`, `A-8`             |            |            |
 | `A-10` | A2 · F1 ACL clause + `resolvePrincipals` (cached)                                                                               | `TODO`        | Johurul  | `A-9`, `A-21`            |            |            |
 | `A-11` | A2 · Scheduled `sharepoint.sync`, permission-only re-sync, daily `acl-refresh`                                                | `TODO`        | Johurul  | `A-7`, `A-9`, `B-4`    |            |            |
@@ -472,3 +472,19 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
   - **Site-group membership isn't available from Graph v1.0.** SharePoint REST (`/_api/web/sitegroups(n)/users`) rejects a client-secret app-only token (401); SharePoint app-only requires a **certificate** credential and SharePoint's own `Sites.Selected` (application) permission.
   - **Proposed (pending Johurul's decision):** add a certificate + SharePoint `Sites.Selected` to the SharePoint connector app and resolve site groups via REST (correct for communication sites and custom groups). Rejected alternative: mapping Owners/Members to the M365 group (team sites only; Visitors and communication sites unresolvable).
   - **Still to test:** files shared with one user, a security group, an org-wide link; sharing with unlicensed users; delta with `Prefer: deltashowsharingchanges`.
+- `2026-10-22 · A-8 spike, final findings (NGI Engineering site, 4 test files):`
+  - **Certificate decision (option A) done:** the SharePoint connector app has a certificate (`CN=KMS SharePoint Connector`, thumbprint `DB844F7C…D740D4`, expires 2028-10-20; key outside the repo, `SHAREPOINT_CERT_PATH` / `SHAREPOINT_CERT_KEY_PATH`) and SharePoint `Sites.Selected` (application). SharePoint REST with a certificate-signed client assertion works with the existing per-site grants: `/_api/web/sitegroups(n)/users` returns members. Deployed workers will need the PEMs as environment variables.
+  - **Site-group members** (Engineering): *Members* = `c:0o.c|federateddirectoryclaimprovider|<M365 group id>` (that group's members); *Owners* = the same login with `_o` suffix (the M365 group's **owners**) + `SHAREPOINT\system`; *Visitors* = empty. Other login forms to handle: `i:0#.f|membership|<upn>` (user), `c:0t.c|tenant|<group id>` (security group), "Everyone" / `spo-grid-all-users` (whole tenant).
+  - **What each sharing type looks like** in `GET /drives/…/items/{id}/permissions`:
+    - specific user → direct `grantedToV2.user` (Entra object id);
+    - security group → direct `grantedToV2.group` (Entra group id, login `c:0t.c|tenant|…`);
+    - "People in <org>" link → direct entry with `link.scope = organization`;
+    - not shared → inherited site-group entries + the M365 group owners (`grantedToV2.group` with `_o` login).
+    - Sharing a file **breaks inheritance**: the site-group entries are copied onto the file as direct entries, so a file's permissions are always "site groups + extras".
+    - Any role (`read`/`write`/`owner`) means the principal can see the file.
+  - **No license needed:** sharing with unlicensed users (emp1, emp2) and a security group of unlicensed users worked without any warning.
+  - **Permission-only changes are detectable:** delta with `Prefer: deltashowsharingchanges, hierarchicalsharing` marks items with `@microsoft.graph.sharedChanged = true` (no marker without the header).
+  - **Design for A-9/A-10 (from these findings):**
+    - Capture: for every synced file, read its permissions and store **expanded** rows in `DocumentAcl`. Site groups are resolved through SharePoint REST, cached per site per sync run, and stored as their members, so no `site_group` rows are needed at query time. Principal types: `user` (object id), `group` (Entra group id = its members), `group_owners` (Entra group id, `_o` logins), `tenant` (org links, "Everyone"). Users found only by UPN in site groups are resolved to object ids with Graph `/users/{upn}` (`User.Read.All` on the connector app). `SHAREPOINT\system` is ignored.
+    - Enforcement (`resolvePrincipals`): the user's object id (from `UserIdentity`), their transitive group ids, the groups they own, and the tenant id.
+    - Sync: request delta with the sharing header; when an item has `sharedChanged` but an unchanged `externalModifiedAt`, refresh its ACL without re-downloading it. (Today that path skips the file entirely.)
