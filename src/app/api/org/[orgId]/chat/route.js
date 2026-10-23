@@ -388,6 +388,7 @@ export async function POST(req, { params }) {
       filePath: c.filePath,
       externalUrl: c.externalUrl || null,
       sourceProvider: c.sourceProvider || null,
+      contentType: c.contentType || "file",
       department: c.department_name,
       project: c.project_name,
       texts: [],
@@ -416,7 +417,7 @@ export async function POST(req, { params }) {
       preview: g.texts.join(" ").slice(0, 900),
       url: g.filePath
         ? await generateSignedUrl(g.filePath).catch(() => null)
-        : g.externalUrl && g.sourceProvider === "sharepoint"
+        : g.externalUrl && g.sourceProvider === "sharepoint" && g.contentType !== "page"
         ? sourcePreviewUrl(g.documentId) // A-14 no-copy: KMS checks access, then streams it
         : null,
       externalUrl: g.externalUrl,

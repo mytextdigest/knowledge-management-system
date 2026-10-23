@@ -186,8 +186,13 @@ export async function getFolderTree({ accessToken, siteId }) {
 // spike). Without `hierarchicalsharing`, a folder's sharing change is
 // reported on the items below it too.
 export async function getDelta({ accessToken, siteId, cursor, sharingChanges = false }) {
+  return getDriveDelta({ accessToken, rootUrl: `${GRAPH_BASE}/sites/${siteId}/drive/root/delta`, cursor, sharingChanges });
+}
+
+// A-15: the same delta walk for any drive (e.g. a site's Site Pages library).
+export async function getDriveDelta({ accessToken, driveId, rootUrl, cursor, sharingChanges = false }) {
   const headers = sharingChanges ? { Prefer: "deltashowsharingchanges" } : {};
-  let url = cursor || `${GRAPH_BASE}/sites/${siteId}/drive/root/delta`;
+  let url = cursor || rootUrl || `${GRAPH_BASE}/drives/${driveId}/root/delta`;
   const items = [];
   let deltaLink = null;
   while (url) {
@@ -316,4 +321,34 @@ export async function fetchDriveItemContent({ accessToken, driveId, itemId }) {
 export async function downloadDriveItemContent({ accessToken, driveId, itemId }) {
   const res = await fetchDriveItemContent({ accessToken, driveId, itemId });
   return Buffer.from(await res.arrayBuffer());
+}
+
+// --- Site pages (A-15) ------------------------------------------------------
+
+// The drive behind a site's pages library, or null if the site has none.
+// Graph's /lists hides this system library, so it's addressed by its id
+// (from SharePoint REST, base template 119) or, failing that, by its
+// English title. Its items carry the pages' permissions, like files.
+export async function getPagesDriveId({ accessToken, siteId, listId = null }) {
+  try {
+    const list = encodeURIComponent(listId || "Site Pages");
+    const drive = await graphFetch(`/sites/${siteId}/lists/${list}/drive?$select=id`, { accessToken });
+    return drive.id;
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
+}
+
+// The site's modern pages: [{ id, name, title, description, webUrl, lastModifiedDateTime }].
+export async function listSitePages({ accessToken, siteId }) {
+  return graphGetAll(
+    `/sites/${siteId}/pages/microsoft.graph.sitePage?$select=id,name,title,description,webUrl,lastModifiedDateTime`,
+    { accessToken }
+  );
+}
+
+// One page with its content (canvasLayout).
+export async function getSitePage({ accessToken, siteId, pageId }) {
+  return graphFetch(`/sites/${siteId}/pages/${pageId}/microsoft.graph.sitePage?$expand=canvasLayout`, { accessToken });
 }

@@ -4,7 +4,13 @@
 
 /** Whether the document's file can be streamed from its source. */
 export function canStreamFromSource(doc) {
-  return !doc?.filePath && doc?.sourceProvider === "sharepoint" && Boolean(doc.externalContainerId && doc.externalId);
+  // Pages (A-15) have no file: only their text is kept.
+  return (
+    !doc?.filePath &&
+    doc?.sourceProvider === "sharepoint" &&
+    doc.contentType !== "page" &&
+    Boolean(doc.externalContainerId && doc.externalId)
+  );
 }
 
 /** The KMS URL that serves a no-copy document's file. */

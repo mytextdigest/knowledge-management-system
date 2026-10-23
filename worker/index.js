@@ -17,7 +17,8 @@ import { processClusterJobWorker } from "./cluster.js";
 import { classifyDocument, computeContentHash, detectDocumentDuplicates } from "./classify.js";
 import { processKnowledgeContext } from "./knowledgeContext.js";
 import { decrypt, encrypt } from "../src/lib/crypto.js";
-import { getAppOnlyToken, downloadDriveItemContent } from "../src/lib/msGraph.js";
+import { getAppOnlyToken, downloadDriveItemContent, getDriveDelta, getSitePage, listSitePages } from "../src/lib/msGraph.js";
+import { findPagesDriveId, isPageItem, pageToText } from "../src/lib/connectors/sharepointPages.js";
 import { sharePointSettings } from "../src/lib/connectors/sharepointSettings.js";
 import { getConnector } from "../src/lib/connectors/index.js";
 import { createAclResolver, aclWriteData } from "../src/lib/connectors/sharepointAcl.js";
@@ -139,12 +140,16 @@ async function processChunkJob(job) {
 
   const endExtract = startTimer("TEXT EXTRACTION", { docId, filename });
 
+  const isPage = existingDoc.contentType === "page";
   const isSpreadsheet =
     filename.endsWith(".xlsx") ||
     filename.endsWith(".xls") ||
     filename.endsWith(".csv");
 
-  if (isSpreadsheet) {
+  if (isPage) {
+    rawText = buffer.toString("utf8");
+    endExtract();
+  } else if (isSpreadsheet) {
     const { chunks: extractedChunks, fullText } = extractSpreadsheetChunks(
       buffer,
       filename,
@@ -698,6 +703,8 @@ async function ensureFreshAppOnlyToken(integration) {
 // EKP A-14: a document's original bytes. From S3 when KMS keeps a copy,
 // otherwise straight from the source (no-copy mode), held in memory only.
 async function getDocumentBytes(doc, s3Key = doc.filePath) {
+  // A-15: a page's text is extracted at sync time; there is no file.
+  if (doc.contentType === "page") return Buffer.from(doc.content || "", "utf8");
   if (s3Key) {
     const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
     return streamToBuffer(object.Body);
@@ -860,6 +867,95 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
   return { skipped: false };
 }
 
+const MIN_PAGE_TEXT = 50; // same floor as processChunkJob
+
+// EKP A-15: one changed page of a site's "Site Pages" library. Same rules as
+// syncOneFile: permissions are read before anything is stored, and an
+// unchanged page only has its ACL re-read when sharing changed or was never
+// read. The page's text goes into Document.content (no file is stored).
+async function syncOnePage({ item, page, site, pagesDriveId, integration, connectedByUserId, accessToken, aclResolver }) {
+  const orgId = integration.orgId;
+  const modifiedAt = new Date(item.lastModifiedDateTime);
+  const readAcl = () => aclResolver.itemAcl({ driveId: pagesDriveId, itemId: item.id, siteUrl: site.siteUrl });
+
+  const existing = await prisma.document.findFirst({
+    where: { orgId, sourceProvider: "sharepoint", externalId: item.id },
+    select: { id: true, externalModifiedAt: true, aclSyncedAt: true },
+  });
+  if (existing?.externalModifiedAt?.getTime() === modifiedAt.getTime()) {
+    const refreshAcl = Boolean(aclResolver) && (item["@microsoft.graph.sharedChanged"] === true || !existing.aclSyncedAt);
+    if (refreshAcl) await prisma.document.update({ where: { id: existing.id }, data: aclWriteData(await readAcl()) });
+    return { skipped: true, aclRefreshed: refreshAcl };
+  }
+
+  const subscription = await prisma.subscription.findUnique({ where: { orgId } });
+  if (!subscription || !["active", "trialing"].includes(subscription.status)) {
+    throw new Error("No active subscription for org");
+  }
+
+  const content = pageToText(await getSitePage({ accessToken, siteId: site.siteId, pageId: page.id }));
+  // Pages with (almost) no text, like an empty site home page, aren't
+  // worth a document; the pipeline would reject them anyway.
+  if (content.length < MIN_PAGE_TEXT && !existing) return { skipped: true };
+  const aclRows = aclResolver ? await readAcl() : null;
+  const title = page.title || item.name.replace(/\.aspx$/i, "");
+  const data = {
+    filename: title,
+    content,
+    contentType: "page",
+    filePath: null,
+    status: "queued",
+    externalModifiedAt: modifiedAt,
+    externalUrl: page.webUrl || item.webUrl || null,
+    externalContainerId: pagesDriveId,
+  };
+  const doc = existing
+    ? await prisma.document.update({ where: { id: existing.id }, data: { ...data, ...(aclRows ? aclWriteData(aclRows) : {}) } })
+    : await prisma.document.create({
+        data: {
+          ...newDocumentFields({ name: title, externalId: item.id }, integration, site, connectedByUserId),
+          ...data,
+          ...(aclRows ? aclWriteData(aclRows, { create: true }) : {}),
+        },
+      });
+  await enqueueChunk({ doc, s3Key: null, filename: title, connectedByUserId, orgId });
+  return { skipped: false };
+}
+
+// EKP A-15: sync a site's pages (modern pages; classic wiki pages aren't
+// returned by Graph's pages API and are skipped). Uses its own delta cursor.
+async function syncSitePages({ site, integration, connectedByUserId, accessToken, aclResolver }) {
+  const result = { found: 0, failed: 0, aclRefreshed: 0, pagesDriveId: site.pagesDriveId ?? null, pagesCursor: site.pagesCursor ?? null };
+  result.pagesDriveId =
+    result.pagesDriveId || (await findPagesDriveId({ accessToken, site, tenantId: integration.scopeConfig?.tenantId }));
+  if (!result.pagesDriveId) return result;
+
+  const { items, deltaLink } = await getDriveDelta({
+    accessToken,
+    driveId: result.pagesDriveId,
+    cursor: site.pagesCursor,
+    sharingChanges: true,
+  });
+  const changed = items.filter((item) => isPageItem(item) && !item.deleted);
+  if (changed.length) {
+    const pagesByName = new Map((await listSitePages({ accessToken, siteId: site.siteId })).map((p) => [p.name.toLowerCase(), p]));
+    for (const item of changed) {
+      const page = pagesByName.get(item.name.toLowerCase());
+      if (!page) continue;
+      try {
+        const r = await syncOnePage({ item, page, site, pagesDriveId: result.pagesDriveId, integration, connectedByUserId, accessToken, aclResolver });
+        if (!r.skipped) result.found++;
+        if (r.aclRefreshed) result.aclRefreshed++;
+      } catch (err) {
+        console.error(`❌ Failed to sync page "${item.name}":`, err.message);
+        result.failed++;
+      }
+    }
+  }
+  result.pagesCursor = deltaLink;
+  return result;
+}
+
 // Fields of a newly synced SharePoint document.
 function newDocumentFields(change, integration, site, connectedByUserId) {
   return {
@@ -978,9 +1074,29 @@ async function processSharePointSyncJob(job) {
       // map over the accumulating scopeConfig.sites, not the outer `sites`
       // snapshot — otherwise each site's update clobbers the previous
       // site's freshly-persisted cursor with its stale pre-loop value.
+      // A-15: the site's pages, when the integration includes them.
+      let pagesState = { pagesDriveId: site.pagesDriveId ?? null, pagesCursor: site.pagesCursor ?? null };
+      if (sharePointSettings(scopeConfig).syncPages) {
+        try {
+          const pages = await syncSitePages({ site, integration, connectedByUserId, accessToken, aclResolver });
+          filesFound += pages.found;
+          filesFailed += pages.failed;
+          aclRefreshed += pages.aclRefreshed;
+          pagesState = { pagesDriveId: pages.pagesDriveId, pagesCursor: pages.pagesCursor };
+        } catch (err) {
+          console.error(`❌ Page sync failed for site ${site.siteUrl}:`, err.message);
+          filesFailed++;
+        }
+      }
+
       if (refreshWholeSite) {
         try {
-          const stats = await refreshSiteAcls(prisma, { orgId: integration.orgId, site, accessToken, resolver: aclResolver });
+          const stats = await refreshSiteAcls(prisma, {
+            orgId: integration.orgId,
+            site: { ...site, pagesDriveId: pagesState.pagesDriveId },
+            accessToken,
+            resolver: aclResolver,
+          });
           aclRefreshed += stats.updated;
           if (stats.failed) aclFingerprint = site.aclFingerprint ?? null; // retry next sync
           console.log(`🔐 Site permissions re-read for ${site.siteUrl}:`, stats);
@@ -992,7 +1108,7 @@ async function processSharePointSyncJob(job) {
 
       scopeConfig = {
         ...scopeConfig,
-        sites: scopeConfig.sites.map((s) => (s.siteId === site.siteId ? { ...s, lastSyncCursor: cursor, aclFingerprint } : s)),
+        sites: scopeConfig.sites.map((s) => (s.siteId === site.siteId ? { ...s, lastSyncCursor: cursor, aclFingerprint, ...pagesState } : s)),
       };
       await prisma.orgIntegration.update({ where: { id: integrationId }, data: { scopeConfig } });
     }

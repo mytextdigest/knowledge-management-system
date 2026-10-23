@@ -76,7 +76,7 @@ export async function orgSearch(
 
   return prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
-           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
            dept.name AS department_name,
            proj.name AS project_name,
            (c.embedding_vec <=> ${embStr}::vector) AS distance,
@@ -130,7 +130,7 @@ export async function orgKeywordSearch(
 
   const candidates = await prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
-           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
            dept.name AS department_name,
            proj.name AS project_name
     FROM "Chunk" c
@@ -188,7 +188,7 @@ export async function orgFallbackTextSearch(
 
   return prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
-           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
            dept.name AS department_name,
            proj.name AS project_name,
            1::float AS distance,

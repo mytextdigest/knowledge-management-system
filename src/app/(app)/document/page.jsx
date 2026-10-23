@@ -803,7 +803,8 @@ function DocumentContent() {
 
     const ext = doc.filename.split(".").pop().toLowerCase();
 
-    if (ext === "txt") {
+    // A SharePoint page (A-15) has no file; show its text.
+    if (ext === "txt" || doc.contentType === "page") {
       return (
         <div ref={docScrollRef} onScroll={handleDocScroll} className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
           <pre className="whitespace-pre-wrap text-gray-900 dark:text-gray-100 p-6 font-mono text-sm leading-relaxed max-w-5xl mx-auto">

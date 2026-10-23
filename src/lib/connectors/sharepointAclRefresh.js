@@ -18,7 +18,8 @@
 // Imported by the worker, so relative imports only.
 
 import crypto from "node:crypto";
-import { getDelta, getSiteDriveId } from "../msGraph.js";
+import { getDelta, getDriveDelta, getSiteDriveId } from "../msGraph.js";
+import { isPageItem } from "./sharepointPages.js";
 import { aclWriteData } from "./sharepointAcl.js";
 import { refreshIdentityGroups, syncEmailMatchIdentities } from "../identity/entraIdentity.js";
 
@@ -44,21 +45,37 @@ const sameRows = (a, b) =>
   a.every((r, i) => r.principalType === b[i].principalType && r.principalId === b[i].principalId);
 
 /**
- * Re-read the permissions of every synced file of one site. Unchanged ACLs
- * only get aclSyncedAt bumped. Files no longer in SharePoint are left alone
+ * Re-read the permissions of every synced file of one site, and of its
+ * pages when `site.pagesDriveId` is known (A-15). Unchanged ACLs only get
+ * aclSyncedAt bumped. Items no longer in SharePoint are left alone
  * (deletion handling is FR-2 open question #4).
  * Returns { checked, updated, failed }.
  */
 export async function refreshSiteAcls(db, { orgId, site, accessToken, resolver, deps = {} }) {
-  const { getDelta: listAll, getSiteDriveId: driveIdOf } = { getDelta, getSiteDriveId, ...deps };
-  const { items } = await listAll({ accessToken, siteId: site.siteId });
-  const files = new Map(items.filter((i) => i.file && !i.deleted).map((i) => [i.id, i]));
+  const graph = { getDelta, getDriveDelta, getSiteDriveId, ...deps };
   const stats = { checked: 0, updated: 0, failed: 0 };
-  if (!files.size) return stats;
 
-  const siteDriveId = await driveIdOf({ accessToken, siteId: site.siteId });
+  const { items: fileItems } = await graph.getDelta({ accessToken, siteId: site.siteId });
+  const files = fileItems.filter((i) => i.file && !i.deleted);
+  if (files.length) {
+    const siteDriveId = await graph.getSiteDriveId({ accessToken, siteId: site.siteId });
+    await refreshDriveAcls(db, { orgId, site, items: files, fallbackDriveId: siteDriveId, contentType: "file", resolver, stats });
+  }
+
+  if (site.pagesDriveId) {
+    const { items: pageItems } = await graph.getDriveDelta({ accessToken, driveId: site.pagesDriveId });
+    const pages = pageItems.filter((i) => isPageItem(i) && !i.deleted);
+    if (pages.length) {
+      await refreshDriveAcls(db, { orgId, site, items: pages, fallbackDriveId: site.pagesDriveId, contentType: "page", resolver, stats });
+    }
+  }
+  return stats;
+}
+
+async function refreshDriveAcls(db, { orgId, site, items, fallbackDriveId, contentType, resolver, stats }) {
+  const byId = new Map(items.map((i) => [i.id, i]));
   const docs = await db.document.findMany({
-    where: { orgId, sourceProvider: "sharepoint", contentType: "file", externalId: { in: [...files.keys()] } },
+    where: { orgId, sourceProvider: "sharepoint", contentType, externalId: { in: [...byId.keys()] } },
     select: {
       id: true,
       externalId: true,
@@ -72,21 +89,23 @@ export async function refreshSiteAcls(db, { orgId, site, accessToken, resolver, 
   const unchanged = [];
   for (const doc of docs) {
     stats.checked++;
-    const item = files.get(doc.externalId);
-    const driveId = item.parentReference?.driveId || siteDriveId;
+    const item = byId.get(doc.externalId);
+    const driveId = item.parentReference?.driveId || fallbackDriveId;
     try {
       const rows = await resolver.itemAcl({ driveId, itemId: item.id, siteUrl: site.siteUrl });
       const current = [...doc.acl].sort((a, b) =>
         `${a.principalType}:${a.principalId}` < `${b.principalType}:${b.principalId}` ? -1 : 1
       );
-      const sourceChanged = (item.webUrl && item.webUrl !== doc.externalUrl) || (driveId && driveId !== doc.externalContainerId);
+      // A page's link is the page URL set at sync time; only files take the item's webUrl.
+      const webUrl = contentType === "file" ? item.webUrl : null;
+      const sourceChanged = (webUrl && webUrl !== doc.externalUrl) || (driveId && driveId !== doc.externalContainerId);
       if (doc.aclSyncedAt && sameRows(rows, current) && !sourceChanged) {
         unchanged.push(doc.id);
         continue;
       }
       await db.document.update({
         where: { id: doc.id },
-        data: { ...aclWriteData(rows), externalUrl: item.webUrl || undefined, externalContainerId: driveId || undefined },
+        data: { ...aclWriteData(rows), externalUrl: webUrl || undefined, externalContainerId: driveId || undefined },
       });
       stats.updated++;
     } catch (err) {
@@ -97,7 +116,6 @@ export async function refreshSiteAcls(db, { orgId, site, accessToken, resolver, 
   if (unchanged.length) {
     await db.document.updateMany({ where: { id: { in: unchanged } }, data: { aclSyncedAt: new Date() } });
   }
-  return stats;
 }
 
 /**

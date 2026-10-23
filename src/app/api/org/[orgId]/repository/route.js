@@ -160,6 +160,7 @@ export async function GET(req, { params }) {
     filename: true,
     sourceProvider: true,
     externalUrl: true,
+    contentType: true,
     status: true,
     scope: true,
     lifecycle: true,

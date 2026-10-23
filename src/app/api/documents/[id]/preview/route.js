@@ -19,7 +19,7 @@ export async function GET(req, { params }) {
     where: { id },
     select: {
       id: true, userId: true, orgId: true, departmentId: true, lifecycle: true, filename: true, filePath: true,
-      sourceProvider: true, externalId: true, externalContainerId: true,
+      sourceProvider: true, contentType: true, externalId: true, externalContainerId: true,
       project: { select: { orgId: true, departmentId: true, scope: true } },
     },
   });

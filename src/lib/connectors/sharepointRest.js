@@ -125,3 +125,9 @@ export async function listSiteGroups(siteUrl, token) {
   const groups = await sharePointRestGetAll(siteUrl, "/web/sitegroups?$select=Id,Title", token);
   return groups.map((g) => ({ id: String(g.Id), title: g.Title }));
 }
+
+/** The id of the site's pages library (base template 119, "Site Pages" in English), or null. */
+export async function getPagesListId(siteUrl, token) {
+  const lists = await sharePointRestGetAll(siteUrl, "/web/lists?$filter=BaseTemplate eq 119&$select=Id", token);
+  return lists[0]?.Id ?? null;
+}
