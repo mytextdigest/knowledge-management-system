@@ -5,6 +5,7 @@ import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { grantSitePermission, getAppOnlyToken } from "@/lib/msGraph";
 import { encrypt } from "@/lib/crypto";
 import { readSetupCookie, clearSetupCookie } from "@/lib/integrationSetup";
+import { pickSharePointSettings } from "@/lib/connectors/sharepointSettings";
 
 const APP_DISPLAY_NAME = "KMS SharePoint Connector";
 
@@ -82,10 +83,12 @@ export async function POST(req, { params }) {
       // re-confirmed (e.g. department reassignment) — only a genuinely new
       // site starts with no cursor.
       lastSyncCursor: sitesById.get(s.siteId)?.lastSyncCursor ?? null,
+      aclFingerprint: sitesById.get(s.siteId)?.aclFingerprint ?? null,
     });
   }
 
   const scopeConfig = {
+    ...pickSharePointSettings(existing?.scopeConfig),
     tenantId: setup.tenantId,
     connectedByUserId: user.id,
     sites: [...sitesById.values()],

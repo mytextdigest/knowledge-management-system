@@ -29,6 +29,7 @@
     "ekp:a21:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a21-*.test.mjs",
     "ekp:a10:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a10-*.test.mjs",
     "ekp:a11:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a11-*.test.mjs",
+    "ekp:a14:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a14-*.test.mjs",
     "alpha:combined-test": "node --test scripts/alpha-bugfix/combined-permissions.test.mjs",
     "task10:test": "node --test scripts/task-10/tier2-expert.static.test.mjs scripts/task-10/expertise-scoring.logic.test.mjs scripts/task-10/expert-test1-individual-signals.logic.test.mjs scripts/task-10/expert-test2-signal-caps.logic.test.mjs scripts/task-10/expert-test8-recency-decay.logic.test.mjs",
     "task10:test:integration": "node --test scripts/task-10/expert-rbac.integration.test.mjs scripts/task-10/expert-test3-anti-gaming.integration.test.mjs scripts/task-10/expert-test6-false-positives.integration.test.mjs scripts/task-10/expert-test9-topic-isolation.integration.test.mjs scripts/task-10/expert-test10-cross-topic-contamination.integration.test.mjs scripts/task-10/expert-test11-human-override.integration.test.mjs",

@@ -1,0 +1,42 @@
+// EKP Workstream A: per-org SharePoint connector settings, kept in
+// OrgIntegration.scopeConfig next to the connected sites (until Workstream
+// B's org settings, F5, exist). Absent means the default, so integrations
+// connected before a setting existed behave as they did.
+//
+//   storeOriginals (A-14)  keep a copy of each file in KMS storage (S3).
+//                          Off = no-copy mode: SharePoint stays the only
+//                          copy; text is extracted in memory and previews
+//                          stream from SharePoint.
+//   syncPages (A-15)       also ingest the sites' pages (Site Pages).
+//
+// Imported by the worker, so relative imports only.
+
+export const SHAREPOINT_SETTING_DEFAULTS = { storeOriginals: true, syncPages: true };
+
+export function sharePointSettings(scopeConfig) {
+  return {
+    storeOriginals: scopeConfig?.storeOriginals !== false,
+    syncPages: scopeConfig?.syncPages !== false,
+  };
+}
+
+/** Validate a PATCH body. Returns { data } (only the keys sent) or { error }. */
+export function validateSharePointSettingsPatch(body) {
+  const data = {};
+  for (const key of Object.keys(SHAREPOINT_SETTING_DEFAULTS)) {
+    if (body?.[key] === undefined) continue;
+    if (typeof body[key] !== "boolean") return { error: `${key} must be true or false` };
+    data[key] = body[key];
+  }
+  if (!Object.keys(data).length) return { error: "Nothing to update" };
+  return { data };
+}
+
+/** The settings keys of an existing scopeConfig, to carry over when it's rebuilt. */
+export function pickSharePointSettings(scopeConfig) {
+  const kept = {};
+  for (const key of Object.keys(SHAREPOINT_SETTING_DEFAULTS)) {
+    if (scopeConfig?.[key] !== undefined) kept[key] = scopeConfig[key];
+  }
+  return kept;
+}

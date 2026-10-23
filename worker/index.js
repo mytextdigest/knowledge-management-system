@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, SendMessageCommand } from "@aws-sdk/client-sqs";
-import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { extractPdfText } from "./extractPdf.js";
 import { extractSpreadsheetChunks } from "./extractSpreadsheet.js";
 import { runOCR } from "./runOcr.js";
@@ -17,7 +17,8 @@ import { processClusterJobWorker } from "./cluster.js";
 import { classifyDocument, computeContentHash, detectDocumentDuplicates } from "./classify.js";
 import { processKnowledgeContext } from "./knowledgeContext.js";
 import { decrypt, encrypt } from "../src/lib/crypto.js";
-import { getAppOnlyToken } from "../src/lib/msGraph.js";
+import { getAppOnlyToken, downloadDriveItemContent } from "../src/lib/msGraph.js";
+import { sharePointSettings } from "../src/lib/connectors/sharepointSettings.js";
 import { getConnector } from "../src/lib/connectors/index.js";
 import { createAclResolver, aclWriteData } from "../src/lib/connectors/sharepointAcl.js";
 import { refreshSiteAcls, siteGroupFingerprint } from "../src/lib/connectors/sharepointAclRefresh.js";
@@ -126,13 +127,9 @@ async function processChunkJob(job) {
   // -----------------------------
   // 2. Download file
   // -----------------------------
-  const endDownload = startTimer("S3 DOWNLOAD", { docId });
-  const object = await s3.send(
-    new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key })
-  );
+  const endDownload = startTimer("DOWNLOAD", { docId });
+  const buffer = await getDocumentBytes(existingDoc, s3Key);
   endDownload();
-
-  const buffer = await streamToBuffer(object.Body);
 
   // -----------------------------
   // 3. Extract + sanitize text
@@ -698,6 +695,24 @@ async function ensureFreshAppOnlyToken(integration) {
   return accessToken;
 }
 
+// EKP A-14: a document's original bytes. From S3 when KMS keeps a copy,
+// otherwise straight from the source (no-copy mode), held in memory only.
+async function getDocumentBytes(doc, s3Key = doc.filePath) {
+  if (s3Key) {
+    const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
+    return streamToBuffer(object.Body);
+  }
+  if (doc.sourceProvider === "sharepoint" && doc.externalContainerId && doc.externalId && doc.orgId) {
+    const integration = await prisma.orgIntegration.findUnique({
+      where: { orgId_provider: { orgId: doc.orgId, provider: "sharepoint" } },
+    });
+    if (!integration) throw new Error("SharePoint integration not found for a no-copy document");
+    const accessToken = await ensureFreshAppOnlyToken(integration);
+    return downloadDriveItemContent({ accessToken, driveId: doc.externalContainerId, itemId: doc.externalId });
+  }
+  throw new Error(`Document ${doc.id} has no stored file and no source to read it from`);
+}
+
 // Pulls one changed file into the existing pipeline exactly as a manual
 // upload would (same S3 + Document + SQS "chunk" entrypoint), with
 // sourceProvider/externalId/externalModifiedAt set.
@@ -722,7 +737,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
 
   const existing = await prisma.document.findFirst({
     where: { orgId, sourceProvider: "sharepoint", externalId: change.externalId },
-    select: { id: true, externalModifiedAt: true, aclSyncedAt: true, externalUrl: true, externalContainerId: true },
+    select: { id: true, filePath: true, externalModifiedAt: true, aclSyncedAt: true, externalUrl: true, externalContainerId: true },
   });
   if (existing?.externalModifiedAt && existing.externalModifiedAt.getTime() === new Date(change.modifiedAt).getTime()) {
     const refreshAcl = Boolean(aclResolver) && (change.permissionsChanged || !existing.aclSyncedAt);
@@ -737,6 +752,47 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
   }
 
   const aclRows = aclResolver ? await readAcl() : null;
+
+  // A-14: no-copy mode. Nothing goes to S3 and no storage is charged; the
+  // chunk job reads the file from SharePoint. A copy kept from before the
+  // switch is removed.
+  if (!sharePointSettings(integration.scopeConfig).storeOriginals && driveId) {
+    const subscription = await prisma.subscription.findUnique({ where: { orgId } });
+    if (!subscription || !["active", "trialing"].includes(subscription.status)) {
+      throw new Error("No active subscription for org");
+    }
+    let freedBytes = 0n;
+    if (existing?.filePath) {
+      try {
+        const head = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: existing.filePath }));
+        freedBytes = BigInt(head.ContentLength || 0);
+        await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: existing.filePath }));
+      } catch (err) {
+        console.error(`⚠️ Couldn't remove the stored copy of ${change.name}:`, err.message);
+        freedBytes = 0n;
+      }
+    }
+    const data = {
+      filePath: null,
+      status: "queued",
+      externalModifiedAt: new Date(change.modifiedAt),
+      ...sourceFields,
+    };
+    const [doc] = await prisma.$transaction([
+      existing
+        ? prisma.document.update({ where: { id: existing.id }, data: { ...data, ...(aclRows ? aclWriteData(aclRows) : {}) } })
+        : prisma.document.create({
+            data: {
+              ...data,
+              ...newDocumentFields(change, integration, site, connectedByUserId),
+              ...(aclRows ? aclWriteData(aclRows, { create: true }) : {}),
+            },
+          }),
+      prisma.user.update({ where: { id: connectedByUserId }, data: { storageUsedBytes: { decrement: freedBytes } } }),
+    ]);
+    await enqueueChunk({ doc, s3Key: null, filename: change.name, connectedByUserId, orgId });
+    return { skipped: false };
+  }
 
   const dbUser = await prisma.user.findUnique({ where: { id: connectedByUserId } });
   if (!dbUser) throw new Error("Connecting user no longer exists");
@@ -786,29 +842,12 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
         })
       : prisma.document.create({
           data: {
-            filename: change.name,
             filePath: s3Key,
             status: "queued",
-            visibility: "private",
-            scope: "repository",
-            // FR-5/FR-6: a newly-synced file isn't canonical yet — it sits out
-            // of the regular repository/search (existing `lifecycle: "draft"`
-            // filtering already excludes drafts by default) until a super
-            // admin confirms it via the Needs-Review queue (7-E/7-F), which
-            // transitions it to "published". Only new rows start this way —
-            // an update to an already-published document (re-sync of an
-            // edited file) intentionally leaves lifecycle alone, so a minor
-            // content edit doesn't force a previously-approved doc back
-            // through review.
-            lifecycle: "draft",
-            sourceProvider: "sharepoint",
-            externalId: change.externalId,
             externalModifiedAt: new Date(change.modifiedAt),
             ...sourceFields,
             ...(aclRows ? aclWriteData(aclRows, { create: true }) : {}),
-            organization: { connect: { id: orgId } },
-            department: { connect: { id: site.departmentId } },
-            user: { connect: { id: connectedByUserId } },
+            ...newDocumentFields(change, integration, site, connectedByUserId),
           },
         }),
     prisma.user.update({
@@ -817,6 +856,37 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
     }),
   ]);
 
+  await enqueueChunk({ doc, s3Key, filename: change.name, connectedByUserId, orgId });
+  return { skipped: false };
+}
+
+// Fields of a newly synced SharePoint document.
+function newDocumentFields(change, integration, site, connectedByUserId) {
+  return {
+    filename: change.name,
+    visibility: "private",
+    scope: "repository",
+    // FR-5/FR-6: a newly-synced file isn't canonical yet — it sits out
+    // of the regular repository/search (existing `lifecycle: "draft"`
+    // filtering already excludes drafts by default) until a super
+    // admin confirms it via the Needs-Review queue (7-E/7-F), which
+    // transitions it to "published". Only new rows start this way —
+    // an update to an already-published document (re-sync of an
+    // edited file) intentionally leaves lifecycle alone, so a minor
+    // content edit doesn't force a previously-approved doc back
+    // through review.
+    lifecycle: "draft",
+    sourceProvider: "sharepoint",
+    externalId: change.externalId,
+    organization: { connect: { id: integration.orgId } },
+    department: { connect: { id: site.departmentId } },
+    user: { connect: { id: connectedByUserId } },
+  };
+}
+
+// Hands a synced document to the regular pipeline (same "chunk" entrypoint
+// as a manual upload). s3Key is null in no-copy mode (A-14).
+async function enqueueChunk({ doc, s3Key, filename, connectedByUserId, orgId }) {
   await sqs.send(
     new SendMessageCommand({
       QueueUrl: QUEUE_URL,
@@ -824,7 +894,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
         type: "chunk",
         docId: doc.id,
         s3Key,
-        filename: change.name,
+        filename,
         projectId: null,
         userId: connectedByUserId,
         orgId,
@@ -833,8 +903,6 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
       }),
     })
   );
-
-  return { skipped: false };
 }
 
 async function processSharePointSyncJob(job) {

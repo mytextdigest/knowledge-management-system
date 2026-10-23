@@ -26,6 +26,7 @@ export default function SharePointIntegrationPage() {
   const [syncRuns, setSyncRuns] = useState([]);
   const [syncing, setSyncing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [savingSetting, setSavingSetting] = useState(null);
 
   useEffect(() => {
     fetch(`/api/org/${orgId}/settings`)
@@ -143,6 +144,26 @@ export default function SharePointIntegrationPage() {
       setError(err.message || 'Failed to start sync.');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  // EKP A-14/A-15: connector settings.
+  const updateSetting = async (key, value) => {
+    setSavingSetting(key);
+    setError('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/integrations/sharepoint`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to save the setting.');
+      setIntegration((prev) => ({ ...prev, settings: data.settings }));
+    } catch (err) {
+      setError(err.message || 'Failed to save the setting.');
+    } finally {
+      setSavingSetting(null);
     }
   };
 
@@ -295,6 +316,39 @@ export default function SharePointIntegrationPage() {
                 </div>
               ))}
             </div>
+            {integration.settings && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+                {[
+                  {
+                    key: 'storeOriginals',
+                    label: 'Keep a copy of files in KMS',
+                    help: 'Off: SharePoint stays the only copy. KMS keeps only the extracted text and streams previews and downloads from SharePoint. Applies to files synced from now on.',
+                  },
+                  {
+                    key: 'syncPages',
+                    label: 'Include site pages',
+                    help: "Also make the sites' pages (Site Pages) searchable, with their SharePoint permissions.",
+                  },
+                ].map(({ key, label, help }) => (
+                  <label key={key} className="flex items-start justify-between gap-4 px-4 py-3 cursor-pointer">
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">{label}</span>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">{help}</span>
+                    </span>
+                    <span className="flex items-center gap-2 flex-shrink-0">
+                      {savingSetting === key && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-blue-600"
+                        checked={Boolean(integration.settings[key])}
+                        disabled={savingSetting !== null}
+                        onChange={(e) => updateSetting(key, e.target.checked)}
+                      />
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={triggerSync}

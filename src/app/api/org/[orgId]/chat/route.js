@@ -13,6 +13,7 @@ import { classifyWorkflowRequest, formatWorkflowInstruction, getWorkflowSteps } 
 import { searchAccessWhere, getUserPrincipals } from "@/lib/access/documentAccess";
 import { isDecisionQuestion, getDecisionEvidence, formatDecisionContext, DECISION_INSTRUCTION } from "@/lib/decisionIntelligence";
 import { isLessonQuestion, getLessonEvidence, formatLessonContext, LESSON_INSTRUCTION } from "@/lib/lessonsIntelligence";
+import { sourcePreviewUrl } from "@/lib/documentSource";
 
 const SYSTEM_PROMPT = `
 You are an expert assistant that answers questions using only the
@@ -413,7 +414,11 @@ export async function POST(req, { params }) {
       department: g.department || null,
       project: g.project || null,
       preview: g.texts.join(" ").slice(0, 900),
-      url: g.filePath ? await generateSignedUrl(g.filePath).catch(() => null) : null,
+      url: g.filePath
+        ? await generateSignedUrl(g.filePath).catch(() => null)
+        : g.externalUrl && g.sourceProvider === "sharepoint"
+        ? sourcePreviewUrl(g.documentId) // A-14 no-copy: KMS checks access, then streams it
+        : null,
       externalUrl: g.externalUrl,
       sourceProvider: g.sourceProvider,
     }))

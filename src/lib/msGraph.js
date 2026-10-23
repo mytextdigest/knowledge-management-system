@@ -299,3 +299,21 @@ export async function getUserGroupIds({ accessToken, userId }) {
     throw err;
   }
 }
+
+// --- No-copy mode (A-14) ----------------------------------------------------
+
+// App-only-token call: a drive item's content as a fetch Response (Graph
+// redirects to a short-lived download URL; fetch follows it). For streaming.
+export async function fetchDriveItemContent({ accessToken, driveId, itemId }) {
+  const res = await fetchWithRetry(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}/content`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw await parseGraphError(res);
+  return res;
+}
+
+// App-only-token call: a drive item's content as a Buffer.
+export async function downloadDriveItemContent({ accessToken, driveId, itemId }) {
+  const res = await fetchDriveItemContent({ accessToken, driveId, itemId });
+  return Buffer.from(await res.arrayBuffer());
+}
