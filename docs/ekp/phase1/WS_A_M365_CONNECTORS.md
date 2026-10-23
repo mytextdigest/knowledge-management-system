@@ -407,7 +407,7 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 | `A-18` | A4 · Content Server: design note in Phase 1; build after award (needs NYPA instance + network path)                               | `BLOCKED`     | Johurul  | NYPA                         |            |            |
 | `A-19` | Phase 1 integration & cross-testing (A + B together, all roles)                                                                    | `TODO`        | All 3    | `A-12`, `A-15`, `B-21` |            |            |
 | `A-20` | Update RTM status for E2, E12, E32 in the plan; re-score Phase 1                                                                   | `TODO`        | Johurul  | `A-19`                     |            |            |
-| `A-21` | A2 · Identity by verified email (`email_match` via Graph app-only) + re-check in `acl-refresh`                                | `TODO`        | Johurul  | `A-4`                      |            |            |
+| `A-21` | A2 · Identity by verified email (`email_match` via Graph app-only) + re-check in `acl-refresh`                                | `IN_PROGRESS` | Johurul  | `A-4`                      | 2026-10-23 |            |
 
 ## 7. Implementation Notes
 
@@ -496,3 +496,8 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
   - **Fixed on the way:** `getDelta` only read the first page of results (large libraries were cut off); it now follows `@odata.nextLink`. Graph calls retry on 429/503 with `Retry-After`.
   - **Migration** `20261023000000_ekp_identity_groups_and_container` (A-9/A-10): `Document.externalContainerId`, `UserIdentity.groupIds` / `ownedGroupIds` / `groupsSyncedAt`.
   - Tests: `scripts/ekp/a9-sharepoint-acl.test.mjs` (`npm run ekp:a9:test`), on the real permission entries of the Engineering test files. Dry run: `node scripts/ekp/sharepoint-acl-dryrun.mjs --org <orgId>` prints every file's rows (read-only); on NGI it matches the A-8 findings for all 4 test files.
+- `2026-10-23 · A-21 (email_match) + group refresh for A-10:`
+  - **Code:** `src/lib/identity/entraIdentity.js`. `syncEmailMatchIdentities` links org members to the Entra account whose UPN or mail equals their verified email (Graph `userPrincipalName in (…) or mail in (…)`, 7 emails per call): exactly one enabled match, `sso` always wins, one Entra account is never linked to two KMS users; a disabled or vanished account removes the link.
+  - **Groups live on the identity** (`groupIds`, `ownedGroupIds`, `groupsSyncedAt`; `transitiveMemberOf` + `ownedObjects` with the connector app), so A-10's check is plain SQL with no Graph call per query.
+  - **When it runs:** at every sign-in (NextAuth `events.signIn`, all providers) and in `resolveOrgRole` (the guard every org route uses): at most one DB check per user per minute, Graph only when groups are older than 15 minutes or the user has no identity yet (an unmatched user is retried hourly). Never blocks a request; groups that can't be refreshed for 24 hours are dropped (fails closed). The daily `acl-refresh` job (A-11) re-checks every member.
+  - Tests: `scripts/ekp/a21-email-match.test.mjs` (`EKP_DB_TESTS=1 npm run ekp:a21:test`).

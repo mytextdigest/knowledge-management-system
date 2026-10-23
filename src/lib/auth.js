@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { resolveEntraSignIn, SsoError } from "@/lib/sso/entra";
 import { isPasswordLoginAllowed } from "@/lib/sso/discovery";
+import { ensureFreshPrincipals } from "@/lib/identity/entraIdentity";
 
 // next-auth's providers are CommonJS; the bundler unwraps `default`, plain
 // Node (node --test) doesn't.
@@ -143,6 +144,14 @@ export const authOptions = {
       // Fallback
       return baseUrl;
     }
+  },
+  events: {
+    // A-21/A-10: link the user to their Entra account (by verified email, if
+    // they didn't use Microsoft) and read their groups, so SharePoint files
+    // shared with them show up from the first page. Never blocks sign-in.
+    async signIn({ user }) {
+      await ensureFreshPrincipals(prisma, user?.id, { force: true });
+    },
   },
   pages: {
     signIn: "/auth/signin",

@@ -240,3 +240,62 @@ export async function downloadFileContent({ accessToken, siteId, itemId }) {
   if (!res.ok) throw await parseGraphError(res);
   return Buffer.from(await res.arrayBuffer());
 }
+
+// --- Identity lookups (A-21 / A-10), app-only, SharePoint connector app ----
+
+const appTokenCache = new Map(); // tenantId → { token, expiresAt }
+
+// getAppOnlyToken, reused until two minutes before it expires.
+export async function getCachedAppOnlyToken(tenantId) {
+  const cached = appTokenCache.get(tenantId);
+  if (cached && cached.expiresAt - Date.now() > 2 * 60_000) return cached.token;
+  const { accessToken, expiresIn } = await getAppOnlyToken(tenantId);
+  appTokenCache.set(tenantId, { token: accessToken, expiresAt: Date.now() + expiresIn * 1000 });
+  return accessToken;
+}
+
+// Entra users whose UPN or mail is one of `emails`, matched case-insensitively.
+// Returns Map(lowercased email → [{ id, accountEnabled, userType }]).
+const EMAILS_PER_QUERY = 7; // 2 terms per email; Graph allows 15 `in` values per clause
+export async function findUsersByEmails({ accessToken, emails }) {
+  const wanted = [...new Set(emails.map((e) => String(e).trim().toLowerCase()).filter(Boolean))];
+  const result = new Map(wanted.map((e) => [e, []]));
+  for (let i = 0; i < wanted.length; i += EMAILS_PER_QUERY) {
+    const batch = wanted.slice(i, i + EMAILS_PER_QUERY);
+    const list = batch.map((e) => `'${e.replace(/'/g, "''")}'`).join(",");
+    const params = new URLSearchParams({
+      $filter: `userPrincipalName in (${list}) or mail in (${list})`,
+      $select: "id,accountEnabled,mail,userPrincipalName,userType",
+      $top: "999",
+    });
+    const users = await graphGetAll(`/users?${params}`, { accessToken });
+    for (const user of users) {
+      const keys = new Set([user.userPrincipalName, user.mail].filter(Boolean).map((v) => v.toLowerCase()));
+      for (const key of keys) {
+        const list = result.get(key);
+        if (list && !list.some((u) => u.id === user.id)) {
+          list.push({ id: user.id, accountEnabled: user.accountEnabled, userType: user.userType });
+        }
+      }
+    }
+  }
+  return result;
+}
+
+// An Entra user's transitive group ids and the ids of groups they own.
+// Returns null if the user no longer exists.
+export async function getUserGroupIds({ accessToken, userId }) {
+  try {
+    const [memberOf, owned] = await Promise.all([
+      graphGetAll(`/users/${userId}/transitiveMemberOf/microsoft.graph.group?$select=id&$top=999`, { accessToken }),
+      graphGetAll(`/users/${userId}/ownedObjects/microsoft.graph.group?$select=id&$top=999`, { accessToken }),
+    ]);
+    return {
+      groupIds: [...new Set(memberOf.map((g) => g.id.toLowerCase()))].sort(),
+      ownedGroupIds: [...new Set(owned.map((g) => g.id.toLowerCase()))].sort(),
+    };
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
+}
