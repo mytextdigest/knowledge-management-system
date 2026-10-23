@@ -119,3 +119,9 @@ export async function listSiteGroupMembers(siteUrl, groupId, token) {
   );
   return users.map((u) => ({ loginName: u.LoginName, principalType: u.PrincipalType }));
 }
+
+/** The site's SharePoint groups: [{ id, title }]. */
+export async function listSiteGroups(siteUrl, token) {
+  const groups = await sharePointRestGetAll(siteUrl, "/web/sitegroups?$select=Id,Title", token);
+  return groups.map((g) => ({ id: String(g.Id), title: g.Title }));
+}

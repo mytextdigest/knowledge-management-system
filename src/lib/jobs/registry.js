@@ -13,6 +13,12 @@
 //   run({ prisma, orgId, enqueue })
 //                                 do the work, or enqueue an SQS job; return a small
 //                                 JSON summary (stored as lastResult). Throw to fail.
+//   lockMinutes (optional)        how long a run may take before it's assumed
+//                                 crashed (default DEFAULT_LOCK_MINUTES)
+
+import { createAclResolver } from "../connectors/sharepointAcl.js";
+import { refreshIntegrationAcls } from "../connectors/sharepointAclRefresh.js";
+import { getCachedAppOnlyToken } from "../msGraph.js";
 
 export const INTERVAL_CHOICES = [15, 30, 60, 240, 720, 1440];
 
@@ -24,18 +30,20 @@ export const DEFAULT_LOCK_MINUTES = 30;
 // started less than this long ago and hasn't finished.
 const SYNC_IN_FLIGHT_MINUTES = 120;
 
+async function connectedSharePoint(prisma, orgId) {
+  const integration = await prisma.orgIntegration.findUnique({
+    where: { orgId_provider: { orgId, provider: "sharepoint" } },
+    select: { status: true },
+  });
+  return integration?.status === "connected";
+}
+
 export const JOB_DEFINITIONS = {
   "sharepoint.sync": {
     label: "SharePoint sync",
     description: "Picks up new and changed files from the connected SharePoint sites, same as Sync Now.",
     defaultIntervalMinutes: 60,
-    async appliesTo({ prisma, orgId }) {
-      const integration = await prisma.orgIntegration.findUnique({
-        where: { orgId_provider: { orgId, provider: "sharepoint" } },
-        select: { status: true },
-      });
-      return integration?.status === "connected";
-    },
+    appliesTo: ({ prisma, orgId }) => connectedSharePoint(prisma, orgId),
     async run({ prisma, orgId, enqueue }) {
       const integration = await prisma.orgIntegration.findUnique({
         where: { orgId_provider: { orgId, provider: "sharepoint" } },
@@ -58,6 +66,28 @@ export const JOB_DEFINITIONS = {
       });
       await enqueue({ type: "sharepoint_sync", integrationId: integration.id, syncRunId: syncRun.id });
       return { syncRunId: syncRun.id };
+    },
+  },
+
+  // A-11/A-21: the full daily pass. Re-reads every synced file's SharePoint
+  // permissions and re-checks every member's Microsoft identity and groups.
+  "sharepoint.acl-refresh": {
+    label: "SharePoint permissions refresh",
+    description:
+      "Re-reads every synced file's SharePoint permissions and re-checks which Microsoft account and groups each member has. Sharing changes are also picked up by every sync; this is the daily safety net.",
+    defaultIntervalMinutes: 1440,
+    lockMinutes: 180,
+    appliesTo: ({ prisma, orgId }) => connectedSharePoint(prisma, orgId),
+    async run({ prisma, orgId }) {
+      const integration = await prisma.orgIntegration.findUnique({
+        where: { orgId_provider: { orgId, provider: "sharepoint" } },
+      });
+      if (integration?.status !== "connected") return { skipped: "SharePoint isn't connected" };
+      const tenantId = integration.scopeConfig?.tenantId;
+      const accessToken = await getCachedAppOnlyToken(tenantId);
+      const resolver = createAclResolver({ graphToken: accessToken, tenantId });
+      const result = await refreshIntegrationAcls(prisma, { integration, accessToken, resolver });
+      return resolver ? result : { ...result, warning: "SharePoint certificate not configured: file permissions not refreshed" };
     },
   },
 };

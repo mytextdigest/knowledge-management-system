@@ -102,7 +102,7 @@ test("sharepoint.sync: job row only for connected orgs, starts off; queues a sch
       });
       await ensureOrgJobs(db, org.id);
       await ensureOrgJobs(db, org.id);
-      const rows = await db.scheduledJob.findMany({ where: { orgId: org.id } });
+      const rows = await db.scheduledJob.findMany({ where: { orgId: org.id, name: "sharepoint.sync" } });
       assert.equal(rows.length, 1, "idempotent");
       assert.equal(rows[0].name, "sharepoint.sync");
       assert.equal(rows[0].enabled, false, "starts off");

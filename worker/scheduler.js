@@ -39,6 +39,12 @@ export async function runJob(db, job, { definitions = JOB_DEFINITIONS, enqueue }
   try {
     const def = definitions[job.name];
     if (!def) throw new Error(`Unknown job "${job.name}"`);
+    if (def.lockMinutes) {
+      await db.scheduledJob.update({
+        where: { id: job.id },
+        data: { lockedUntil: new Date(Date.now() + def.lockMinutes * 60_000) },
+      });
+    }
     lastResult = (await def.run({ prisma: db, orgId: job.orgId, enqueue })) ?? null;
   } catch (err) {
     lastStatus = "failed";

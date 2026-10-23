@@ -20,6 +20,7 @@ import { decrypt, encrypt } from "../src/lib/crypto.js";
 import { getAppOnlyToken } from "../src/lib/msGraph.js";
 import { getConnector } from "../src/lib/connectors/index.js";
 import { createAclResolver, aclWriteData } from "../src/lib/connectors/sharepointAcl.js";
+import { refreshSiteAcls, siteGroupFingerprint } from "../src/lib/connectors/sharepointAclRefresh.js";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 
@@ -876,6 +877,22 @@ async function processSharePointSyncJob(job) {
         continue; // keep going with the next site rather than aborting the whole run
       }
 
+      // A-11: site-group membership changes aren't reported by delta. When
+      // the site's groups changed since the last sync (or were never seen,
+      // which backfills ACLs of files synced earlier), re-read every file's
+      // permissions after this run's changes are in.
+      let aclFingerprint = site.aclFingerprint ?? null;
+      let refreshWholeSite = false;
+      if (aclResolver) {
+        try {
+          const fingerprint = await siteGroupFingerprint(aclResolver, site.siteUrl);
+          refreshWholeSite = fingerprint !== site.aclFingerprint;
+          aclFingerprint = fingerprint;
+        } catch (err) {
+          console.error(`❌ Couldn't read the site groups of ${site.siteUrl}:`, err.message);
+        }
+      }
+
       for (const change of changes) {
         if (change.deleted) continue; // FR-2 MVP: no orphan/archive handling yet (Open Question #4)
         try {
@@ -893,7 +910,22 @@ async function processSharePointSyncJob(job) {
       // map over the accumulating scopeConfig.sites, not the outer `sites`
       // snapshot — otherwise each site's update clobbers the previous
       // site's freshly-persisted cursor with its stale pre-loop value.
-      scopeConfig = { ...scopeConfig, sites: scopeConfig.sites.map((s) => (s.siteId === site.siteId ? { ...s, lastSyncCursor: cursor } : s)) };
+      if (refreshWholeSite) {
+        try {
+          const stats = await refreshSiteAcls(prisma, { orgId: integration.orgId, site, accessToken, resolver: aclResolver });
+          aclRefreshed += stats.updated;
+          if (stats.failed) aclFingerprint = site.aclFingerprint ?? null; // retry next sync
+          console.log(`🔐 Site permissions re-read for ${site.siteUrl}:`, stats);
+        } catch (err) {
+          aclFingerprint = site.aclFingerprint ?? null;
+          console.error(`❌ Site permission refresh failed for ${site.siteUrl}:`, err.message);
+        }
+      }
+
+      scopeConfig = {
+        ...scopeConfig,
+        sites: scopeConfig.sites.map((s) => (s.siteId === site.siteId ? { ...s, lastSyncCursor: cursor, aclFingerprint } : s)),
+      };
       await prisma.orgIntegration.update({ where: { id: integrationId }, data: { scopeConfig } });
     }
   } catch (err) {

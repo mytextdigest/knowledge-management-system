@@ -20,7 +20,7 @@
 // Imported by the worker, so relative imports only.
 
 import { getItemPermissions, getUserIdByUpn } from "../msGraph.js";
-import { getSharePointToken, isSharePointCertConfigured, listSiteGroupMembers } from "./sharepointRest.js";
+import { getSharePointToken, isSharePointCertConfigured, listSiteGroupMembers, listSiteGroups } from "./sharepointRest.js";
 
 export const PRINCIPAL_TYPES = ["user", "group", "group_owners", "tenant"];
 
@@ -131,6 +131,7 @@ export class SharePointAclResolver {
       getUserIdByUpn,
       getSharePointToken,
       listSiteGroupMembers,
+      listSiteGroups,
       ...deps,
     };
     this.siteGroups = new Map(); // `${siteUrl}|${groupId}` → Promise<{ principals, upns }>
