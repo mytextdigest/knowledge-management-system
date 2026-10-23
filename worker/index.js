@@ -19,6 +19,7 @@ import { processKnowledgeContext } from "./knowledgeContext.js";
 import { decrypt, encrypt } from "../src/lib/crypto.js";
 import { getAppOnlyToken } from "../src/lib/msGraph.js";
 import { getConnector } from "../src/lib/connectors/index.js";
+import { createAclResolver, aclWriteData } from "../src/lib/connectors/sharepointAcl.js";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 
@@ -705,16 +706,36 @@ async function ensureFreshAppOnlyToken(integration) {
 // actually changed (compared on Graph's lastModifiedDateTime), and updated
 // in place — not re-created as a duplicate row — if it has. Returns
 // { skipped } so the caller can report an accurate filesFound count.
-async function syncOneFile({ change, integration, site, connectedByUserId, accessToken }) {
+//
+// EKP A-9: with an aclResolver, the file's SharePoint permissions are read
+// (before anything is stored, so a file whose permissions can't be read is
+// never ingested) and saved as DocumentAcl rows in the same write as the
+// document. An unchanged file only has its permissions re-read when Graph
+// flags a sharing change or they were never read. Without a resolver (no
+// certificate configured) documents keep department-only access.
+async function syncOneFile({ change, integration, site, connectedByUserId, accessToken, aclResolver, siteDriveId }) {
   const orgId = integration.orgId;
+  const driveId = change.driveId || siteDriveId;
+  const readAcl = () => aclResolver.itemAcl({ driveId, itemId: change.externalId, siteUrl: site.siteUrl });
+  const sourceFields = { externalUrl: change.webUrl || undefined, externalContainerId: driveId || undefined };
 
   const existing = await prisma.document.findFirst({
     where: { orgId, sourceProvider: "sharepoint", externalId: change.externalId },
-    select: { id: true, externalModifiedAt: true },
+    select: { id: true, externalModifiedAt: true, aclSyncedAt: true, externalUrl: true, externalContainerId: true },
   });
   if (existing?.externalModifiedAt && existing.externalModifiedAt.getTime() === new Date(change.modifiedAt).getTime()) {
-    return { skipped: true };
+    const refreshAcl = Boolean(aclResolver) && (change.permissionsChanged || !existing.aclSyncedAt);
+    const fillSource = (change.webUrl && !existing.externalUrl) || (driveId && !existing.externalContainerId);
+    if (refreshAcl || fillSource) {
+      await prisma.document.update({
+        where: { id: existing.id },
+        data: { ...sourceFields, ...(refreshAcl ? aclWriteData(await readAcl()) : {}) },
+      });
+    }
+    return { skipped: true, aclRefreshed: refreshAcl };
   }
+
+  const aclRows = aclResolver ? await readAcl() : null;
 
   const dbUser = await prisma.user.findUnique({ where: { id: connectedByUserId } });
   if (!dbUser) throw new Error("Connecting user no longer exists");
@@ -754,7 +775,13 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
     existing
       ? prisma.document.update({
           where: { id: existing.id },
-          data: { filePath: s3Key, status: "queued", externalModifiedAt: new Date(change.modifiedAt) },
+          data: {
+            filePath: s3Key,
+            status: "queued",
+            externalModifiedAt: new Date(change.modifiedAt),
+            ...sourceFields,
+            ...(aclRows ? aclWriteData(aclRows) : {}),
+          },
         })
       : prisma.document.create({
           data: {
@@ -776,6 +803,8 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
             sourceProvider: "sharepoint",
             externalId: change.externalId,
             externalModifiedAt: new Date(change.modifiedAt),
+            ...sourceFields,
+            ...(aclRows ? aclWriteData(aclRows, { create: true }) : {}),
             organization: { connect: { id: orgId } },
             department: { connect: { id: site.departmentId } },
             user: { connect: { id: connectedByUserId } },
@@ -817,6 +846,7 @@ async function processSharePointSyncJob(job) {
   const connectedByUserId = integration.scopeConfig?.connectedByUserId;
   let filesFound = 0;
   let filesFailed = 0;
+  let aclRefreshed = 0;
   let runError = null;
   let scopeConfig = integration.scopeConfig;
 
@@ -825,9 +855,17 @@ async function processSharePointSyncJob(job) {
 
     const accessToken = await ensureFreshAppOnlyToken(integration);
     const sites = scopeConfig.sites || [];
+    const aclResolver = createAclResolver({ graphToken: accessToken, tenantId: scopeConfig.tenantId });
+    if (!aclResolver) console.warn("⚠️ SharePoint certificate not configured: per-file permissions aren't captured");
 
     for (const site of sites) {
       const connector = getConnector("sharepoint", { accessToken, siteId: site.siteId });
+      let siteDriveId = null;
+      try {
+        siteDriveId = await connector.getDriveId();
+      } catch (err) {
+        console.error(`❌ Couldn't read the document library of site ${site.siteId}:`, err.message);
+      }
       let changes = [];
       let cursor = site.lastSyncCursor;
       try {
@@ -841,8 +879,9 @@ async function processSharePointSyncJob(job) {
       for (const change of changes) {
         if (change.deleted) continue; // FR-2 MVP: no orphan/archive handling yet (Open Question #4)
         try {
-          const result = await syncOneFile({ change, integration, site, connectedByUserId, accessToken });
+          const result = await syncOneFile({ change, integration, site, connectedByUserId, accessToken, aclResolver, siteDriveId });
           if (!result.skipped) filesFound++;
+          if (result.aclRefreshed) aclRefreshed++;
         } catch (err) {
           console.error(`❌ Failed to sync file "${change.name}" (${change.externalId}):`, err.message);
           filesFailed++;
@@ -874,7 +913,7 @@ async function processSharePointSyncJob(job) {
     },
   });
 
-  console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed}`);
+  console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed} aclRefreshed=${aclRefreshed}`);
 
   // FR-7 — one digest email per sync run (not one per file), only when
   // there's actually something new to review. Non-fatal: an email hiccup

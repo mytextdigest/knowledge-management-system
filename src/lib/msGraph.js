@@ -101,18 +101,45 @@ export async function getAppOnlyToken(tenantId) {
 
 // --- Graph calls -----------------------------------------------------------
 
-async function graphFetch(path, { accessToken, method = "GET", body } = {}) {
-  const res = await fetch(`${GRAPH_BASE}${path}`, {
+// Graph throttles with 429 (and sometimes 503) plus Retry-After. A full ACL
+// pass makes one permissions call per item, so honour it instead of failing.
+const MAX_RETRIES = 4;
+
+async function fetchWithRetry(url, init) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init);
+    if ((res.status !== 429 && res.status !== 503) || attempt >= MAX_RETRIES) return res;
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2 ** attempt * 1000;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 60_000)));
+  }
+}
+
+async function graphFetch(path, { accessToken, method = "GET", body, headers = {} } = {}) {
+  const res = await fetchWithRetry(path.startsWith("http") ? path : `${GRAPH_BASE}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${accessToken}`,
       ...(body ? { "Content-Type": "application/json" } : {}),
+      ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw await parseGraphError(res);
   if (res.status === 204) return null;
   return res.json();
+}
+
+// GET every page of a collection (follows @odata.nextLink).
+async function graphGetAll(path, { accessToken, headers } = {}) {
+  const values = [];
+  let next = path;
+  while (next) {
+    const data = await graphFetch(next, { accessToken, headers });
+    values.push(...(data.value || []));
+    next = data["@odata.nextLink"] || null;
+  }
+  return values;
 }
 
 // Delegated-token call: enumerate sites the signed-in admin can see (which,
@@ -151,22 +178,63 @@ export async function getFolderTree({ accessToken, siteId }) {
 
 // App-only-token call: delta query for FR-2/FR-4. Pass `cursor` (a full
 // `@odata.deltaLink` URL) to resume from the last sync; omit it to do the
-// initial full listing.
-export async function getDelta({ accessToken, siteId, cursor }) {
-  const url = cursor || `${GRAPH_BASE}/sites/${siteId}/drive/root/delta`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (!res.ok) throw await parseGraphError(res);
-  const data = await res.json();
-  return {
-    items: data.value || [],
-    nextLink: data["@odata.nextLink"] || null,
-    deltaLink: data["@odata.deltaLink"] || null,
-  };
+// initial full listing. Follows every @odata.nextLink page, so large
+// libraries aren't cut off after the first page.
+//
+// A-9: with `sharingChanges`, Graph also returns items whose permissions
+// changed, marked `@microsoft.graph.sharedChanged` (verified in the A-8
+// spike). Without `hierarchicalsharing`, a folder's sharing change is
+// reported on the items below it too.
+export async function getDelta({ accessToken, siteId, cursor, sharingChanges = false }) {
+  const headers = sharingChanges ? { Prefer: "deltashowsharingchanges" } : {};
+  let url = cursor || `${GRAPH_BASE}/sites/${siteId}/drive/root/delta`;
+  const items = [];
+  let deltaLink = null;
+  while (url) {
+    const data = await graphFetch(url, { accessToken, headers });
+    items.push(...(data.value || []));
+    url = data["@odata.nextLink"] || null;
+    deltaLink = data["@odata.deltaLink"] || deltaLink;
+  }
+  return { items, deltaLink };
+}
+
+// A-9: app-only-token call: the id of a site's default document library.
+export async function getSiteDriveId({ accessToken, siteId }) {
+  const drive = await graphFetch(`/sites/${siteId}/drive?$select=id`, { accessToken });
+  return drive.id;
+}
+
+// A-9: app-only-token call: an item's permissions (direct and inherited).
+export async function getItemPermissions({ accessToken, driveId, itemId }) {
+  return graphGetAll(`/drives/${driveId}/items/${itemId}/permissions`, { accessToken });
+}
+
+// A-9: app-only-token call: an Entra user's object id from their UPN, or
+// null if there's no such user. Needs User.Read.All on the connector app.
+export async function getUserIdByUpn({ accessToken, upn }) {
+  try {
+    const user = await graphFetch(`/users/${encodeURIComponent(upn)}?$select=id`, { accessToken });
+    return user.id;
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
+}
+
+// A-9: app-only-token call: one drive item (null if it no longer exists).
+export async function getDriveItem({ accessToken, driveId, itemId, select = "id,name,webUrl,lastModifiedDateTime,size,file,parentReference" }) {
+  try {
+    return await graphFetch(`/drives/${driveId}/items/${itemId}?$select=${select}`, { accessToken });
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
 }
 
 // App-only-token call: download a file's binary content for FR-2's ingest step.
 export async function downloadFileContent({ accessToken, siteId, itemId }) {
-  const res = await fetch(`${GRAPH_BASE}/sites/${siteId}/drive/items/${itemId}/content`, {
+  const res = await fetchWithRetry(`${GRAPH_BASE}/sites/${siteId}/drive/items/${itemId}/content`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw await parseGraphError(res);
