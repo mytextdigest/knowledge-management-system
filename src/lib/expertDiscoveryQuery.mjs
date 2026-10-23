@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { documentAclSql } from "./access/documentAcl.js";
 
 const SEMANTIC_TOPIC_THRESHOLD = 0.3;
 const SEMANTIC_TOPIC_CANDIDATES = 25;
@@ -55,6 +56,7 @@ function expertTopicAccessSql({ userId, isSuperAdmin = false }) {
       t.scope = 'repository'
       AND d.scope = 'repository'
       AND d.lifecycle = 'published'
+      AND ${documentAclSql({ userId, alias: "d" })}
       AND (d."departmentId" IS NULL OR EXISTS (
         SELECT 1 FROM "DepartmentMember" viewer_dm
         WHERE viewer_dm."departmentId" = d."departmentId"
@@ -129,6 +131,7 @@ export async function isExpertTopicAccessibleWithPrisma(prisma, { orgId, userId,
           t.scope = 'repository'
           AND d.scope = 'repository'
           AND d.lifecycle = 'published'
+          AND ${documentAclSql({ userId, alias: "d" })}
           AND (d."departmentId" IS NULL OR EXISTS (
             SELECT 1 FROM "DepartmentMember" dm
             WHERE dm."departmentId" = d."departmentId" AND dm."userId" = ${userId}

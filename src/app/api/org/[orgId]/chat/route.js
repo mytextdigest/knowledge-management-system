@@ -10,7 +10,7 @@ import { getRecentMemory, recordMemoryTopics } from "@/lib/orgMemberMemory";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 import { classifyWorkflowRequest, formatWorkflowInstruction, getWorkflowSteps } from "@/lib/workflowAssistance";
-import { searchAccessWhere } from "@/lib/access/documentAccess";
+import { searchAccessWhere, getUserPrincipals } from "@/lib/access/documentAccess";
 import { isDecisionQuestion, getDecisionEvidence, formatDecisionContext, DECISION_INSTRUCTION } from "@/lib/decisionIntelligence";
 import { isLessonQuestion, getLessonEvidence, formatLessonContext, LESSON_INSTRUCTION } from "@/lib/lessonsIntelligence";
 
@@ -290,7 +290,12 @@ export async function POST(req, { params }) {
       where: {
         id: activeWorkflowDocumentId,
         orgId,
-        ...searchAccessWhere({ userId: user.id, orgId, isSuperAdmin: isSuperAdmin(role) }),
+        ...searchAccessWhere({
+          userId: user.id,
+          orgId,
+          isSuperAdmin: isSuperAdmin(role),
+          principals: await getUserPrincipals(prisma, user.id),
+        }),
       },
       select: { id: true, filename: true, filePath: true, summary: true, content: true },
     });
