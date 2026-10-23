@@ -28,16 +28,18 @@
 **Out of scope for Phase 1:**
 
 - E32.6 tag write-back to SharePoint managed metadata (depends on Workstream C taxonomy).
-- SharePoint on-premises (unless NYPA's answers require it; see §2).
+- SharePoint on-premises. NYPA confirmed it's SharePoint Online only (Q&A #108).
 - Search ranking changes and search analytics (Workstreams C and D, F7).
-- **Content Server connector build** (design note only). It's on-premises at NYPA, has no test instance before award, and needs a network path from KMS to NYPA's network (VPN, private link or an on-premises sync agent). This is an architecture decision for after award.
+- **Content Server connector build** (design note only). It runs in NYPA's **private cloud** (CE 25.4), and NYPA allows a connector to be installed inside its network (Q&A #114, #161). There's no test instance before award, and NYPA confirms it can be added after launch (Q&A #66). The network path is still an architecture decision for after award.
 - OAuth/token authentication for KMS APIs (the "OAuth for APIs" half of S2): Workstream G.
+- **E32.7: KMS search and answers inside M365 Copilot Chat** (API, MCP server or Copilot connector; Q&A #47). New in PRS v1.1. It's planned for after Phase 1, and NYPA's M365 Governance Review Team must approve the connection pattern.
+- **PowerPoint, video and VTT text extraction** (E11). These are Phase 2 (Workstream E). Until then, sync must not choke on large videos (`A-24`).
 
 ## 2. Working Assumptions (until NYPA answers)
 
 NYPA won't register KMS in their tenant or give test access until after the award, so we build against our own test tenant (`nextgenerationinnovation.onmicrosoft.com`, mock org "NGI") and state these assumptions in the proposal.
 
-**The questions haven't been sent to NYPA**, so we build on these assumptions until award. After award, NYPA's design team will review the design. Expect changes then, and keep each assumption behind one setting or one module so it can change without a rewrite.
+**We didn't send our questions, but NYPA's answers to other vendors (published 2026-10-22, `docs/ekp/Attachment 5 - Q+A format NYPA Response.xlsx`) settle most of them.** The "NYPA's answer" column below records them. After award, NYPA's design team will still review the design. Keep each assumption behind one setting or one module so it can change without a rewrite.
 
 | #    | Assumption we build on                                                                                                                                                                                                                                                                                                                                                                                | Why                                                                                                                                                                                                                                                                    | Cost if NYPA says otherwise                                                                                                              |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -48,6 +50,23 @@ NYPA won't register KMS in their tenant or give test access until after the awar
 | AS-5 | **No-copy mode on by default** for M365 content (SharePoint stays the master copy)                                                                                                                                                                                                                                                                                                              | E32.2                                                                                                                                                                                                                                                                  | None.                                                                                                                                    |
 | AS-6 | **ServiceNow** (Phase 1 stretch) built against a free developer instance, Knowledge Base articles only, permissions per knowledge base mapped to a KMS department. **Content Server** deferred to after award.                                                                                                                                                                            | No NYPA test systems before award; ServiceNow and Content Server are "target capability", not mandatory                                                                                                                                                                | Per-article ServiceNow user criteria and incidents/problems (Q6) are added after award.                                                  |
 | AS-7 | **Entra ID is NYPA's identity provider for all KMS users**, including contractors (as B2B guests)                                                                                                                                                                                                                                                                                               | Needed so every user can be mapped to SharePoint permissions                                                                                                                                                                                                           | Users outside Entra can still sign in with a password but see no permission-restricted M365 items.                                       |
+
+**NYPA's answers (2026-10-22):**
+
+| #    | NYPA's answer                                                                                                                                                                                                                                                                                       | Effect                                                                                                                                                         |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AS-1 | **Confirmed.** SharePoint Online in an M365 G5 **GCC** tenant, not GCC High (Q&A #108). Azure is believed to be Commercial.                                                                                                                                                                          | No change. GCC uses the standard `graph.microsoft.com` and `login.microsoftonline.com` endpoints, so nothing built so far needs to change.                     |
+| AS-2 | **Not answered directly.** Whether to read sources with an application identity or as the signed-in user is "to be determined with NYPA architecture/cyber stakeholders during solution design" (Q&A #179). The EKB is open to all users and no CEII is in scope (Q&A #102, #140). | Keep per-file permissions (A-9 to A-11). The app-only model we built is one of the two options NYPA named.                                                    |
+| AS-4 | **Not answered.**                                                                                                                                                                                                                                                                                     | Keep OIDC (done) and SAML (A-16).                                                                                                                              |
+| AS-6 | **ServiceNow confirmed and simpler.** Knowledge Base only; the main KB "is accessible to all users"; no script-based user criteria (Q&A #126). Release "Australia" (Q&A #161). Can be added after launch (Q&A #66). **Content Server:** CE 25.4 in NYPA's private cloud, connector installable inside NYPA's network, OpenText Core in use (Q&A #114, #161). | Mapping each knowledge base to a department is enough. **Per-article user criteria are dropped**, not deferred (see A4). Content Server stays after award. |
+| AS-7 | **Confirmed.** Entra ID is the identity provider. NYPA and Canals are in one tenant (Q&A #179). Their content doesn't need to be kept separate (Q&A #110).                                                                                                                                             | One tenant maps to one KMS org, which is how A1 is built.                                                                                                     |
+
+**Other NYPA answers that affect A:**
+- **Sync freshness:** NYPA asked for changes within **5 minutes** (Q&A #99), and also said "scheduled indexing should be ok" (Q&A #46). The scheduler's minimum interval goes from 15 to 5 minutes (`A-22`, NFR-6).
+- **In-scope SharePoint content:** the EKB site (~1,000 documents and ~300 videos) plus 7 other sites (~150 items), about 1,500 files, mostly **PPT, PDF and MP4**, with VTT/Word transcripts (Q&A #132, #44, #185). NYPA picks the subsets to index (Q&A #94). Content stays in SharePoint; no bulk migration (Q&A #58, #160). This supports no-copy mode (A-14).
+- **Large files:** videos are up to **8 GB** (Q&A #188). The sync and no-copy path load whole files into memory, so A-24 adds a size guard.
+- **Existing tags:** Semaphore has already tagged ~250,000 items across 60 sites into SharePoint managed-metadata columns (Q&A #128). The sync should keep those values (`A-23`, PRS E16.5) so Workstream C can map them to terms.
+- **Recordings** stay in the organizer's OneDrive unless someone moves them to SharePoint (Q&A #159). Only SharePoint sites are in scope for the connector.
 
 ## 3. Shared Design (decided once for the whole workstream)
 
@@ -145,6 +164,7 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
   - A registers `sharepoint.sync` and `sharepoint.acl-refresh`.
   - B registers `content.stale-scan`, `reviews.due-scan` and `documents.purge-deleted`.
 - **Intervals rather than cron expressions:** simpler for admins and enough for every Phase 1 job. Cron can be added later.
+- **Minimum interval: 5 minutes** (changed from 15 on 2026-10-23; NFR-6, Q&A #99). Delta sync makes a 5-minute `sharepoint.sync` cheap when nothing has changed. The scheduler's 60 s tick is unchanged.
 - **Admin UI:** Settings → Scheduled jobs. It lists jobs with their interval, enabled flag, last run and status, and has a "Run now" button. Only super_admin can use it. Every change is audit-logged (F2, from B).
 
 ### 3.4 Connector contract (extended)
@@ -282,6 +302,13 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
   - Cached for 15 minutes.
 - **Scheduled sync:** register `sharepoint.sync` per org. The interval comes from the integration settings (default 60 min, NFR-6). "Sync Now" stays.
 - **Graph permissions:** document exactly what NYPA's admin must grant: `Sites.Selected`, `User.Read.All`, `GroupMember.Read.All` (app-only), plus the delegated sign-in scopes. Verify in the test tenant.
+- **Existing managed metadata (`A-23`, PRS E16.5):**
+  - On each sync, read the item's list fields (Graph `/drives/{d}/items/{i}/listItem?$expand=fields`).
+  - Store the managed-metadata (taxonomy) values as raw `{ field, label, termGuid }` on the document. Nothing is mapped to KMS terms yet; that's Workstream C (E15/E16).
+  - At NYPA these are the Semaphore tags already applied to ~250,000 items (Q&A #128).
+- **Large files (`A-24`):**
+  - Files above a size limit (integration setting, default 200 MB) are recorded with their metadata, ACL and deep link, but they aren't downloaded or chunked. They're marked `skipped_too_large` in the sync run.
+  - Until Phase 2 (E11), PPTX and MP4 produce no text anyway. The guard stops an 8 GB video (Q&A #188) from being loaded into worker memory.
 
 **Known risks:**
 
@@ -302,6 +329,9 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 - [ ] Disabling the Entra account removes the `email_match` identity at the next `acl-refresh`.
 - [ ] Sync history shows each scheduled run. A 5,000-item sync completes without errors.
 - [ ] The F1 parity test still passes for all non-SharePoint documents.
+- [ ] A scheduled sync can be set to a 5-minute interval, and a 4-minute interval is rejected (`A-22`).
+- [ ] A file with a managed-metadata value in the test tenant arrives with that value stored on the document (`A-23`).
+- [ ] A file above the size limit appears in KMS with its deep link and permissions. It isn't downloaded, and the sync run reports it as skipped (`A-24`).
 
 ### A3: SharePoint pages, deep links, SharePoint as master copy (E12.1, E12.3–4, E32.2–5)
 
@@ -334,23 +364,28 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 
 ### A4: ServiceNow connector (stretch) · Content Server (after award) (E2.1, E2.8, E12.2)
 
-**Status:** outlined. ServiceNow is a Phase 1 stretch for week 6; Content Server is deferred. Both are "target capability" in the RFP, not mandatory.
+**Status:** outlined. ServiceNow is a Phase 1 stretch for week 6; Content Server is deferred. Both are "target capability" in the RFP, not mandatory, and NYPA confirms both can be added after launch (Q&A #66).
 
 **Scope for both:** read-only ingestion, the same pattern as SharePoint (`BaseConnector`). Content is indexed, searchable and citable, with a link back to the original. Nothing is written back to the source system.
 
 **`ServiceNowConnector` (Phase 1 stretch):**
 
 - **What it is:** ServiceNow is a cloud IT service management platform; its Knowledge Base module holds how-to and support articles.
-- **What we ingest:** published Knowledge Base articles (Table API `kb_knowledge`), incremental by `sys_updated_on`, saved as `contentType: "article"`. Incidents/problems only if NYPA asks (Q6), after award.
-- **Permissions (first version):** each knowledge base is mapped to a KMS department in the integration settings, like SharePoint sites today. Per-article "user criteria" enforcement is after award.
+- **What we ingest:** published Knowledge Base articles (Table API `kb_knowledge`), incremental by `sys_updated_on`, saved as `contentType: "article"`. **Knowledge Base only.** NYPA's scope is the KB (Q&A #126), so incidents and problems are out of scope.
+- **Permissions:** each knowledge base is mapped to a KMS department in the integration settings, like SharePoint sites today. NYPA's main KB "is accessible to all users", and NYPA doesn't use script-based user criteria (Q&A #126). **Per-article user-criteria enforcement is dropped**, not deferred. If a later KB is restricted, map it to a narrower department.
 - **Auth:** basic auth or OAuth client credentials for a read-only integration user, encrypted in `OrgIntegration` (`provider: "servicenow"`).
-- **Test system:** free ServiceNow developer instance.
+- **Test system:** free ServiceNow developer instance. NYPA runs the **"Australia"** release (Q&A #161), so pick a developer instance on that release (or the closest one available) and use only the stable Table API.
 
 **Content Server (after award):**
 
 - **What it is:** OpenText Content Server (formerly Livelink), an enterprise document management product, usually installed on the customer's own servers.
-- **Phase 1 deliverable:** a short design note only (REST API v2 nodes, categories metadata, per-node permissions → `DocumentAcl`).
-- **Blocked on:** an NYPA test instance, the Content Server version, and a network path from KMS to NYPA's on-premises network (VPN, private link or an on-premises sync agent).
+- **At NYPA (Q&A #17, #92, #114, #115, #161):**
+  - Version and hosting: CE 25.4 in NYPA's private cloud, with OpenText Core in use.
+  - **A connector may be installed inside NYPA's network**, so an in-network sync agent that pushes to KMS is an accepted pattern.
+  - Size: about 500K knowledge assets (not the 3 million records in the RFI), about 5 TB now and about 10 TB by year 3.
+  - NYPA expects OCR and indexing of all images and video, though it says very few Content Server videos will need it.
+- **Phase 1 deliverable:** a short design note only (REST API v2 nodes, categories metadata, per-node permissions → `DocumentAcl`, in-network agent option).
+- **Blocked on:** an NYPA test instance, and how Content Server permissions are managed (AD groups, Content Server groups or both, which NYPA hasn't answered; Q&A #133). The version is now known.
 
 **One ranked result list:** all sources already land in the same `Document` / `Chunk` index, so E2.1 only needs a source label and filter in the UI.
 
@@ -403,11 +438,14 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 | `A-14` | A3 · No-copy mode + `getDocumentBytes` + preview endpoint                                                                       | `IN_PROGRESS` | Johurul  | `A-13`                   | 2026-10-23 |            |
 | `A-15` | A3 · SharePoint site pages ingestion (`contentType: page`)                                                                      | `IN_PROGRESS` | Johurul  | `A-9`                      | 2026-10-23 |            |
 | `A-16` | A1 · SAML 2.0 via embedded SAML Jackson + `BoxyHQSAMLProvider` (required by RFP §6 S2)                                         | `TODO`        | Johurul  | `A-5`                      |            |            |
-| `A-17` | A4 · ServiceNow connector, KB articles only, knowledge base → department (stretch, developer instance)                           | `TODO`        | Johurul  | `A-9`                      |            |            |
+| `A-17` | A4 · ServiceNow connector, KB articles only, knowledge base → department, no per-article criteria (stretch, developer instance) | `TODO`        | Johurul  | `A-9`                      |            |            |
 | `A-18` | A4 · Content Server: design note in Phase 1; build after award (needs NYPA instance + network path)                               | `BLOCKED`     | Johurul  | NYPA                         |            |            |
 | `A-19` | Phase 1 integration & cross-testing (A + B together, all roles)                                                                    | `TODO`        | All 3    | `A-12`, `A-15`, `B-21` |            |            |
 | `A-20` | Update RTM status for E2, E12, E32 in the plan; re-score Phase 1                                                                   | `TODO`        | Johurul  | `A-19`                     |            |            |
 | `A-21` | A2 · Identity by verified email (`email_match` via Graph app-only) + re-check in `acl-refresh`                                | `IN_PROGRESS` | Johurul  | `A-4`                      | 2026-10-23 |            |
+| `A-22` | A2 · F3: lower the minimum job interval from 15 to 5 minutes (NFR-6, NYPA Q&A #99)                                                | `TODO`        | Johurul  | `A-7`                      |            |            |
+| `A-23` | A2 · Store SharePoint managed-metadata values (raw label + term GUID) on synced documents (PRS E16.5; mapped to terms by C)       | `TODO`        | Johurul  | `A-9`                      |            |            |
+| `A-24` | A2 · Large-file guard: above the size limit, index metadata, ACL and link only; no download (8 GB videos, Q&A #188)               | `TODO`        | Johurul  | `A-14`                     |            |            |
 
 ## 7. Implementation Notes
 
@@ -518,6 +556,12 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
   - **Off:** the sync stores no S3 object and charges no storage (a copy kept from before is deleted and its size given back); the chunk job reads the bytes from SharePoint (`getDocumentBytes` in the worker: S3 if `filePath`, else Graph `/drives/{d}/items/{i}/content`), in memory only. Needs-Review confirm and Regenerate work without a stored copy.
   - **Preview/download:** `GET /api/documents/[id]/preview` streams from SharePoint after the document-page access check (including the file's SharePoint permissions); the document API returns it as `fileUrl`/`fileDownloadUrl`, so the existing PDF/DOCX viewers, repository Preview/Download and chat citations work unchanged.
   - Tests: `scripts/ekp/a14-no-copy.test.mjs` (`npm run ekp:a14:test`).
+- `2026-10-23 · NYPA RFP Q&A (Johurul):` NYPA's answers to other vendors' questions are now in §2 (the "NYPA's answer" table) and in PRS v1.1 §6.
+  - AS-1 and AS-7 are confirmed. GCC uses the standard endpoints, so nothing built changes.
+  - ServiceNow (A4) is KB-only and open to all users, so **per-article user criteria are dropped**.
+  - Content Server is in a private cloud, and an in-network connector is allowed.
+  - New tasks: `A-22` (5-minute minimum interval), `A-23` (keep existing managed-metadata tags) and `A-24` (large-file guard).
+  - Copilot/MCP access (E32.7) and PPTX/video extraction (E11, Phase 2) are out of Phase 1 scope (§1).
 - `2026-10-23 · A-15 (site pages):`
   - **A page is a drive item** in the site's *Site Pages* library, so it reuses A-9's permission capture, delta (own cursor, `scopeConfig.sites[].pagesCursor`) and A-11's refresh unchanged. Graph's `/lists` hides that library; its id comes from SharePoint REST (`BaseTemplate eq 119`), then Graph `/sites/{id}/lists/{listId}/drive` (falls back to the English title "Site Pages").
   - **Text** from Graph `sitePage` `canvasLayout` (text web parts, searchable texts of standard web parts, title, description), `src/lib/connectors/sharepointPages.js`. Stored in `Document.content` with `contentType: "page"`, no file; the chunk job uses that text. Pages with under 50 characters of text (e.g. an empty site home page) are skipped.
