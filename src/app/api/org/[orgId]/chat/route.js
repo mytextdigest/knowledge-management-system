@@ -385,6 +385,8 @@ export async function POST(req, { params }) {
       documentId: c.document_id,
       filename: c.filename,
       filePath: c.filePath,
+      externalUrl: c.externalUrl || null,
+      sourceProvider: c.sourceProvider || null,
       department: c.department_name,
       project: c.project_name,
       texts: [],
@@ -412,6 +414,8 @@ export async function POST(req, { params }) {
       project: g.project || null,
       preview: g.texts.join(" ").slice(0, 900),
       url: g.filePath ? await generateSignedUrl(g.filePath).catch(() => null) : null,
+      externalUrl: g.externalUrl,
+      sourceProvider: g.sourceProvider,
     }))
   );
 

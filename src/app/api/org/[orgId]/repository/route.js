@@ -158,6 +158,8 @@ export async function GET(req, { params }) {
   const documentSelect = {
     id: true,
     filename: true,
+    sourceProvider: true,
+    externalUrl: true,
     status: true,
     scope: true,
     lifecycle: true,

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Eye, Download, Info, Loader2, Check, X, AlertTriangle } from "lucide-react";
 import { Modal, ModalHeader, ModalTitle, ModalContent } from "@/components/ui/Modal";
+import OpenInSourceLink from "@/components/documents/OpenInSourceLink";
 
 const CATEGORIES = [
   "Policies",
@@ -362,6 +363,7 @@ export default function RepositoryDocumentCard({
         <button type="button" onClick={handlePreview} disabled={pendingAction === "preview"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "preview" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />} Preview</button>
         <button type="button" onClick={handleDownload} disabled={pendingAction === "download"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "download" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download</button>
         <button type="button" onClick={() => router.push(`/document?id=${document.id}`)} title="Open the full document viewer to read, chat with, and summarize this document" className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"><Info className="h-3.5 w-3.5" /> View</button>
+        <OpenInSourceLink url={document?.externalUrl} sourceProvider={document?.sourceProvider} />
       </div>
       {actionError ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{actionError}</p> : null}
 
