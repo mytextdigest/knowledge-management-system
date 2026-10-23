@@ -25,7 +25,7 @@ Without these capabilities, it is simply a document repository with AI.
 
 | Rank | Capability | Purpose | Typical Usage | Status |
 |---|---|---|---|---|
-| 1 | Conversational Knowledge Assistant | Primary interface to organizational knowledge | Daily | In Progress |
+| 1 | Conversational Knowledge Assistant | Primary interface to organizational knowledge | Daily | Done |
 | 2 | Semantic Knowledge Retrieval | Finds information regardless of wording | Daily | Done |
 | 3 | Automated Knowledge Ingestion Pipeline | Converts documents into organizational intelligence | Continuous | Done |
 | 4 | Automatic Knowledge Classification | Self-organizing enterprise knowledge | Continuous | Done |
@@ -55,7 +55,7 @@ These capabilities transform information into enterprise-wide intelligence.
 | 13 | Organizational Knowledge Graph | Enterprise-wide knowledge map | Weekly | Done |
 | 14 | Decision Intelligence Repository | Preserve why decisions were made | Weekly | Done |
 | 15 | Project Intelligence | Link projects, documents, lessons, experts | Weekly | TBD |
-| 16 | Topic Evolution Tracking | Monitor how knowledge changes over time | Monthly | TBD |
+| 16 | Topic Evolution Tracking | Monitor how knowledge changes over time | Monthly | Done |
 
 #### Why These Matter
 

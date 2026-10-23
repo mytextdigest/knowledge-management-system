@@ -1,1 +1,37 @@
-This is a txt file
+EC2 Command: ssh -i kms-bg-worker-key.pem ubuntu@3.19.222.105
+cd ~/kms-dev
+git pull origin dev
+npm install --production
+npx prisma generate
+pm2 logs kms-dev-worker
+pm2 restart kms-dev-worker
+
+nano .env
+
+Run worker: node worker/index.js
+
+Engineering: https://nextgenerationinnovation.sharepoint.com/sites/Engineering/SitePages/CollabHome.aspx
+
+Finance: https://nextgenerationinnovation.sharepoint.com/sites/Finance/SitePages/CollabHome.aspx 
+
+MTD:
+
+git add .
+git commit -m "Updated summarization logic + email + helper"
+git push origin main
+
+
+ssh -i my-text-digest-bg-worker-key.pem ubuntu@3.19.211.236
+
+cd ~/my-text-digest
+git pull origin main
+
+npm install --production
+
+npx prisma generate
+
+pm2 restart my-text-digest-worker
+
+pm2 logs my-text-digest-worker
+
+pm2 save

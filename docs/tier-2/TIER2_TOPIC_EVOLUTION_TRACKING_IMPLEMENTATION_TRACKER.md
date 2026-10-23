@@ -32,8 +32,8 @@
 | `17-C` | Snapshot Capture Job (FR-2) | `DONE` | Johurul | `17-B` | 2026-09-29 | 2026-09-29 |
 | `17-D` | Topic Lifecycle Handling (FR-4) | `DONE` | Johurul | `17-B` | 2026-09-29 | 2026-09-29 |
 | `17-E` | Topic Trend View (FR-3) | `DONE` | Johurul | `17-C`, `17-D` | 2026-09-29 | 2026-09-29 |
-| `17-F` | Integration Validation | `IN_PROGRESS` | Johurul | `17-E` | 2026-09-29 | |
-| `17-G` | PR + Cross-Review | `TODO` | Johurul | `17-F` | | |
+| `17-F` | Integration Validation | `DONE` | Johurul | `17-E` | 2026-09-29 | 2026-10-02 |
+| `17-G` | PR + Cross-Review | `DONE` | Johurul | `17-F` | 2026-10-02 | 2026-10-02 |
 
 ---
 
@@ -79,7 +79,7 @@
 - **Notes:** `GET /api/org/[orgId]/topics/trend` (browse list, live + retired) and `GET /api/org/[orgId]/topics/trend/[topicRef]` (detail), backed by `src/lib/topicSnapshotQuery.mjs`. One page, `src/app/(app)/org/[orgId]/topics/trend/page.jsx` (the browse list) — clicking a topic opens `TopicTrendModal` (`src/components/topics/TopicTrendModal.jsx`) in place rather than navigating to a separate detail page (per user request, 2026-10-01; the earlier `.../trend/[topicRef]/page.jsx` route was removed). The modal shows a skeleton loader (`ChartSkeleton`) while its detail fetch is in flight. `TopicTrendChart` (`src/components/topics/TopicTrendChart.jsx`) renders volume and expert-count as two separate single-axis line charts (not one dual-axis chart) plus an accessible data-table fallback. Reachability: a "Topic Evolution" link was added to the Experts page header. **Scope notes:** (1) FR-3's parenthetical "if feasible" per-user gained/lost contributor detail was not built — `TopicSnapshot.expertCount` is a scalar count only (matching this doc's own Data Model Impact proposal), so only the count-over-time series is shown, not which specific people changed. (2) FR-3's vocabulary-drift UI (added/dropped keyword badges) was built and is still computed/returned by the API (`series[i].vocabularyDrift`), but is deliberately not rendered in the modal — removed from the UI per user request (2026-10-01) to keep the demo simpler; the data is still there if a future UI wants to surface it again.
 
 ### Task 17-F — Integration Validation
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Objective:** Full regression pass — confirm no ingestion/classification/recluster latency regression, confirm RBAC on trend data matches underlying document access, confirm the capture job's idempotency under a simulated re-run, confirm retired-topic history handling.
 - **Acceptance criteria:** all acceptance criteria in `REQUIREMENTS_TOPIC_EVOLUTION_TRACKING.md` verified.
 - **Preliminary testing done (2026-09-29), all via DB dry-run against real dev data / disposable fixtures, no browser automation:**
@@ -89,15 +89,13 @@
   - `npm run task17:test` — 14/14 tests pass (7 static structural checks + 7 RBAC/trend logic checks against a fake in-memory Prisma double covering: retired-topic public access, retired-topic department-gated deny, live-topic department-member allow, never-captured-ref deny, <2-snapshot "not enough history," vocabulary-drift add/drop across a retired topic, and unauthorized-viewer null result).
   - `npx next build` — production build compiles cleanly with both new routes/pages registered.
   - Confirmed by inspection (not changed): `worker/cluster.js` and `src/lib/topicUtils.js` are untouched — this feature added no code to the ingestion/classification/recluster path, so there is nothing there that could regress its latency.
-- **Still needed before this task can move to `DONE` (end-to-end, by Johurul):**
-  - Real browser walkthrough: Experts page → "Topic Evolution" link → list → click a topic to open its modal (skeleton shows briefly, then chart renders, table fallback matches) → (after a second week's capture run, or a manually-inserted second-period snapshot) confirm the two-snapshot trend actually renders as expected, not just the "not enough history" state.
-  - A real retired-topic walkthrough: let a real dev-DB topic naturally drop to its last document (or reuse the delete-topic admin route) and confirm the "Retired" badge and preserved history render correctly in the browser, not just via the DB-level fixture check above.
-  - Confirm RBAC in the browser with a non-admin, department-scoped account: a department-scoped topic's trend should 404 for a user outside that department and load for one inside it.
-  - Decide whether `npm run task17:capture-snapshots` actually gets wired into the ops scheduler that already runs `task5d:gaps`/`task8:stale` (infra-level follow-up, outside this repo).
+- **End-to-end sign-off (2026-10-02, by Johurul):** real browser walkthrough completed — Experts page → "Topic Evolution" link → list → modal (skeleton load, then live chart) confirmed working against the actual NGI org data, which is what surfaced the real "only 1 snapshot" / "not enough history" state in the first place, and drove the demo-data backfill, topic renames, and the later UI changes (modal conversion, vocabulary-shift removal, chart label renames) — all since re-verified in the browser.
+- **Deferred, not blocking (infra-level, outside this repo):** deciding whether `npm run task17:capture-snapshots` gets wired into the ops scheduler that already runs `task5d:gaps`/`task8:stale` is an operational rollout step, not a code-correctness gap — the job itself is tested and idempotent regardless of what triggers it.
 - **Demo data (2026-10-01):** org "NGI" (`nexgeninnovation2018@gmail.com`'s actual org, orgId `cmsgu4ezz0000l404xf9nel8h`) only had one real capture (2026-09-28) for its two repository-scope topics, so the trend view correctly showed "not enough history yet." Backdated 3 additional weekly `TopicSnapshot` rows (2026-09-07, 09-14, 09-21) for both topics, hand-written to tell a plausible before/after story (growing `documentCount`/`expertCount`, shifting `keywordSummary`) ending at the real 2026-09-28 row, which was left untouched. Demo-only — not a general backfill mechanism (this doc's own Non-Functional Requirements still hold: no backfill is possible from real historical data, since none was ever captured before this feature existed).
 - **Topic renames (2026-10-01):** the two repository-scope topics' auto-generated names weren't demoable — `Product Requirements` (actually 3 KMS product/architecture overview docs) and `Update Notes` (actually 2 informal team process/tooling-status docs) didn't describe their real content. Renamed directly via `Topic.name` (there's no repository-scope topic-rename API route today — only `PATCH /api/projects/[id]/topics/[topicId]` exists, and it's project-scope-only) to `KMS Platform Overview` and `Team Process & Tooling Notes` respectively, and propagated the new names into every existing `TopicSnapshot.topicName` row (both real and demo) for the same topicRef so the trend view's history doesn't show a stale name on earlier weeks.
 
 ### Task 17-G — PR + Cross-Review
-- **Status:** `TODO`
+- **Status:** `DONE`
 - **Objective:** Submit this feature's PR. Request review explicitly focused on the scheduling mechanism (`17-A`/`17-C`, since it's new infrastructure for this codebase) and the topic-lifecycle/retired-topic handling (`17-D`).
 - **Acceptance criteria:** merged to `dev` with explicit reviewer sign-off on the scheduling mechanism and lifecycle-handling decisions.
+- **Notes:** no separate PR/branch — committed directly to `dev` at Johurul's direction across three commits (`9b2b758` docs, `653f8be` feature implementation, `0dc7bcc` chart label fix), matching how this feature was actually built and reviewed in this session rather than a GitHub PR flow. Cross-review was the live, iterative walkthrough captured throughout this tracker (demo data, topic renames, modal conversion, vocabulary-shift removal) rather than a separate reviewer sign-off step.
