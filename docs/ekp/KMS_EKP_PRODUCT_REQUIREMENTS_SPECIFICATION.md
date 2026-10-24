@@ -4,8 +4,8 @@
 |---|---|
 | **Product** | KMS (Knowledge Management System) |
 | **Document** | Product Requirements Specification (PRS), Enterprise Knowledge Platform |
-| **Version** | 1.1 (draft), 2026-10-22: NYPA's RFP Q&A answers added (§6) |
-| **Source** | NYPA RFP Q26-7821RJM, Attachment 1 §2.1 *Enterprise KM Platform Capabilities* (identical to RFI Q26-7772RJM §3.1) · NYPA's answers to vendor questions: `docs/ekp/Attachment 5 - Q+A format NYPA Response.xlsx` (cited as "Q&A #n") |
+| **Version** | 1.2 (draft), 2026-10-24: answers from NYPA's updated Q&A (10/22, #213–#238) added. 1.1, 2026-10-22: NYPA's RFP Q&A answers added (§6) |
+| **Source** | NYPA RFP Q26-7821RJM, Attachment 1 §2.1 *Enterprise KM Platform Capabilities* (identical to RFI Q26-7772RJM §3.1) · NYPA's answers to vendor questions: `docs/ekp/Copy of Attachment 5 - Q+A format NYPA Response_updated10.22.26.xlsx` (cited as "Q&A #n"; #1–#212 are numbered as in the first version) |
 | **Related** | `docs/ekp/EKP_IMPLEMENTATION_PLAN.md` (phases, workstreams, workflow) · `docs/NYPA_RFP_Q26-7821_KMS_GAP_ANALYSIS.md` (current status) |
 
 
@@ -66,7 +66,7 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
 | **Member** | All employees | Search, ask questions, browse, upload, follow topics. |
 | **Guest** | Limited or external users | Read-only access to what they're permitted to see. |
 
-**NYPA's user numbers (Q&A #8, #69, #191):** about 2,600 users in total, about 200 KM power users (creators/editors), 5 KM team members and about 20 owners/administrators. NYPA and Canals share one Entra tenant. The KM team is the product owner and decides what is retained, archived or retired (Q&A #164, #166).
+**NYPA's user numbers (Q&A #8, #69, #191):** about 2,600 users in total, about 200 KM power users (creators/editors), 5 KM team members and about 20 owners/administrators. **All ~2,500 users** need to view, create and contribute content in the EKP (Q&A #237), so every member is a contributor. The ~20 owners/administrators span all of NYPA's KM products: the 5-person KM team, IT technical owners and partners, and business superusers the KM team promotes (Q&A #237). NYPA and Canals share one Entra tenant. The KM team is the product owner and decides what is retained, archived or retired (Q&A #164, #166).
 
 **Universal rule:** every requirement must respect role and document-level permissions. A user must never see, receive in an answer, or be cited content they can't access in KMS or in the source system.
 
@@ -150,7 +150,7 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
 - **Dependencies / notes:** E32 (Microsoft sign-in). NYPA's answers (see §6.2):
   - **SharePoint:** SharePoint Online in a **GCC** M365 tenant (not GCC High), identity is Entra ID (Q&A #108, #179). In scope at go-live: the Enterprise Knowledge Base (EKB) site (~1,000 documents and ~300 videos) plus 7 other sites (~150 items), about 1,500 files in total and growing (Q&A #132). NYPA will choose which subsets are indexed (Q&A #94). Content stays in place; no bulk migration (Q&A #58, #160).
   - **Permissions:** whether the solution reads sources with an application identity or as the signed-in user will be decided with NYPA's architecture and cyber teams during design (Q&A #179). The EKB is open to all users and no CEII is in scope (Q&A #102, #140), but we keep **per-file permissions** because the RFP text requires "respects original permissions".
-  - **Content Server:** CE 25.4 in NYPA's private cloud; a connector can be installed inside NYPA's network; OpenText Core is in use (Q&A #114, #161). About 500K knowledge assets in scope, not the 3 million records the RFI mentioned (Q&A #17). Storage is about 5 TB, growing to about 10 TB by year 3 (Q&A #92). How permissions are managed (AD groups or Content Server groups) is unanswered (Q&A #133).
+  - **Content Server:** CE 25.4 in NYPA's private cloud; a connector can be installed inside NYPA's network; **OpenText Extended ECM for M365** is in use (Q&A #114, corrected in the 10/22 update; #161). Extended ECM connects Content Server with SharePoint and Teams, so some Content Server content may already be reachable through M365. About 500K knowledge assets in scope, not the 3 million records the RFI mentioned (Q&A #17). Storage is about 5 TB, growing to about 10 TB by year 3 (Q&A #92). How permissions are managed (AD groups or Content Server groups) is unanswered (Q&A #133).
   - **ServiceNow:** "Australia" release. The main Knowledge Base is open to all users; no script-based user criteria (Q&A #126, #161).
   - **Freshness:** NYPA gave two answers: "scheduled indexing should be ok" (Q&A #46) and "near real time, under 5 minutes" (Q&A #99). See NFR-6.
 
@@ -316,7 +316,7 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E16.2** The import must support standard exchange formats (**SKOS as RDF/XML and Turtle (TTL)**, and CSV) and should support a direct connector to Progress Semaphore's API or to the SharePoint term store.
   - **E16.3** Re-sync must update changed terms and flag removed ones without breaking document tags.
   - **E16.4** Externally managed term sets must be read-only in KMS (the external tool is the master).
-  - **E16.5** For SharePoint-synced documents, the connector should import the **existing managed-metadata tags** (term-store values already on the item) as document tags, instead of only re-classifying the document.
+  - **E16.5** For SharePoint-synced documents, the connector should import the **existing managed-metadata tags** (term-store values already on the item) as document tags, instead of only re-classifying the document. If EKB content is ever moved into KMS, its existing metadata must be preserved (Q&A #234).
 - **Acceptance criteria:** a SKOS export (RDF/XML or TTL) from a taxonomy tool is imported, documents are tagged with its terms, and a re-import with changes updates them correctly. A synced SharePoint item that already has managed-metadata values arrives with those terms attached.
 - **Dependencies / notes:** E15. NYPA's tool is **Progress Semaphore**, including Classification Server. Its model is synced into the SharePoint term store. It can be reached by API and exported as SKOS/RDF/TTL (Q&A #59, #113, #128, #177). Semaphore already auto-classifies about **250,000 items across 60 SharePoint sites and 200 libraries** (Q&A #128), so many documents already carry terms. Semaphore's future is undecided: its contract runs to the end of 2026, and NYPA asks vendors to evaluate it alongside alternatives (Q&A #60, #113, #200). KMS must work with Semaphore and also be able to act as the taxonomy master if NYPA chooses that.
 
@@ -329,7 +329,7 @@ Requirement language: **must** = mandatory, **should** = expected unless there's
   - **E17.3** Conversational answers must draw on graph relationships. *(Exists.)*
   - **E17.4** Once E15 exists, taxonomy terms should become graph nodes, linking documents through shared terms.
 - **Acceptance criteria:** met today. E17.4 is an enhancement.
-- **Dependencies / notes:** NYPA expects no knowledge-graph use cases beyond taxonomy-driven search, navigation and content discovery. An embedded or a standalone graph is acceptable, and no downstream system consumes the graph (Q&A #116, #193). No further graph work is needed for the RFP beyond E17.4.
+- **Dependencies / notes:** NYPA expects no knowledge-graph use cases beyond taxonomy-driven search, navigation and content discovery. An embedded or a standalone graph is acceptable, and no downstream system consumes the graph (Q&A #116, #193). However, NYPA **doesn't maintain any enterprise knowledge graph today** and expects the vendor to "design/implement/operationalize a new knowledge graph" (Q&A #227). KMS already does this, so it's a differentiator to show in the proposal and demo. No further graph work is needed for the RFP beyond E17.4.
 
 ### 4.6 Content Ingestion
 
@@ -569,6 +569,14 @@ We didn't send these questions ourselves. Other vendors asked equivalent questio
 ### 6.3 Other NYPA notes that affect the product
 
 **Scope and approach**
+- **NYPA's main pain point:** knowledge is spread across systems and isn't indexed or searchable through a single interface (Q&A #238). That is E2 (unified search), and the proposal should lead with it.
+- **AI at go-live:** NYPA wants "ideally all" of conversational search, auto-tagging, metadata generation, summarization, FAQ generation, knowledge extraction and recommendations in the initial phase (Q&A #224). KMS covers most of them. **FAQ generation** is the gap; it belongs to RFP §2.2 (not E1–E32), but it should be shown if possible.
+- **Copilot isn't the main interface:** NYPA doesn't see Copilot or any agent as the primary discovery interface (Q&A #225). KMS's own search and chat UI stays central, and E32.7 stays a "should".
+- **Taxonomy master:** NYPA is open to alternatives to Semaphore, and its taxonomy model is portable (Q&A #222). KMS's taxonomy (E15/E16) could become the master, not just import from Semaphore.
+- **Go-live content:** SharePoint content as it exists today. Content Server, ServiceNow and other sources come later (Q&A #235). No content must be migrated; Content Server and ServiceNow content stays in place (Q&A #223, #234).
+- **Rollout:** NYPA is leaning toward an enterprise-wide rollout, with some phasing if it makes sense (Q&A #236).
+- **Architecture and performance in the proposal:** submit a vendor-recommended search architecture; the in-scope repositories have APIs (Q&A #226). Vendors must **share their own performance statistics** (Q&A #230). Measure search and answer latency, the 5,000-document permission load test and the 500-documents-in-30-minutes classification run.
+- **Lessons learned:** integration with the EKP is preferred but not required (Q&A #228).
 - NYPA is seeking a **technology solution**, not a broader KM programme (Q&A #204). Both a COTS product and a custom solution are acceptable (Q&A #211). A SharePoint/M365-based or a new platform are both acceptable (Q&A #54, #199).
 - The existing SharePoint setup "is functional and can be integrated with and/or enhanced" rather than rebuilt (Q&A #206).
 - Out of scope: structured SQL data (Q&A #184); languages other than English (Q&A #103); vendor-led content remediation, taxonomy development, metadata mapping and migration, which NYPA does itself (Q&A #104, #105); and business-process or workflow-development services (Q&A #41).
@@ -593,6 +601,8 @@ We didn't send these questions ourselves. Other vendors asked equivalent questio
 - Knowledge-transfer events: about 60 a year, rising to about 120, each 1–3 hours or longer (Q&A #17, #117).
 
 **Unanswered or contradictory (don't build on these yet)**
+- Go-live and final acceptance criteria, and NYPA's staffing for the project: "to be determined" (Q&A #232, #233).
+- Knowledge graph: "no use cases beyond taxonomy-driven search" (Q&A #193) vs. "vendor to design and operationalize a new knowledge graph" (Q&A #227). Both are satisfied by E17 as built.
 - Accessibility standard (WCAG / Section 508) (Q&A #131).
 - How Content Server permissions are managed (AD vs. Content Server groups) (Q&A #133).
 - Azure landing zone and networking (Q&A #137); Teams app and Power Platform DLP policies (Q&A #135).
