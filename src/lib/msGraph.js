@@ -190,18 +190,34 @@ export async function getDelta({ accessToken, siteId, cursor, sharingChanges = f
 }
 
 // A-15: the same delta walk for any drive (e.g. a site's Site Pages library).
+//
+// A cursor Graph no longer accepts (410 resyncRequired: it expired, or was
+// made without the sharing-changes header) restarts the walk from the
+// beginning. Safe: unchanged items are recognised and skipped by the sync.
 export async function getDriveDelta({ accessToken, driveId, rootUrl, cursor, sharingChanges = false }) {
   const headers = sharingChanges ? { Prefer: "deltashowsharingchanges" } : {};
-  let url = cursor || rootUrl || `${GRAPH_BASE}/drives/${driveId}/root/delta`;
+  const start = rootUrl || `${GRAPH_BASE}/drives/${driveId}/root/delta`;
+  let url = cursor || start;
   const items = [];
   let deltaLink = null;
+  let restarted = false;
   while (url) {
-    const data = await graphFetch(url, { accessToken, headers });
+    let data;
+    try {
+      data = await graphFetch(url, { accessToken, headers });
+    } catch (err) {
+      if (err.status !== 410 || !cursor || restarted) throw err;
+      console.warn("Delta cursor no longer valid (410); listing from the beginning");
+      restarted = true;
+      items.length = 0;
+      url = start;
+      continue;
+    }
     items.push(...(data.value || []));
     url = data["@odata.nextLink"] || null;
     deltaLink = data["@odata.deltaLink"] || deltaLink;
   }
-  return { items, deltaLink };
+  return { items, deltaLink, restarted };
 }
 
 // A-9: app-only-token call: the id of a site's default document library.

@@ -120,3 +120,29 @@ test("aclWriteData: replace on update, plain create on create, stamps aclSyncedA
   });
   assert.deepEqual(aclWriteData([], { create: true, now }).acl, { create: [] });
 });
+
+test("delta: a cursor Graph rejects with 410 restarts the listing from the beginning", async () => {
+  const { getDriveDelta } = await import("../../src/lib/msGraph.js");
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("token=old")) return new Response(JSON.stringify({ error: { code: "resyncRequired", message: "Resync required" } }), { status: 410 });
+    if (String(url).endsWith("/root/delta")) return Response.json({ value: [{ id: "a" }], "@odata.nextLink": "https://graph/next" });
+    return Response.json({ value: [{ id: "b" }], "@odata.deltaLink": "https://graph/delta?token=new" });
+  };
+  const origWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const r = await getDriveDelta({ accessToken: "t", driveId: "d", cursor: "https://graph/delta?token=old", sharingChanges: true });
+    assert.deepEqual(r.items.map((i) => i.id), ["a", "b"]);
+    assert.equal(r.deltaLink, "https://graph/delta?token=new");
+    assert.equal(r.restarted, true);
+    // Without a cursor, a 410 is a real error.
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: "gone" } }), { status: 410 });
+    await assert.rejects(getDriveDelta({ accessToken: "t", driveId: "d" }), /410/);
+  } finally {
+    globalThis.fetch = realFetch;
+    console.warn = origWarn;
+  }
+});
