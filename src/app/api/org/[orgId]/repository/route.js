@@ -50,7 +50,7 @@ export async function GET(req, { params }) {
   // Repository documents plus documents of org-scope projects in the user's
   // departments (all for super_admin). Drafts only for super_admin and for a
   // dept_admin in the departments they administer (F1 browse policy).
-  const principals = await getUserPrincipals(prisma, user.id);
+  const principals = await getUserPrincipals(prisma, user.id, { orgId });
   const andConditions = [repositoryAccessWhere({ orgId, role, userDeptIds, adminDeptIds, principals })];
 
   if (lifecycle === "suggested_review") {

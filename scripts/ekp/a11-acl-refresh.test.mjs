@@ -66,7 +66,6 @@ test("refreshSiteAcls re-reads every synced file, writes only changed ACLs, fill
       const synced = await mk(`item-a-${tag}`, {
         aclSyncedAt: new Date("2026-01-01"),
         externalUrl: "https://x/a",
-        externalContainerId: "drive-1",
         acl: { create: [{ principalType: "group", principalId: M365 }, { principalType: "group_owners", principalId: M365 }] },
       });
       const legacy = await mk(`item-b-${tag}`); // synced before A-9: no ACL, no links
@@ -84,7 +83,6 @@ test("refreshSiteAcls re-reads every synced file, writes only changed ACLs, fill
       const b = await db.document.findUnique({ where: { id: legacy.id }, include: { acl: true } });
       assert.ok(b.aclSyncedAt);
       assert.equal(b.externalUrl, "https://x/b");
-      assert.equal(b.externalContainerId, "drive-1");
       assert.equal(b.acl.length, 2);
       const a = await db.document.findUnique({ where: { id: synced.id } });
       assert.ok(a.aclSyncedAt > new Date("2026-01-01"), "unchanged ACL still gets aclSyncedAt bumped");

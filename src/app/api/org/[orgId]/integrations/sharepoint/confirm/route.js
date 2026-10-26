@@ -76,6 +76,9 @@ export async function POST(req, { params }) {
   const sitesById = new Map(existingSites.map((s) => [s.siteId, s]));
   for (const s of selections) {
     sitesById.set(s.siteId, {
+      // Keep what syncs recorded for an already-connected site (cursors,
+      // drive ids, permission fingerprint).
+      ...sitesById.get(s.siteId),
       siteId: s.siteId,
       siteUrl: s.siteUrl || null,
       departmentId: s.departmentId,

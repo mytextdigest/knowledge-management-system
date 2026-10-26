@@ -9,11 +9,11 @@
 //      site's groups; when the fingerprint changes, the whole site's ACLs are
 //      re-read (refreshSiteAcls).
 //   3. Daily job sharepoint.acl-refresh (src/lib/jobs/registry.js): every
-//      file of every connected site, plus every member's Entra identity and
-//      groups (refreshIntegrationAcls).
+//      file and page of every connected site, plus every member's email
+//      match (refreshIntegrationAcls).
 //
 // Microsoft 365 / security group membership needs none of this: groups are
-// stored on the user (UserIdentity.groupIds), refreshed every 15 minutes.
+// read for the user at query time (src/lib/identity/groupCache.js, 15 minutes).
 //
 // Imported by the worker, so relative imports only.
 
@@ -21,7 +21,7 @@ import crypto from "node:crypto";
 import { getDelta, getDriveDelta, getSiteDriveId } from "../msGraph.js";
 import { isPageItem } from "./sharepointPages.js";
 import { aclWriteData } from "./sharepointAcl.js";
-import { refreshIdentityGroups, syncEmailMatchIdentities } from "../identity/entraIdentity.js";
+import { syncEmailMatchIdentities } from "../identity/entraIdentity.js";
 
 /**
  * A fingerprint of the site's SharePoint groups and their members (raw
@@ -80,7 +80,6 @@ async function refreshDriveAcls(db, { orgId, site, items, fallbackDriveId, conte
       id: true,
       externalId: true,
       externalUrl: true,
-      externalContainerId: true,
       aclSyncedAt: true,
       acl: { where: { source: "sharepoint" }, select: { principalType: true, principalId: true } },
     },
@@ -98,14 +97,14 @@ async function refreshDriveAcls(db, { orgId, site, items, fallbackDriveId, conte
       );
       // A page's link is the page URL set at sync time; only files take the item's webUrl.
       const webUrl = contentType === "file" ? item.webUrl : null;
-      const sourceChanged = (webUrl && webUrl !== doc.externalUrl) || (driveId && driveId !== doc.externalContainerId);
+      const sourceChanged = Boolean(webUrl) && webUrl !== doc.externalUrl;
       if (doc.aclSyncedAt && sameRows(rows, current) && !sourceChanged) {
         unchanged.push(doc.id);
         continue;
       }
       await db.document.update({
         where: { id: doc.id },
-        data: { ...aclWriteData(rows), externalUrl: webUrl || undefined, externalContainerId: driveId || undefined },
+        data: { ...aclWriteData(rows), externalUrl: webUrl || undefined },
       });
       stats.updated++;
     } catch (err) {
@@ -124,22 +123,12 @@ async function refreshDriveAcls(db, { orgId, site, items, fallbackDriveId, conte
  */
 export async function refreshIntegrationAcls(db, { integration, accessToken, resolver, deps = {} }) {
   const { tenantId, sites = [] } = integration.scopeConfig || {};
-  const result = { identities: null, groups: { updated: 0, deleted: 0, failed: 0 }, sites: [] };
+  const result = { identities: null, sites: [] };
 
+  // Re-checks every member's email match; disabled or deleted Entra
+  // accounts lose their email_match identity here. Groups aren't stored, so
+  // there's nothing to refresh for them (read per user at query time).
   result.identities = await syncEmailMatchIdentities(db, { orgId: integration.orgId, tenantId, deps: deps.identity });
-  const members = await db.organizationMember.findMany({ where: { orgId: integration.orgId }, select: { userId: true } });
-  const identities = await db.userIdentity.findMany({
-    where: { provider: "entra", tenantId, userId: { in: members.map((m) => m.userId) } },
-  });
-  for (const identity of identities) {
-    try {
-      const outcome = await refreshIdentityGroups(db, identity, { deps: deps.identity });
-      result.groups[outcome]++;
-    } catch (err) {
-      result.groups.failed++;
-      console.error("❌ Group refresh failed:", err.message);
-    }
-  }
 
   if (resolver) {
     for (const site of sites) {

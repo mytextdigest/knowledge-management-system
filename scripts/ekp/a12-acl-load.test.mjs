@@ -8,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PrismaClient } from "@prisma/client";
 import { searchAccessSql, knowledgeAccessSql, repositoryAccessWhere, getUserPrincipals } from "../../src/lib/access/documentAccess.js";
+import { clearCachedGroups, setCachedGroups } from "../../src/lib/identity/groupCache.js";
 
 const RUN_DB_TESTS = process.env.EKP_DB_TESTS === "1";
 const ROLLBACK = Symbol("rollback");
@@ -30,19 +31,23 @@ test(`ACL check over ${DOCS} SharePoint documents stays within ${BUDGET_MS} ms p
       const org = await db.organization.create({ data: { name: `a12-${tag}` } });
       const dept = await db.department.create({ data: { orgId: org.id, name: `Eng ${tag}` } });
       const uploader = await db.user.create({ data: { email: `a12-admin-${tag}@contoso.test` } });
+      await db.orgIntegration.create({
+        data: { orgId: org.id, provider: "sharepoint", scopeConfig: { tenantId, sites: [] }, accessToken: "x", tokenExpiry: new Date() },
+      });
 
       // Users: everyone in the M365 group's tenant; each in 2 security groups; 10% no identity.
       const userRows = Array.from({ length: USERS }, (_, i) => ({ id: `a12u${i}-${tag}`, email: `u${i}-${tag}@contoso.test`, emailVerified: true }));
       await db.user.createMany({ data: userRows });
       await db.organizationMember.createMany({ data: userRows.map((u) => ({ orgId: org.id, userId: u.id, role: "employee" })) });
       await db.departmentMember.createMany({ data: userRows.map((u) => ({ departmentId: dept.id, userId: u.id, role: "member" })) });
+      const withIdentity = userRows.slice(0, USERS * 0.9);
       await db.userIdentity.createMany({
-        data: userRows.slice(0, USERS * 0.9).map((u, i) => ({
-          userId: u.id, provider: "entra", source: "email_match", tenantId, externalId: guid("05e40000", i),
-          groupIds: [groups[i % 20], groups[(i + 7) % 20], ...(i % 3 === 0 ? [m365] : [])],
-          ownedGroupIds: i % 50 === 0 ? [m365] : [],
-        })),
+        data: withIdentity.map((u, i) => ({ userId: u.id, provider: "entra", source: "email_match", tenantId, externalId: guid("05e40000", i) })),
       });
+      withIdentity.forEach((u, i) => setCachedGroups(u.id, {
+        groupIds: [groups[i % 20], groups[(i + 7) % 20], ...(i % 3 === 0 ? [m365] : [])],
+        ownedGroupIds: i % 50 === 0 ? [m365] : [],
+      }));
 
       // Documents: every one has the site-group rows; then 1 in 4 a direct user, 1 in 4 a group, 1 in 10 an org link.
       const docRows = Array.from({ length: DOCS }, (_, i) => ({
@@ -80,7 +85,7 @@ test(`ACL check over ${DOCS} SharePoint documents stays within ${BUDGET_MS} ms p
           SELECT count(*)::int AS n FROM "Document" d WHERE d."orgId" = ${org.id} AND ${searchAccessSql({ userId: user.id, orgId: org.id })}`);
         const graph = await time(`knowledge predicate (${label})`, () => db.$queryRaw`
           SELECT count(*)::int AS n FROM "Document" d WHERE d."orgId" = ${org.id} AND ${knowledgeAccessSql({ userId: user.id })}`);
-        const principals = await getUserPrincipals(db, user.id);
+        const principals = await getUserPrincipals(db, user.id, { orgId: org.id });
         const repo = await time(`repository where (${label})`, () =>
           db.document.count({ where: repositoryAccessWhere({ orgId: org.id, role: "employee", userDeptIds: [dept.id], principals }) }));
         assert.equal(search[0].n, graph[0].n);
@@ -94,6 +99,7 @@ test(`ACL check over ${DOCS} SharePoint documents stays within ${BUDGET_MS} ms p
   } catch (err) {
     if (err !== ROLLBACK) throw err;
   } finally {
+    clearCachedGroups();
     await prisma.$disconnect();
   }
 });

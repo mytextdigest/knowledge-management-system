@@ -74,7 +74,7 @@ export const JOB_DEFINITIONS = {
   "sharepoint.acl-refresh": {
     label: "SharePoint permissions refresh",
     description:
-      "Re-reads every synced file's SharePoint permissions and re-checks which Microsoft account and groups each member has. Sharing changes are also picked up by every sync; this is the daily safety net.",
+      "Re-reads every synced file's and page's SharePoint permissions and re-checks which Microsoft account each member has. Sharing changes are also picked up by every sync; this is the daily safety net.",
     defaultIntervalMinutes: 1440,
     lockMinutes: 180,
     appliesTo: ({ prisma, orgId }) => connectedSharePoint(prisma, orgId),

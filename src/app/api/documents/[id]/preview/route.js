@@ -5,6 +5,7 @@ import { resolveOrgRole } from "@/lib/orgGuard";
 import { canViewDocument } from "@/lib/access/documentAccess";
 import { canStreamFromSource } from "@/lib/documentSource";
 import { fetchDriveItemContent, getCachedAppOnlyToken } from "@/lib/msGraph";
+import { resolveDriveId } from "@/lib/connectors/sharepointLocate";
 
 // EKP A-14: stream a no-copy document's file from SharePoint, so preview and
 // download work without KMS storing the original. Same access rule as the
@@ -19,7 +20,7 @@ export async function GET(req, { params }) {
     where: { id },
     select: {
       id: true, userId: true, orgId: true, departmentId: true, lifecycle: true, filename: true, filePath: true,
-      sourceProvider: true, contentType: true, externalId: true, externalContainerId: true,
+      sourceProvider: true, contentType: true, externalId: true, externalUrl: true,
       project: { select: { orgId: true, departmentId: true, scope: true } },
     },
   });
@@ -42,7 +43,9 @@ export async function GET(req, { params }) {
   let upstream;
   try {
     const accessToken = await getCachedAppOnlyToken(integration.scopeConfig?.tenantId);
-    upstream = await fetchDriveItemContent({ accessToken, driveId: doc.externalContainerId, itemId: doc.externalId });
+    const driveId = await resolveDriveId(doc, { scopeConfig: integration.scopeConfig, accessToken });
+    if (!driveId) return NextResponse.json({ error: "This file's SharePoint site is no longer connected" }, { status: 404 });
+    upstream = await fetchDriveItemContent({ accessToken, driveId, itemId: doc.externalId });
   } catch (err) {
     console.error("SharePoint preview failed:", err.message);
     const status = err.status === 404 ? 404 : 502;

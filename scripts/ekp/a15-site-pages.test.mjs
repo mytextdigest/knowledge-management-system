@@ -45,5 +45,5 @@ test("only .aspx files outside Templates are pages; pages are never streamed as 
   assert.equal(isPageItem({ name: "Tpl.aspx", file: {}, parentReference: { path: "/drives/x/root:/Templates" } }), false);
   assert.equal(isPageItem({ name: "Templates", folder: {} }), false);
   assert.equal(isPageItem({ name: "logo.png", file: {} }), false);
-  assert.equal(canStreamFromSource({ sourceProvider: "sharepoint", contentType: "page", externalId: "i", externalContainerId: "d" }), false);
+  assert.equal(canStreamFromSource({ sourceProvider: "sharepoint", contentType: "page", externalId: "i", externalUrl: "https://x/SitePages/a.aspx" }), false);
 });

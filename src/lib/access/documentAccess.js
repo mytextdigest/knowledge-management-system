@@ -160,9 +160,11 @@ async function isDepartmentAdmin(db, departmentId, userId) {
 }
 
 // A-10: the per-file permission clause for one loaded document (needs `id`;
-// a document without one fails closed).
+// a document without one fails closed). A document loaded with
+// aclSyncedAt null has no source permissions, so no query is needed.
 async function passesAcl(db, document, userId) {
   if (!document?.id) return false;
+  if (document.aclSyncedAt === null) return true;
   return (await documentIdsPassingAcl(db, [document.id], { userId })).has(document.id);
 }
 
@@ -301,7 +303,7 @@ export async function filterAccessibleDocuments(documents, { userId, role, db = 
     if (!d.departmentId) return true;
     return memberDeptIds.has(d.departmentId);
   });
-  const others = allowed.filter((d) => d.userId !== userId);
-  const passing = await documentIdsPassingAcl(db, others.map((d) => d.id), { userId });
-  return allowed.filter((d) => d.userId === userId || passing.has(d.id));
+  const needsAcl = allowed.filter((d) => d.userId !== userId && d.aclSyncedAt !== null);
+  const passing = await documentIdsPassingAcl(db, needsAcl.map((d) => d.id), { userId });
+  return allowed.filter((d) => d.userId === userId || d.aclSyncedAt === null || passing.has(d.id));
 }

@@ -19,6 +19,7 @@ import { processKnowledgeContext } from "./knowledgeContext.js";
 import { decrypt, encrypt } from "../src/lib/crypto.js";
 import { getAppOnlyToken, downloadDriveItemContent, getDriveDelta, getSitePage, listSitePages } from "../src/lib/msGraph.js";
 import { findPagesDriveId, isPageItem, pageToText } from "../src/lib/connectors/sharepointPages.js";
+import { resolveDriveId } from "../src/lib/connectors/sharepointLocate.js";
 import { sharePointSettings } from "../src/lib/connectors/sharepointSettings.js";
 import { getConnector } from "../src/lib/connectors/index.js";
 import { createAclResolver, aclWriteData } from "../src/lib/connectors/sharepointAcl.js";
@@ -709,13 +710,15 @@ async function getDocumentBytes(doc, s3Key = doc.filePath) {
     const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
     return streamToBuffer(object.Body);
   }
-  if (doc.sourceProvider === "sharepoint" && doc.externalContainerId && doc.externalId && doc.orgId) {
+  if (doc.sourceProvider === "sharepoint" && doc.externalUrl && doc.externalId && doc.orgId) {
     const integration = await prisma.orgIntegration.findUnique({
       where: { orgId_provider: { orgId: doc.orgId, provider: "sharepoint" } },
     });
     if (!integration) throw new Error("SharePoint integration not found for a no-copy document");
     const accessToken = await ensureFreshAppOnlyToken(integration);
-    return downloadDriveItemContent({ accessToken, driveId: doc.externalContainerId, itemId: doc.externalId });
+    const driveId = await resolveDriveId(doc, { scopeConfig: integration.scopeConfig, accessToken });
+    if (!driveId) throw new Error(`Couldn't tell which connected SharePoint site ${doc.externalUrl} belongs to`);
+    return downloadDriveItemContent({ accessToken, driveId, itemId: doc.externalId });
   }
   throw new Error(`Document ${doc.id} has no stored file and no source to read it from`);
 }
@@ -740,15 +743,15 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
   const orgId = integration.orgId;
   const driveId = change.driveId || siteDriveId;
   const readAcl = () => aclResolver.itemAcl({ driveId, itemId: change.externalId, siteUrl: site.siteUrl });
-  const sourceFields = { externalUrl: change.webUrl || undefined, externalContainerId: driveId || undefined };
+  const sourceFields = { externalUrl: change.webUrl || undefined };
 
   const existing = await prisma.document.findFirst({
     where: { orgId, sourceProvider: "sharepoint", externalId: change.externalId },
-    select: { id: true, filePath: true, externalModifiedAt: true, aclSyncedAt: true, externalUrl: true, externalContainerId: true },
+    select: { id: true, filePath: true, externalModifiedAt: true, aclSyncedAt: true, externalUrl: true },
   });
   if (existing?.externalModifiedAt && existing.externalModifiedAt.getTime() === new Date(change.modifiedAt).getTime()) {
     const refreshAcl = Boolean(aclResolver) && (change.permissionsChanged || !existing.aclSyncedAt);
-    const fillSource = (change.webUrl && !existing.externalUrl) || (driveId && !existing.externalContainerId);
+    const fillSource = Boolean(change.webUrl) && change.webUrl !== existing.externalUrl;
     if (refreshAcl || fillSource) {
       await prisma.document.update({
         where: { id: existing.id },
@@ -907,7 +910,6 @@ async function syncOnePage({ item, page, site, pagesDriveId, integration, connec
     status: "queued",
     externalModifiedAt: modifiedAt,
     externalUrl: page.webUrl || item.webUrl || null,
-    externalContainerId: pagesDriveId,
   };
   const doc = existing
     ? await prisma.document.update({ where: { id: existing.id }, data: { ...data, ...(aclRows ? aclWriteData(aclRows) : {}) } })
@@ -1108,7 +1110,11 @@ async function processSharePointSyncJob(job) {
 
       scopeConfig = {
         ...scopeConfig,
-        sites: scopeConfig.sites.map((s) => (s.siteId === site.siteId ? { ...s, lastSyncCursor: cursor, aclFingerprint, ...pagesState } : s)),
+        sites: scopeConfig.sites.map((s) =>
+          s.siteId === site.siteId
+            ? { ...s, lastSyncCursor: cursor, aclFingerprint, driveId: siteDriveId || s.driveId || null, ...pagesState }
+            : s
+        ),
       };
       await prisma.orgIntegration.update({ where: { id: integrationId }, data: { scopeConfig } });
     }

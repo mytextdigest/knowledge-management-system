@@ -2,48 +2,66 @@
 //
 // A document whose source permissions are known (aclSyncedAt set, e.g. a
 // SharePoint file) is visible only if one of its DocumentAcl rows matches the
-// user: their Entra object id, their tenant, a group they're in, or a group
-// they own. The user's identities and groups are stored on UserIdentity
-// (src/lib/identity/entraIdentity.js), so this is plain SQL. A document with
+// user: their Entra object id or tenant (UserIdentity, joined in SQL), or a
+// group they're in or own (read from Graph into the in-memory group cache,
+// src/lib/identity/groupCache.js, and passed as parameters). A document with
 // aclSyncedAt null (manual uploads) is unaffected. super_admin skips it.
 //
 // It narrows the existing role/department/lifecycle rules, never widens
-// them. Only imports Prisma, so plain-Node modules can use it.
+// them. Only plain imports, so plain-Node modules can use it.
 
 import { Prisma } from "@prisma/client";
+import { getCachedGroups } from "../identity/groupCache.js";
 
 /** SQL: `alias` (a "Document" row) passes the ACL for this user. */
 export function documentAclSql({ userId, isSuperAdmin = false, alias = "d" }) {
   const t = Prisma.raw(`"${alias}"`);
+  const { groupIds, ownedGroupIds } = getCachedGroups(userId);
   return Prisma.sql`(
     ${isSuperAdmin}
     OR ${t}.acl_synced_at IS NULL
     OR EXISTS (
       SELECT 1 FROM "DocumentAcl" acc_acl
-      JOIN "UserIdentity" acc_ui ON acc_ui."userId" = ${userId}
       WHERE acc_acl.document_id = ${t}.id
         AND (
-          (acc_acl.principal_type = 'user' AND acc_acl.principal_id = acc_ui.external_id)
-          OR (acc_acl.principal_type = 'tenant' AND acc_acl.principal_id = acc_ui.tenant_id)
-          OR (acc_acl.principal_type = 'group' AND acc_acl.principal_id = ANY(acc_ui.group_ids))
-          OR (acc_acl.principal_type = 'group_owners' AND acc_acl.principal_id = ANY(acc_ui.owned_group_ids))
+          (acc_acl.principal_type = 'group' AND acc_acl.principal_id = ANY(${groupIds}::text[]))
+          OR (acc_acl.principal_type = 'group_owners' AND acc_acl.principal_id = ANY(${ownedGroupIds}::text[]))
+          OR EXISTS (
+            -- The user's identity in the tenant this document came from (the
+            -- SharePoint tenant connected to the document's org).
+            SELECT 1 FROM "UserIdentity" acc_ui
+            JOIN "OrgIntegration" acc_oi
+              ON acc_oi."orgId" = ${t}."orgId" AND acc_oi.provider = 'sharepoint'
+             AND acc_oi.scope_config->>'tenantId' = acc_ui.tenant_id
+            WHERE acc_ui."userId" = ${userId}
+              AND ((acc_acl.principal_type = 'user' AND acc_acl.principal_id = acc_ui.external_id)
+                OR (acc_acl.principal_type = 'tenant' AND acc_acl.principal_id = acc_ui.tenant_id))
+          )
         )
     )
   )`;
 }
 
-/** The user's principals, for Prisma `where` filters: { userIds, tenantIds, groupIds, ownedGroupIds }. */
-export async function getUserPrincipals(db, userId) {
-  const identities = await db.userIdentity.findMany({
-    where: { userId },
-    select: { externalId: true, tenantId: true, groupIds: true, ownedGroupIds: true },
+/**
+ * The user's principals in an org's SharePoint tenant, for Prisma `where`
+ * filters: { userIds, tenantIds, groupIds, ownedGroupIds }.
+ */
+export async function getUserPrincipals(db, userId, { orgId }) {
+  const integration = await db.orgIntegration.findUnique({
+    where: { orgId_provider: { orgId, provider: "sharepoint" } },
+    select: { scopeConfig: true },
   });
+  const tenantId = integration?.scopeConfig?.tenantId;
+  const identities = tenantId
+    ? await db.userIdentity.findMany({ where: { userId, tenantId }, select: { externalId: true, tenantId: true } })
+    : [];
   const uniq = (values) => [...new Set(values)];
+  const { groupIds, ownedGroupIds } = getCachedGroups(userId);
   return {
     userIds: uniq(identities.map((i) => i.externalId)),
     tenantIds: uniq(identities.map((i) => i.tenantId)),
-    groupIds: uniq(identities.flatMap((i) => i.groupIds)),
-    ownedGroupIds: uniq(identities.flatMap((i) => i.ownedGroupIds)),
+    groupIds: [...groupIds],
+    ownedGroupIds: [...ownedGroupIds],
   };
 }
 

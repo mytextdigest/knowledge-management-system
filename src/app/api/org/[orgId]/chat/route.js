@@ -295,7 +295,7 @@ export async function POST(req, { params }) {
           userId: user.id,
           orgId,
           isSuperAdmin: isSuperAdmin(role),
-          principals: await getUserPrincipals(prisma, user.id),
+          principals: await getUserPrincipals(prisma, user.id, { orgId }),
         }),
       },
       select: { id: true, filename: true, filePath: true, summary: true, content: true },

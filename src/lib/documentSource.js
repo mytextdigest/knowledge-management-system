@@ -9,7 +9,7 @@ export function canStreamFromSource(doc) {
     !doc?.filePath &&
     doc?.sourceProvider === "sharepoint" &&
     doc.contentType !== "page" &&
-    Boolean(doc.externalContainerId && doc.externalId)
+    Boolean(doc.externalUrl && doc.externalId)
   );
 }
 

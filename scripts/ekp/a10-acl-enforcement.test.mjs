@@ -17,6 +17,7 @@ import {
   filterAccessibleDocuments,
   getUserPrincipals,
 } from "../../src/lib/access/documentAccess.js";
+import { clearCachedGroups, setCachedGroups } from "../../src/lib/identity/groupCache.js";
 
 const RUN_DB_TESTS = process.env.EKP_DB_TESTS === "1";
 const ROLLBACK = Symbol("rollback");
@@ -33,15 +34,17 @@ test("SharePoint permissions narrow every access path; other documents are unaff
     await prisma.$transaction(async (db) => {
       const org = await db.organization.create({ data: { name: `a10-${tag}` } });
       const dept = await db.department.create({ data: { orgId: org.id, name: `Eng ${tag}` } });
+      await db.orgIntegration.create({
+        data: { orgId: org.id, provider: "sharepoint", scopeConfig: { tenantId: TENANT, sites: [] }, accessToken: "x", tokenExpiry: new Date() },
+      });
 
       const user = async (name, role, { oid, tenantId = TENANT, groups = [], owned = [] } = {}) => {
         const u = await db.user.create({ data: { email: `${name}-${tag}@contoso.test`, emailVerified: true } });
         await db.organizationMember.create({ data: { orgId: org.id, userId: u.id, role } });
         if (role !== "super_admin") await db.departmentMember.create({ data: { departmentId: dept.id, userId: u.id, role: "member" } });
         if (oid) {
-          await db.userIdentity.create({
-            data: { userId: u.id, provider: "entra", source: "email_match", tenantId, externalId: oid, groupIds: groups, ownedGroupIds: owned },
-          });
+          await db.userIdentity.create({ data: { userId: u.id, provider: "entra", source: "email_match", tenantId, externalId: oid } });
+          setCachedGroups(u.id, { groupIds: groups, ownedGroupIds: owned });
         }
         return u;
       };
@@ -104,7 +107,7 @@ test("SharePoint permissions narrow every access path; other documents are unaff
         const graph = await db.$queryRaw`SELECT d.id FROM "Document" d WHERE d."orgId" = ${org.id} AND ${knowledgeAccessSql({ userId: u.id, isSuperAdmin })}`;
         assert.deepEqual(names(idsOf(graph)), want, `${key}: knowledge graph`);
 
-        const principals = await getUserPrincipals(db, u.id);
+        const principals = await getUserPrincipals(db, u.id, { orgId: org.id });
         const where = await db.document.findMany({ where: { orgId: org.id, ...searchAccessWhere({ userId: u.id, orgId: org.id, isSuperAdmin, principals }) }, select: { id: true } });
         assert.deepEqual(names(idsOf(where)), want, `${key}: chat workflow (Prisma where)`);
 
@@ -132,11 +135,16 @@ test("SharePoint permissions narrow every access path; other documents are unaff
       const own = await doc("own-upload", [], { userId: emp1.id });
       const ownRows = await db.$queryRaw`SELECT d.id FROM "Document" d WHERE d.id = ${own.id} AND ${knowledgeAccessSql({ userId: emp1.id })}`;
       assert.equal(ownRows.length, 1);
+      // A cold group cache narrows access: engMember keeps only what doesn't need a group.
+      clearCachedGroups(engMember.id);
+      const cold = await db.$queryRaw`SELECT d.id FROM "Document" d WHERE d."orgId" = ${org.id} AND ${searchAccessSql({ userId: engMember.id, orgId: org.id })}`;
+      assert.deepEqual(names(idsOf(cold)), ["manual", "orgLink"]);
       throw ROLLBACK;
     }, { timeout: 120_000, maxWait: 20_000 });
   } catch (err) {
     if (err !== ROLLBACK) throw err;
   } finally {
+    clearCachedGroups();
     await prisma.$disconnect();
   }
 });

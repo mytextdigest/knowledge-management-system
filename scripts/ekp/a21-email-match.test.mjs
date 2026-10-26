@@ -1,5 +1,5 @@
 // A-21: email_match identities and A-10 group refresh
-// (src/lib/identity/entraIdentity.js). Graph is stubbed; DB cases run inside
+// (src/lib/identity/entraIdentity.js, groupCache.js). Graph is stubbed; DB cases run inside
 // a transaction that is always rolled back.
 // Run: EKP_DB_TESTS=1 npm run ekp:a21:test
 import test from "node:test";
@@ -7,10 +7,11 @@ import assert from "node:assert/strict";
 import { PrismaClient } from "@prisma/client";
 import {
   ensureFreshPrincipals,
-  refreshIdentityGroups,
+  refreshUserGroups,
   resetPrincipalMemo,
   syncEmailMatchIdentities,
 } from "../../src/lib/identity/entraIdentity.js";
+import { clearCachedGroups, getCachedGroups, groupsAreStale, setCachedGroups } from "../../src/lib/identity/groupCache.js";
 
 const RUN_DB_TESTS = process.env.EKP_DB_TESTS === "1";
 const ROLLBACK = Symbol("rollback");
@@ -122,51 +123,69 @@ test("email match: re-check keeps, re-points or removes; sso wins; one Entra acc
   });
 });
 
-test("groups: refreshed into the identity; a deleted Entra account drops email_match, keeps sso", { skip: !RUN_DB_TESTS }, async () => {
+test("groups: read into the cache across identities; a deleted Entra account drops email_match, keeps sso", { skip: !RUN_DB_TESTS }, async () => {
   await withDb(async (db) => {
+    clearCachedGroups();
     const { tenantId, mk } = await seed(db);
     const alice = await mk("alice");
     const sam = await mk("sam");
-    const em = await db.userIdentity.create({ data: { userId: alice.id, provider: "entra", source: "email_match", tenantId, externalId: "a1" } });
-    const sso = await db.userIdentity.create({ data: { userId: sam.id, provider: "entra", source: "sso", tenantId, externalId: "s1", groupIds: ["old"] } });
-    const { deps } = graph({}, { a1: { groupIds: ["g1", "g2"], ownedGroupIds: ["g2"] }, s1: null });
+    await db.userIdentity.create({ data: { userId: alice.id, provider: "entra", source: "email_match", tenantId, externalId: "a1" } });
+    await db.userIdentity.create({ data: { userId: sam.id, provider: "entra", source: "sso", tenantId, externalId: "s1" } });
+    const { deps } = graph({}, { a1: { groupIds: ["G2", "g1"], ownedGroupIds: ["g2"] }, s1: null });
 
-    assert.equal(await refreshIdentityGroups(db, em, { deps }), "updated");
-    const fresh = await db.userIdentity.findUnique({ where: { id: em.id } });
-    assert.deepEqual([fresh.groupIds, fresh.ownedGroupIds], [["g1", "g2"], ["g2"]]);
-    assert.ok(fresh.groupsSyncedAt);
+    await refreshUserGroups(db, alice.id, { deps });
+    assert.deepEqual(getCachedGroups(alice.id).groupIds, ["g1", "g2"], "lowercased, sorted");
+    assert.deepEqual(getCachedGroups(alice.id).ownedGroupIds, ["g2"]);
 
-    assert.equal(await refreshIdentityGroups(db, sso, { deps }), "updated");
-    assert.deepEqual((await db.userIdentity.findUnique({ where: { id: sso.id } })).groupIds, []);
+    await refreshUserGroups(db, sam.id, { deps });
+    assert.deepEqual(getCachedGroups(sam.id).groupIds, []);
+    assert.equal((await identitiesOf(db, sam.id)).length, 1, "sso link kept even if Graph no longer knows the account");
 
-    const gone = graph({}, { a1: null });
-    assert.equal(await refreshIdentityGroups(db, fresh, { deps: gone.deps }), "deleted");
-    assert.equal(await db.userIdentity.count({ where: { id: em.id } }), 0);
+    await refreshUserGroups(db, alice.id, { deps: graph({}, { a1: null }).deps });
+    assert.equal((await identitiesOf(db, alice.id)).length, 0, "email_match removed for a vanished account");
+    assert.deepEqual(getCachedGroups(alice.id).groupIds, []);
+    clearCachedGroups();
   });
+});
+
+test("group cache: stale after 15 min, dropped after 24 h", () => {
+  clearCachedGroups();
+  const t0 = Date.UTC(2026, 9, 26);
+  assert.equal(groupsAreStale("u", t0), true, "unknown user");
+  setCachedGroups("u", { groupIds: ["g"] }, t0);
+  assert.equal(groupsAreStale("u", t0 + 10 * 60_000), false);
+  assert.equal(groupsAreStale("u", t0 + 16 * 60_000), true);
+  assert.deepEqual(getCachedGroups("u", t0 + 23 * 3600_000).groupIds, ["g"], "stale but still used until refreshed");
+  assert.deepEqual(getCachedGroups("u", t0 + 25 * 3600_000).groupIds, [], "fails closed after 24 h");
+  clearCachedGroups();
 });
 
 test("request path: matches a new user, then only refreshes stale groups; never throws", { skip: !RUN_DB_TESTS }, async () => {
   await withDb(async (db) => {
     resetPrincipalMemo();
+    clearCachedGroups();
     const { mk } = await seed(db);
     const alice = await mk("alice");
     const g = graph({ [alice.email]: [{ id: "a1", accountEnabled: true }] }, { a1: { groupIds: ["g1"], ownedGroupIds: [] } });
+    const t0 = Date.now();
 
-    await ensureFreshPrincipals(db, alice.id, { deps: g.deps });
-    const [identity] = await identitiesOf(db, alice.id);
-    assert.deepEqual(identity.groupIds, ["g1"]);
+    await ensureFreshPrincipals(db, alice.id, { deps: g.deps, now: t0 });
+    assert.equal((await identitiesOf(db, alice.id))[0].externalId, "a1");
+    assert.deepEqual(getCachedGroups(alice.id).groupIds, ["g1"]);
     assert.deepEqual([g.calls.lookups, g.calls.groups], [1, 1]);
 
-    await ensureFreshPrincipals(db, alice.id, { deps: g.deps, force: true });
-    assert.deepEqual([g.calls.lookups, g.calls.groups], [1, 1], "fresh groups aren't re-read");
+    await ensureFreshPrincipals(db, alice.id, { deps: g.deps, now: t0 + 30_000 });
+    assert.deepEqual([g.calls.lookups, g.calls.groups], [1, 1], "checked at most once a minute");
 
-    await db.userIdentity.update({ where: { id: identity.id }, data: { groupsSyncedAt: new Date(Date.now() - 20 * 60_000) } });
-    await ensureFreshPrincipals(db, alice.id, { deps: g.deps, force: true });
+    await ensureFreshPrincipals(db, alice.id, { deps: g.deps, now: t0 + 5 * 60_000 });
+    assert.equal(g.calls.groups, 1, "fresh groups aren't re-read");
+
+    await ensureFreshPrincipals(db, alice.id, { deps: g.deps, now: t0 + 20 * 60_000 });
     assert.equal(g.calls.groups, 2, "stale groups are re-read");
 
     const broken = { ...g.deps, getUserGroupIds: async () => { throw new Error("Graph down"); } };
-    await db.userIdentity.update({ where: { id: identity.id }, data: { groupsSyncedAt: new Date(Date.now() - 25 * 3600_000) } });
-    await ensureFreshPrincipals(db, alice.id, { deps: broken, force: true });
-    assert.deepEqual((await db.userIdentity.findUnique({ where: { id: identity.id } })).groupIds, [], "groups dropped after 24 h without a refresh");
+    await ensureFreshPrincipals(db, alice.id, { deps: broken, now: t0 + 40 * 60_000 });
+    assert.deepEqual(getCachedGroups(alice.id).groupIds, ["g1"], "a failed refresh keeps the last groups");
+    clearCachedGroups();
   });
 });

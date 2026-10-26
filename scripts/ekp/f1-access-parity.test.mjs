@@ -276,6 +276,8 @@ async function seed(tx, tag) {
     where: { orgId: org.id },
     select: {
       id: true, filename: true, userId: true, scope: true, lifecycle: true, departmentId: true, projectId: true,
+      // A-10: no source permissions on these, so the ACL clause never applies.
+      aclSyncedAt: true,
       project: { select: { userId: true, scope: true, departmentId: true, orgId: true } },
     },
   });

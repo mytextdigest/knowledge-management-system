@@ -7,19 +7,16 @@
 //   to that has SharePoint connected. Zero or several matches → no identity
 //   (fails closed). An `sso` identity (Microsoft sign-in) always wins, and an
 //   Entra account is never linked to two KMS users.
-// A-10 · groups: each identity stores the user's transitive group ids and the
-//   groups they own (UserIdentity.groupIds / ownedGroupIds), refreshed when
-//   older than 15 minutes, so the F1 predicate can match DocumentAcl rows in
-//   SQL without any Graph call at query time.
+// A-10 · groups: the user's transitive group ids and the groups they own are
+//   read from Graph and kept in memory (src/lib/identity/groupCache.js),
+//   refreshed when older than 15 minutes, so the F1 predicate can match
+//   DocumentAcl rows without a Graph call per query. No database column.
 //
 // All Graph calls use the SharePoint connector app (User.Read.All,
 // GroupMember.Read.All). Imported by the worker, so relative imports only.
 
 import { findUsersByEmails, getCachedAppOnlyToken, getUserGroupIds } from "../msGraph.js";
-
-export const GROUPS_MAX_AGE_MS = 15 * 60_000;
-// If groups can't be refreshed for this long, drop them (fail closed).
-const GROUPS_DROP_AFTER_MS = 24 * 60 * 60_000;
+import { groupsAreStale, setCachedGroups } from "./groupCache.js";
 // Request path: check a user at most this often per server instance...
 const RECHECK_MS = 60_000;
 // ...and retry a failed email match at most this often.
@@ -91,7 +88,7 @@ export async function syncEmailMatchIdentities(db, { orgId, tenantId, userIds, d
       continue;
     }
 
-    const fresh = { externalId: target, email: user.email, verifiedAt: now, groupIds: [], ownedGroupIds: [], groupsSyncedAt: null };
+    const fresh = { externalId: target, email: user.email, verifiedAt: now };
     if (current) {
       await db.userIdentity.update({ where: { id: current.id }, data: fresh });
     } else {
@@ -105,22 +102,27 @@ export async function syncEmailMatchIdentities(db, { orgId, tenantId, userIds, d
 }
 
 /**
- * A-10: re-read one identity's groups. An email_match identity whose Entra
- * account is gone is deleted; an sso identity keeps the link, without groups.
- * Returns "updated" | "deleted".
+ * A-10: read the groups of the user's identities (in `tenantIds`) from Graph
+ * into the cache. An email_match identity whose Entra account is gone is
+ * deleted. Throws if Graph can't be read (the previous cache entry stays).
  */
-export async function refreshIdentityGroups(db, identity, { deps = {}, now = new Date() } = {}) {
+export async function refreshUserGroups(db, userId, { tenantIds, deps = {}, now = Date.now() } = {}) {
   const { getToken, getUserGroupIds: getGroups } = { ...defaultDeps, ...deps };
-  const groups = await getGroups({ accessToken: await getToken(identity.tenantId), userId: identity.externalId });
-  if (!groups && identity.source === "email_match") {
-    await db.userIdentity.delete({ where: { id: identity.id } });
-    return "deleted";
-  }
-  await db.userIdentity.update({
-    where: { id: identity.id },
-    data: { groupIds: groups?.groupIds ?? [], ownedGroupIds: groups?.ownedGroupIds ?? [], groupsSyncedAt: now },
+  const identities = await db.userIdentity.findMany({
+    where: { userId, provider: "entra", ...(tenantIds ? { tenantId: { in: tenantIds } } : {}) },
   });
-  return "updated";
+  const groupIds = [];
+  const ownedGroupIds = [];
+  for (const identity of identities) {
+    const groups = await getGroups({ accessToken: await getToken(identity.tenantId), userId: identity.externalId });
+    if (!groups) {
+      if (identity.source === "email_match") await db.userIdentity.delete({ where: { id: identity.id } });
+      continue;
+    }
+    groupIds.push(...groups.groupIds);
+    ownedGroupIds.push(...groups.ownedGroupIds);
+  }
+  setCachedGroups(userId, { groupIds, ownedGroupIds }, now);
 }
 
 const lastChecked = new Map(); // userId → ms
@@ -158,22 +160,12 @@ export function ensureFreshPrincipals(db, userId, { force = false, deps = {}, no
       }
     }
 
-    const stale = await db.userIdentity.findMany({
-      where: {
-        userId,
-        provider: "entra",
-        tenantId: { in: tenants.map((t) => t.tenantId) },
-        OR: [{ groupsSyncedAt: null }, { groupsSyncedAt: { lt: new Date(now - GROUPS_MAX_AGE_MS) } }],
-      },
-    });
-    for (const identity of stale) {
+    if (force || groupsAreStale(userId, now)) {
       try {
-        await refreshIdentityGroups(db, identity, { deps });
+        await refreshUserGroups(db, userId, { tenantIds: tenants.map((t) => t.tenantId), deps, now });
       } catch (err) {
+        // Keep the previous groups; groupCache drops them after 24 hours.
         console.error("Couldn't refresh the user's Microsoft groups:", err.message);
-        if (identity.groupsSyncedAt && now - identity.groupsSyncedAt.getTime() > GROUPS_DROP_AFTER_MS) {
-          await db.userIdentity.update({ where: { id: identity.id }, data: { groupIds: [], ownedGroupIds: [] } });
-        }
       }
     }
   })()
