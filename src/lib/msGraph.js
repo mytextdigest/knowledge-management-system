@@ -352,3 +352,15 @@ export async function listSitePages({ accessToken, siteId }) {
 export async function getSitePage({ accessToken, siteId, pageId }) {
   return graphFetch(`/sites/${siteId}/pages/${pageId}/microsoft.graph.sitePage?$expand=canvasLayout`, { accessToken });
 }
+
+// A-15 (classic pages): a drive item's list fields (e.g. WikiField,
+// PublishingPageContent), or null if it no longer exists.
+export async function getDriveItemFields({ accessToken, driveId, itemId }) {
+  try {
+    const listItem = await graphFetch(`/drives/${driveId}/items/${itemId}/listItem?$expand=fields`, { accessToken });
+    return listItem.fields || {};
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
+}

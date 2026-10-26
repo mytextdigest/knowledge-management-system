@@ -54,6 +54,6 @@ test("a document's site comes from its URL: longest connected site, at a path bo
 
   const scopeConfig = { tenantId: "t", sites };
   assert.equal(await resolveDriveId({ externalUrl: "https://contoso.sharepoint.com/sites/Eng/a.pdf" }, { scopeConfig }), "d-eng");
-  assert.equal(await resolveDriveId({ contentType: "page", externalUrl: "https://contoso.sharepoint.com/sites/Eng/SitePages/Home.aspx" }, { scopeConfig }), "p-eng");
+  assert.equal(await resolveDriveId({ contentType: "page", externalUrl: "https://contoso.sharepoint.com/sites/Eng/SitePages/Home.aspx" }, { scopeConfig }), null, "pages have no file");
   assert.equal(await resolveDriveId({ externalUrl: "https://fabrikam.sharepoint.com/x" }, { scopeConfig }), null);
 });

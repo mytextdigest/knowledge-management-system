@@ -4,7 +4,7 @@
 // Run: npm run ekp:a15:test
 import test from "node:test";
 import assert from "node:assert/strict";
-import { htmlToText, isPageItem, pageToText } from "../../src/lib/connectors/sharepointPages.js";
+import { classicPageText, htmlToText, isPageItem, pageLibrariesOf, pageToText } from "../../src/lib/connectors/sharepointPages.js";
 import { canStreamFromSource } from "../../src/lib/documentSource.js";
 
 test("htmlToText keeps paragraphs and lists, drops tags and scripts, decodes entities", () => {
@@ -46,4 +46,24 @@ test("only .aspx files outside Templates are pages; pages are never streamed as 
   assert.equal(isPageItem({ name: "Templates", folder: {} }), false);
   assert.equal(isPageItem({ name: "logo.png", file: {} }), false);
   assert.equal(canStreamFromSource({ sourceProvider: "sharepoint", contentType: "page", externalId: "i", externalUrl: "https://x/SitePages/a.aspx" }), false);
+});
+
+test("classic pages: wiki and publishing bodies, with title and description", () => {
+  assert.equal(
+    classicPageText({ Title: "KMS Classic Wiki Test", WikiField: '<div class="ExternalClass1"><p>Release <b>checklist</b></p><p>Run the smoke tests.</p></div>' }),
+    "KMS Classic Wiki Test\n\nRelease checklist\nRun the smoke tests."
+  );
+  assert.equal(
+    classicPageText({ Title: "Policy", Comments: "HR policy page", PublishingPageContent: "<p>Leave &amp; holidays</p>" }),
+    "Policy\n\nHR policy page\n\nLeave & holidays"
+  );
+  assert.equal(classicPageText({ Title: "Only a title" }), "Only a title");
+  assert.equal(classicPageText(null), "");
+});
+
+test("page libraries: read the single-library keys of earlier syncs", () => {
+  assert.deepEqual(pageLibrariesOf({ pagesDriveId: "p1", pagesCursor: "c1" }), [{ listId: null, driveId: "p1", template: 119, cursor: "c1" }]);
+  const libs = [{ listId: "l", driveId: "p2", template: 850, cursor: null }];
+  assert.deepEqual(pageLibrariesOf({ pageLibraries: libs, pagesDriveId: "old" }), libs);
+  assert.deepEqual(pageLibrariesOf({}), []);
 });

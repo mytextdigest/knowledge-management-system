@@ -126,8 +126,16 @@ export async function listSiteGroups(siteUrl, token) {
   return groups.map((g) => ({ id: String(g.Id), title: g.Title }));
 }
 
-/** The id of the site's pages library (base template 119, "Site Pages" in English), or null. */
-export async function getPagesListId(siteUrl, token) {
-  const lists = await sharePointRestGetAll(siteUrl, "/web/lists?$filter=BaseTemplate eq 119&$select=Id", token);
-  return lists[0]?.Id ?? null;
+/**
+ * The site's page libraries: wiki page libraries, including "Site Pages"
+ * (base template 119), and publishing "Pages" libraries (850).
+ * Returns [{ listId, template }].
+ */
+export async function listPageLibraries(siteUrl, token) {
+  const lists = await sharePointRestGetAll(
+    siteUrl,
+    "/web/lists?$filter=BaseTemplate eq 119 or BaseTemplate eq 850&$select=Id,BaseTemplate",
+    token
+  );
+  return lists.map((l) => ({ listId: l.Id, template: l.BaseTemplate }));
 }

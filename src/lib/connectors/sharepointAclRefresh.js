@@ -19,7 +19,7 @@
 
 import crypto from "node:crypto";
 import { getDelta, getDriveDelta, getSiteDriveId } from "../msGraph.js";
-import { isPageItem } from "./sharepointPages.js";
+import { isPageItem, pageLibrariesOf } from "./sharepointPages.js";
 import { aclWriteData } from "./sharepointAcl.js";
 import { syncEmailMatchIdentities } from "../identity/entraIdentity.js";
 
@@ -46,7 +46,7 @@ const sameRows = (a, b) =>
 
 /**
  * Re-read the permissions of every synced file of one site, and of its
- * pages when `site.pagesDriveId` is known (A-15). Unchanged ACLs only get
+ * pages in its recorded page libraries (A-15). Unchanged ACLs only get
  * aclSyncedAt bumped. Items no longer in SharePoint are left alone
  * (deletion handling is FR-2 open question #4).
  * Returns { checked, updated, failed }.
@@ -62,11 +62,11 @@ export async function refreshSiteAcls(db, { orgId, site, accessToken, resolver, 
     await refreshDriveAcls(db, { orgId, site, items: files, fallbackDriveId: siteDriveId, contentType: "file", resolver, stats });
   }
 
-  if (site.pagesDriveId) {
-    const { items: pageItems } = await graph.getDriveDelta({ accessToken, driveId: site.pagesDriveId });
+  for (const library of pageLibrariesOf(site)) {
+    const { items: pageItems } = await graph.getDriveDelta({ accessToken, driveId: library.driveId });
     const pages = pageItems.filter((i) => isPageItem(i) && !i.deleted);
     if (pages.length) {
-      await refreshDriveAcls(db, { orgId, site, items: pages, fallbackDriveId: site.pagesDriveId, contentType: "page", resolver, stats });
+      await refreshDriveAcls(db, { orgId, site, items: pages, fallbackDriveId: library.driveId, contentType: "page", resolver, stats });
     }
   }
   return stats;

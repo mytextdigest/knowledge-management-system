@@ -1,14 +1,13 @@
 // EKP Workstream A (A-14/A-15): where a synced SharePoint item lives, from
 // what's already stored (no extra database column): the document's
 // SharePoint URL (Document.externalUrl) identifies the connected site, and
-// the site's entry in OrgIntegration.scopeConfig.sites records the drive ids
-// of its document library (`driveId`) and pages library (`pagesDriveId`),
-// written by every sync. Missing drive ids are looked up from Graph.
+// the site's entry in OrgIntegration.scopeConfig.sites records the drive id
+// of its document library (`driveId`), written by every sync; if missing it
+// is looked up from Graph. Pages have no file, so they need no drive here.
 //
 // Imported by the worker, so relative imports only.
 
 import { getSiteDriveId } from "../msGraph.js";
-import { findPagesDriveId } from "./sharepointPages.js";
 
 const trimSlash = (url) => String(url || "").replace(/\/+$/, "").toLowerCase();
 
@@ -30,15 +29,12 @@ export function siteForUrl(sites, url) {
 }
 
 /**
- * The drive id holding a synced SharePoint document (files: the site's
- * document library; pages: its Site Pages library), or null when its site
- * can't be identified.
+ * The drive id holding a synced SharePoint file (the site's document
+ * library), or null for a page or when its site can't be identified.
  */
 export async function resolveDriveId(doc, { scopeConfig, accessToken }) {
+  if (doc.contentType === "page") return null;
   const site = siteForUrl(scopeConfig?.sites, doc.externalUrl);
   if (!site) return null;
-  if (doc.contentType === "page") {
-    return site.pagesDriveId || findPagesDriveId({ accessToken, site, tenantId: scopeConfig.tenantId });
-  }
   return site.driveId || getSiteDriveId({ accessToken, siteId: site.siteId });
 }

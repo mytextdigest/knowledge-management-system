@@ -17,8 +17,15 @@ import { processClusterJobWorker } from "./cluster.js";
 import { classifyDocument, computeContentHash, detectDocumentDuplicates } from "./classify.js";
 import { processKnowledgeContext } from "./knowledgeContext.js";
 import { decrypt, encrypt } from "../src/lib/crypto.js";
-import { getAppOnlyToken, downloadDriveItemContent, getDriveDelta, getSitePage, listSitePages } from "../src/lib/msGraph.js";
-import { findPagesDriveId, isPageItem, pageToText } from "../src/lib/connectors/sharepointPages.js";
+import { getAppOnlyToken, downloadDriveItemContent, getDriveDelta, getDriveItemFields, getSitePage, listSitePages } from "../src/lib/msGraph.js";
+import {
+  WIKI_LIBRARY,
+  classicPageText,
+  findPageLibraries,
+  isPageItem,
+  pageLibrariesOf,
+  pageToText,
+} from "../src/lib/connectors/sharepointPages.js";
 import { resolveDriveId } from "../src/lib/connectors/sharepointLocate.js";
 import { sharePointSettings } from "../src/lib/connectors/sharepointSettings.js";
 import { getConnector } from "../src/lib/connectors/index.js";
@@ -872,14 +879,16 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
 
 const MIN_PAGE_TEXT = 50; // same floor as processChunkJob
 
-// EKP A-15: one changed page of a site's "Site Pages" library. Same rules as
-// syncOneFile: permissions are read before anything is stored, and an
+// EKP A-15: one changed page of one of a site's page libraries. Same rules
+// as syncOneFile: permissions are read before anything is stored, and an
 // unchanged page only has its ACL re-read when sharing changed or was never
-// read. The page's text goes into Document.content (no file is stored).
-async function syncOnePage({ item, page, site, pagesDriveId, integration, connectedByUserId, accessToken, aclResolver }) {
+// read. The page's text goes into Document.content (no file is stored):
+// from the canvas for a modern page (`modernPage`), otherwise from the
+// classic wiki/publishing fields.
+async function syncOnePage({ item, modernPage, library, site, integration, connectedByUserId, accessToken, aclResolver }) {
   const orgId = integration.orgId;
   const modifiedAt = new Date(item.lastModifiedDateTime);
-  const readAcl = () => aclResolver.itemAcl({ driveId: pagesDriveId, itemId: item.id, siteUrl: site.siteUrl });
+  const readAcl = () => aclResolver.itemAcl({ driveId: library.driveId, itemId: item.id, siteUrl: site.siteUrl });
 
   const existing = await prisma.document.findFirst({
     where: { orgId, sourceProvider: "sharepoint", externalId: item.id },
@@ -896,12 +905,23 @@ async function syncOnePage({ item, page, site, pagesDriveId, integration, connec
     throw new Error("No active subscription for org");
   }
 
-  const content = pageToText(await getSitePage({ accessToken, siteId: site.siteId, pageId: page.id }));
+  let content;
+  let title;
+  if (modernPage) {
+    content = pageToText(await getSitePage({ accessToken, siteId: site.siteId, pageId: modernPage.id }));
+    title = modernPage.title;
+  } else {
+    const fields = await getDriveItemFields({ accessToken, driveId: library.driveId, itemId: item.id });
+    if (!fields) return { skipped: true };
+    content = classicPageText(fields);
+    title = fields.Title;
+  }
+  title = title || item.name.replace(/\.aspx$/i, "");
   // Pages with (almost) no text, like an empty site home page, aren't
   // worth a document; the pipeline would reject them anyway.
   if (content.length < MIN_PAGE_TEXT && !existing) return { skipped: true };
   const aclRows = aclResolver ? await readAcl() : null;
-  const title = page.title || item.name.replace(/\.aspx$/i, "");
+
   const data = {
     filename: title,
     content,
@@ -909,7 +929,7 @@ async function syncOnePage({ item, page, site, pagesDriveId, integration, connec
     filePath: null,
     status: "queued",
     externalModifiedAt: modifiedAt,
-    externalUrl: page.webUrl || item.webUrl || null,
+    externalUrl: modernPage?.webUrl || item.webUrl || null,
   };
   const doc = existing
     ? await prisma.document.update({ where: { id: existing.id }, data: { ...data, ...(aclRows ? aclWriteData(aclRows) : {}) } })
@@ -924,28 +944,27 @@ async function syncOnePage({ item, page, site, pagesDriveId, integration, connec
   return { skipped: false };
 }
 
-// EKP A-15: sync a site's pages (modern pages; classic wiki pages aren't
-// returned by Graph's pages API and are skipped). Uses its own delta cursor.
+// EKP A-15: sync a site's pages from every page library (Site Pages, wiki
+// page libraries, publishing Pages libraries), each with its own cursor.
+// Returns stats plus the libraries (with new cursors) to store on the site.
 async function syncSitePages({ site, integration, connectedByUserId, accessToken, aclResolver }) {
-  const result = { found: 0, failed: 0, aclRefreshed: 0, pagesDriveId: site.pagesDriveId ?? null, pagesCursor: site.pagesCursor ?? null };
-  result.pagesDriveId =
-    result.pagesDriveId || (await findPagesDriveId({ accessToken, site, tenantId: integration.scopeConfig?.tenantId }));
-  if (!result.pagesDriveId) return result;
+  const result = { found: 0, failed: 0, aclRefreshed: 0, pageLibraries: pageLibrariesOf(site) };
+  // Look the libraries up again each run (one may have been added); keep known cursors.
+  const known = new Map(result.pageLibraries.map((l) => [l.driveId, l]));
+  const libraries = await findPageLibraries({ accessToken, site, tenantId: integration.scopeConfig?.tenantId });
+  result.pageLibraries = libraries.map((l) => ({ ...l, cursor: known.get(l.driveId)?.cursor ?? null }));
 
-  const { items, deltaLink } = await getDriveDelta({
-    accessToken,
-    driveId: result.pagesDriveId,
-    cursor: site.pagesCursor,
-    sharingChanges: true,
-  });
-  const changed = items.filter((item) => isPageItem(item) && !item.deleted);
-  if (changed.length) {
-    const pagesByName = new Map((await listSitePages({ accessToken, siteId: site.siteId })).map((p) => [p.name.toLowerCase(), p]));
+  let modernByName = null; // listed once per site, only if a library has changes
+  for (const library of result.pageLibraries) {
+    const { items, deltaLink } = await getDriveDelta({ accessToken, driveId: library.driveId, cursor: library.cursor, sharingChanges: true });
+    const changed = items.filter((item) => isPageItem(item) && !item.deleted);
+    if (changed.length && library.template === WIKI_LIBRARY && !modernByName) {
+      modernByName = new Map((await listSitePages({ accessToken, siteId: site.siteId })).map((p) => [p.name.toLowerCase(), p]));
+    }
     for (const item of changed) {
-      const page = pagesByName.get(item.name.toLowerCase());
-      if (!page) continue;
       try {
-        const r = await syncOnePage({ item, page, site, pagesDriveId: result.pagesDriveId, integration, connectedByUserId, accessToken, aclResolver });
+        const modernPage = library.template === WIKI_LIBRARY ? modernByName.get(item.name.toLowerCase()) : null;
+        const r = await syncOnePage({ item, modernPage, library, site, integration, connectedByUserId, accessToken, aclResolver });
         if (!r.skipped) result.found++;
         if (r.aclRefreshed) result.aclRefreshed++;
       } catch (err) {
@@ -953,8 +972,8 @@ async function syncSitePages({ site, integration, connectedByUserId, accessToken
         result.failed++;
       }
     }
+    library.cursor = deltaLink;
   }
-  result.pagesCursor = deltaLink;
   return result;
 }
 
@@ -1077,14 +1096,14 @@ async function processSharePointSyncJob(job) {
       // snapshot — otherwise each site's update clobbers the previous
       // site's freshly-persisted cursor with its stale pre-loop value.
       // A-15: the site's pages, when the integration includes them.
-      let pagesState = { pagesDriveId: site.pagesDriveId ?? null, pagesCursor: site.pagesCursor ?? null };
+      let pageLibraries = pageLibrariesOf(site);
       if (sharePointSettings(scopeConfig).syncPages) {
         try {
           const pages = await syncSitePages({ site, integration, connectedByUserId, accessToken, aclResolver });
           filesFound += pages.found;
           filesFailed += pages.failed;
           aclRefreshed += pages.aclRefreshed;
-          pagesState = { pagesDriveId: pages.pagesDriveId, pagesCursor: pages.pagesCursor };
+          pageLibraries = pages.pageLibraries;
         } catch (err) {
           console.error(`❌ Page sync failed for site ${site.siteUrl}:`, err.message);
           filesFailed++;
@@ -1095,7 +1114,7 @@ async function processSharePointSyncJob(job) {
         try {
           const stats = await refreshSiteAcls(prisma, {
             orgId: integration.orgId,
-            site: { ...site, pagesDriveId: pagesState.pagesDriveId },
+            site: { ...site, pageLibraries },
             accessToken,
             resolver: aclResolver,
           });
@@ -1112,7 +1131,15 @@ async function processSharePointSyncJob(job) {
         ...scopeConfig,
         sites: scopeConfig.sites.map((s) =>
           s.siteId === site.siteId
-            ? { ...s, lastSyncCursor: cursor, aclFingerprint, driveId: siteDriveId || s.driveId || null, ...pagesState }
+            ? {
+                ...s,
+                lastSyncCursor: cursor,
+                aclFingerprint,
+                driveId: siteDriveId || s.driveId || null,
+                pageLibraries,
+                pagesDriveId: undefined, // replaced by pageLibraries
+                pagesCursor: undefined,
+              }
             : s
         ),
       };
