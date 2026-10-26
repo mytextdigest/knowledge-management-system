@@ -22,7 +22,9 @@ const microsoftProviders = process.env.ENTRA_SSO_CLIENT_ID
         clientId: process.env.ENTRA_SSO_CLIENT_ID,
         clientSecret: process.env.ENTRA_SSO_CLIENT_SECRET,
         tenantId: "organizations",
-        authorization: { params: { scope: "openid profile email User.Read" } },
+        // select_account: Microsoft always asks which account, instead of
+        // silently reusing whoever last signed in on this browser.
+        authorization: { params: { scope: "openid profile email User.Read", prompt: "select_account" } },
         // The default profile() downloads the user's photo into the JWT
         // cookie; we only need the identity.
         profile(profile) {
