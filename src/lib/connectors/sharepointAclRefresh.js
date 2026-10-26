@@ -33,7 +33,18 @@ export async function siteGroupFingerprint(resolver, siteUrl) {
   const lines = [];
   for (const group of groups) {
     lines.push(`${group.id}|`);
-    const members = await resolver.deps.listSiteGroupMembers(siteUrl, group.id, token);
+    let members;
+    try {
+      members = await resolver.deps.listSiteGroupMembers(siteUrl, group.id, token);
+    } catch (err) {
+      // System groups with private membership ("Limited Access System
+      // Group…", "SharingLinks…", "SharePointHome OrgLinks…") refuse to list
+      // members (403). They grant nothing KMS reads through them: sharing
+      // links come from the item's own permissions. Count them by name only.
+      if (err.status !== 403) throw err;
+      lines.push(`${group.id}|(private) ${group.title}`);
+      continue;
+    }
     for (const m of members) lines.push(`${group.id}|${String(m.loginName).toLowerCase()}`);
   }
   lines.sort();

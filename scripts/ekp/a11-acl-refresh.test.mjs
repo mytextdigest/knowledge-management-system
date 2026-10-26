@@ -47,6 +47,20 @@ test("fingerprint changes when a site group's members change, not otherwise", as
   assert.notEqual(await siteGroupFingerprint(resolver(), SITE_URL), a);
 });
 
+test("fingerprint: groups with private membership (403) don't fail it; other errors do", async () => {
+  const { resolver } = fakeSite();
+  const r = resolver();
+  const listSiteGroupMembers = r.deps.listSiteGroupMembers;
+  r.deps.listSiteGroups = async () => [{ id: "3", title: "Owners" }, { id: "15", title: "Limited Access System Group For Web" }];
+  r.deps.listSiteGroupMembers = async (u, id) => {
+    if (id === "15") throw Object.assign(new Error("Access is denied."), { status: 403 });
+    return listSiteGroupMembers(u, id);
+  };
+  assert.match(await siteGroupFingerprint(r, SITE_URL), /^[0-9a-f]{64}$/);
+  r.deps.listSiteGroupMembers = async () => { throw Object.assign(new Error("Server error"), { status: 500 }); };
+  await assert.rejects(siteGroupFingerprint(r, SITE_URL), /Server error/);
+});
+
 test("acl-refresh job: registered daily with a long lock; row only for connected orgs", () => {
   const def = JOB_DEFINITIONS["sharepoint.acl-refresh"];
   assert.equal(def.defaultIntervalMinutes, 1440);
