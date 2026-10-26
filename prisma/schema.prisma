@@ -62,12 +62,6 @@ model UserIdentity {
   // Lets a sign-in take back exactly those grants when the user leaves a
   // mapped group, without touching roles or memberships set by hand.
   groupGrants Json?     @map("group_grants")
-  // A-10: the user's Entra groups (transitive) and the groups they own, read
-  // with the SharePoint connector app and refreshed when older than 15 min.
-  // The F1 access predicate matches DocumentAcl rows against these in SQL.
-  groupIds       String[]  @default([]) @map("group_ids")
-  ownedGroupIds  String[]  @default([]) @map("owned_group_ids")
-  groupsSyncedAt DateTime? @map("groups_synced_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -341,10 +335,6 @@ model Document {
   // what kind of item it is (A-15/A-17), and when its source permissions
   // were last read (A-11). Per-file permissions live in DocumentAcl.
   externalUrl        String?   @map("external_url")
-  // Where the item lives in the source: the SharePoint drive id (document
-  // library) or, for ServiceNow, the knowledge base. Used to re-read the
-  // item's permissions and to stream it when no copy is stored (A-14).
-  externalContainerId String?  @map("external_container_id")
   contentType        String    @default("file") @map("content_type") // "file" | "page" | "article"
   aclSyncedAt        DateTime? @map("acl_synced_at")
   acl                DocumentAcl[]
@@ -907,7 +897,7 @@ model OrgIntegration {
 model DocumentAcl {
   id            String   @id @default(cuid())
   documentId    String   @map("document_id")
-  principalType String   @map("principal_type") // "user" | "group" | "group_owners" | "tenant"
+  principalType String   @map("principal_type") // "user" | "group" | "site_group" | "tenant"
   principalId   String   @map("principal_id")
   source        String   @default("sharepoint")
   createdAt     DateTime @default(now()) @map("created_at")
