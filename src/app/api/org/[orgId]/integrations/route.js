@@ -6,7 +6,18 @@ import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 // Known connectors (FR-1's abstraction) — add an entry here as each new
 // provider's dedicated page ships. Purely a display registry; nothing here
 // gates which providers can actually connect.
-const KNOWN_PROVIDERS = [{ provider: "sharepoint", displayName: "SharePoint" }];
+const KNOWN_PROVIDERS = [
+  { provider: "sharepoint", displayName: "SharePoint" },
+  { provider: "servicenow", displayName: "ServiceNow Knowledge Base" },
+];
+
+// ServiceNow (EKP A-17) syncs knowledge bases, not sites.
+function serviceNowSummary(row) {
+  if (row?.status !== "connected") return undefined;
+  const n = row.scopeConfig?.knowledgeBases?.length || 0;
+  const synced = row.lastSyncAt ? ` · last synced ${new Date(row.lastSyncAt).toLocaleDateString()}` : "";
+  return `${n} knowledge base${n === 1 ? "" : "s"}${synced}`;
+}
 
 // Backs the Settings "Integrations" tab — one row per known provider, cross-
 // referenced against what's actually connected for this org.
@@ -35,6 +46,7 @@ export async function GET(req, { params }) {
       status: row?.status || "not_connected",
       siteCount: row?.scopeConfig?.sites?.length || 0,
       lastSyncAt: row?.lastSyncAt || null,
+      ...(provider === "servicenow" ? { summary: serviceNowSummary(row) } : {}),
     };
   });
 

@@ -17,6 +17,9 @@
 
 import { getPagesDriveId } from "../msGraph.js";
 import { getSharePointToken, isSharePointCertConfigured, listPageLibraries } from "./sharepointRest.js";
+import { htmlToText } from "./htmlText.js";
+
+export { htmlToText };
 
 export const WIKI_LIBRARY = 119;
 export const PUBLISHING_LIBRARY = 850;
@@ -62,29 +65,6 @@ export function classicPageText(fields) {
     if (typeof fields?.[key] === "string") parts.push(htmlToText(fields[key]));
   }
   return [...new Set(parts.map((p) => (typeof p === "string" ? p.trim() : "")).filter(Boolean))].join("\n\n");
-}
-
-const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
-
-/** HTML fragment → plain text, keeping paragraph and list breaks. */
-export function htmlToText(html) {
-  return String(html || "")
-    .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, " ")
-    .replace(/<\s*br\s*\/?>/gi, "\n")
-    .replace(/<\s*\/\s*(p|div|h[1-6]|li|tr|blockquote|pre)\s*>/gi, "\n")
-    .replace(/<\s*li[^>]*>/gi, "- ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, code) => {
-      if (code[0] === "#") {
-        const n = code[1].toLowerCase() === "x" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
-        return Number.isFinite(n) ? String.fromCodePoint(n) : m;
-      }
-      return ENTITIES[code.toLowerCase()] ?? m;
-    })
-    .replace(/[ \t\f\v]+/g, " ")
-    .replace(/ *\n */g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 function webPartTexts(webPart) {

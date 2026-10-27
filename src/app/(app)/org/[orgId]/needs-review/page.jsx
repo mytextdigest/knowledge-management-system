@@ -2,13 +2,14 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ClipboardList, Loader2, Cloud, Upload, ExternalLink, Check, FolderPlus, X as XIcon, AlertTriangle } from 'lucide-react';
+import { ClipboardList, Loader2, Cloud, Upload, ExternalLink, Check, FolderPlus, X as XIcon, AlertTriangle, BookOpen } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
 
 const SOURCE_LABELS = {
   manual: { label: 'Manual', icon: Upload },
   sharepoint: { label: 'SharePoint', icon: Cloud },
+  servicenow: { label: 'ServiceNow', icon: BookOpen },
 };
 
 export default function NeedsReviewPage() {
@@ -167,6 +168,7 @@ export default function NeedsReviewPage() {
             <option value="">All sources</option>
             <option value="manual">Manual</option>
             <option value="sharepoint">SharePoint</option>
+            <option value="servicenow">ServiceNow</option>
           </select>
           <select
             value={departmentFilter}
@@ -256,7 +258,7 @@ export default function NeedsReviewPage() {
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className={cn(
                             'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
-                            doc.source === 'sharepoint'
+                            doc.source !== 'manual'
                               ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                               : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
                           )}>

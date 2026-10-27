@@ -31,6 +31,7 @@ import { sharePointSettings } from "../src/lib/connectors/sharepointSettings.js"
 import { getConnector } from "../src/lib/connectors/index.js";
 import { createAclResolver, aclWriteData } from "../src/lib/connectors/sharepointAcl.js";
 import { refreshSiteAcls, siteGroupFingerprint } from "../src/lib/connectors/sharepointAclRefresh.js";
+import { syncServiceNow } from "../src/lib/connectors/servicenowSync.js";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 
@@ -148,7 +149,8 @@ async function processChunkJob(job) {
 
   const endExtract = startTimer("TEXT EXTRACTION", { docId, filename });
 
-  const isPage = existingDoc.contentType === "page";
+  // SharePoint pages (A-15) and ServiceNow articles (A-17) arrive as text.
+  const isPage = existingDoc.contentType === "page" || existingDoc.contentType === "article";
   const isSpreadsheet =
     filename.endsWith(".xlsx") ||
     filename.endsWith(".xls") ||
@@ -711,8 +713,8 @@ async function ensureFreshAppOnlyToken(integration) {
 // EKP A-14: a document's original bytes. From S3 when KMS keeps a copy,
 // otherwise straight from the source (no-copy mode), held in memory only.
 async function getDocumentBytes(doc, s3Key = doc.filePath) {
-  // A-15: a page's text is extracted at sync time; there is no file.
-  if (doc.contentType === "page") return Buffer.from(doc.content || "", "utf8");
+  // A-15/A-17: a page's or article's text is extracted at sync time; there is no file.
+  if (doc.contentType === "page" || doc.contentType === "article") return Buffer.from(doc.content || "", "utf8");
   if (s3Key) {
     const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
     return streamToBuffer(object.Body);
@@ -1164,33 +1166,68 @@ async function processSharePointSyncJob(job) {
 
   console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed} aclRefreshed=${aclRefreshed}`);
 
-  // FR-7 — one digest email per sync run (not one per file), only when
-  // there's actually something new to review. Non-fatal: an email hiccup
-  // shouldn't retroactively fail a sync that otherwise succeeded.
-  if (filesFound > 0) {
-    try {
-      const [org, superAdmins] = await Promise.all([
-        prisma.organization.findUnique({ where: { id: integration.orgId }, select: { name: true } }),
-        prisma.organizationMember.findMany({
-          where: { orgId: integration.orgId, role: "super_admin" },
-          select: { user: { select: { email: true } } },
-        }),
-      ]);
-      const recipients = superAdmins.map((m) => m.user.email).filter(Boolean);
-      if (recipients.length > 0) {
-        await sendSyncDigestEmail({
-          to: recipients,
-          orgName: org?.name || "your organization",
-          source: "SharePoint",
-          filesFound,
-          needsReviewUrl: `${process.env.NEXT_PUBLIC_APP_URL}/org/${integration.orgId}/needs-review`,
-        });
-        console.log(`📧 Sync digest sent to ${recipients.length} super admin(s)`);
-      }
-    } catch (err) {
-      console.error("⚠️ Failed to send sync digest email (non-fatal):", err.message);
+  await sendDigest({ orgId: integration.orgId, source: "SharePoint", filesFound });
+}
+
+// FR-7 — one digest email per sync run (not one per file), only when
+// there's actually something new to review. Non-fatal: an email hiccup
+// shouldn't retroactively fail a sync that otherwise succeeded.
+async function sendDigest({ orgId, source, filesFound }) {
+  if (filesFound === 0) return;
+  try {
+    const [org, superAdmins] = await Promise.all([
+      prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } }),
+      prisma.organizationMember.findMany({
+        where: { orgId, role: "super_admin" },
+        select: { user: { select: { email: true } } },
+      }),
+    ]);
+    const recipients = superAdmins.map((m) => m.user.email).filter(Boolean);
+    if (recipients.length > 0) {
+      await sendSyncDigestEmail({
+        to: recipients,
+        orgName: org?.name || "your organization",
+        source,
+        filesFound,
+        needsReviewUrl: `${process.env.NEXT_PUBLIC_APP_URL}/org/${orgId}/needs-review`,
+      });
+      console.log(`📧 Sync digest sent to ${recipients.length} super admin(s)`);
     }
+  } catch (err) {
+    console.error("⚠️ Failed to send sync digest email (non-fatal):", err.message);
   }
+}
+
+// EKP A-17: ServiceNow Knowledge Base sync (Sync Now or the servicenow.sync job).
+async function processServiceNowSyncJob(job) {
+  const { integrationId, syncRunId } = job;
+  console.log(`🟢 SERVICENOW SYNC JOB: integration=${integrationId} run=${syncRunId}`);
+
+  const integration = await prisma.orgIntegration.findUnique({ where: { id: integrationId } });
+  if (!integration) throw new Error(`OrgIntegration ${integrationId} not found`);
+
+  let stats = { found: 0, failed: 0, retired: 0 };
+  let runError = null;
+  try {
+    stats = await syncServiceNow(prisma, { integration, enqueueChunk });
+  } catch (err) {
+    runError = err.message;
+    console.error("❌ ServiceNow sync run failed:", err);
+  }
+
+  await prisma.orgIntegration.update({ where: { id: integrationId }, data: { lastSyncAt: new Date() } });
+  await prisma.syncRun.update({
+    where: { id: syncRunId },
+    data: {
+      status: runError ? "failed" : "completed",
+      finishedAt: new Date(),
+      filesFound: stats.found,
+      filesFailed: stats.failed,
+      error: runError,
+    },
+  });
+  console.log(`✅ ServiceNow sync complete: run=${syncRunId} found=${stats.found} failed=${stats.failed} retired=${stats.retired}`);
+  await sendDigest({ orgId: integration.orgId, source: "ServiceNow", filesFound: stats.found });
 }
 
 async function processJob(job) {
@@ -1203,6 +1240,7 @@ async function processJob(job) {
     return result;
   }
   if (job.type === "sharepoint_sync") return processSharePointSyncJob(job);
+  if (job.type === "servicenow_sync") return processServiceNowSyncJob(job);
 
   throw new Error("Unknown job type: " + job.type);
 }

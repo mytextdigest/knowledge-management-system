@@ -30,12 +30,38 @@ export const DEFAULT_LOCK_MINUTES = 30;
 // started less than this long ago and hasn't finished.
 const SYNC_IN_FLIGHT_MINUTES = 120;
 
-async function connectedSharePoint(prisma, orgId) {
+async function connected(prisma, orgId, provider) {
   const integration = await prisma.orgIntegration.findUnique({
-    where: { orgId_provider: { orgId, provider: "sharepoint" } },
+    where: { orgId_provider: { orgId, provider } },
     select: { status: true },
   });
   return integration?.status === "connected";
+}
+
+// Queue a sync run of a connected integration (SharePoint, ServiceNow),
+// unless one is already in flight.
+async function queueSync({ prisma, orgId, enqueue, provider, name }) {
+  const integration = await prisma.orgIntegration.findUnique({
+    where: { orgId_provider: { orgId, provider } },
+    select: { id: true, status: true },
+  });
+  if (integration?.status !== "connected") return { skipped: `${name} isn't connected` };
+
+  const inFlight = await prisma.syncRun.findFirst({
+    where: {
+      integrationId: integration.id,
+      status: "running",
+      startedAt: { gt: new Date(Date.now() - SYNC_IN_FLIGHT_MINUTES * 60_000) },
+    },
+    select: { id: true },
+  });
+  if (inFlight) return { skipped: "A sync is already running", syncRunId: inFlight.id };
+
+  const syncRun = await prisma.syncRun.create({
+    data: { integrationId: integration.id, status: "running", trigger: "scheduled" },
+  });
+  await enqueue({ type: `${provider}_sync`, integrationId: integration.id, syncRunId: syncRun.id });
+  return { syncRunId: syncRun.id };
 }
 
 export const JOB_DEFINITIONS = {
@@ -43,30 +69,17 @@ export const JOB_DEFINITIONS = {
     label: "SharePoint sync",
     description: "Picks up new and changed files from the connected SharePoint sites, same as Sync Now.",
     defaultIntervalMinutes: 60,
-    appliesTo: ({ prisma, orgId }) => connectedSharePoint(prisma, orgId),
-    async run({ prisma, orgId, enqueue }) {
-      const integration = await prisma.orgIntegration.findUnique({
-        where: { orgId_provider: { orgId, provider: "sharepoint" } },
-        select: { id: true, status: true },
-      });
-      if (integration?.status !== "connected") return { skipped: "SharePoint isn't connected" };
+    appliesTo: ({ prisma, orgId }) => connected(prisma, orgId, "sharepoint"),
+    run: ({ prisma, orgId, enqueue }) => queueSync({ prisma, orgId, enqueue, provider: "sharepoint", name: "SharePoint" }),
+  },
 
-      const inFlight = await prisma.syncRun.findFirst({
-        where: {
-          integrationId: integration.id,
-          status: "running",
-          startedAt: { gt: new Date(Date.now() - SYNC_IN_FLIGHT_MINUTES * 60_000) },
-        },
-        select: { id: true },
-      });
-      if (inFlight) return { skipped: "A sync is already running", syncRunId: inFlight.id };
-
-      const syncRun = await prisma.syncRun.create({
-        data: { integrationId: integration.id, status: "running", trigger: "scheduled" },
-      });
-      await enqueue({ type: "sharepoint_sync", integrationId: integration.id, syncRunId: syncRun.id });
-      return { syncRunId: syncRun.id };
-    },
+  // A-17: ServiceNow Knowledge Base articles, same as its Sync Now.
+  "servicenow.sync": {
+    label: "ServiceNow sync",
+    description: "Picks up new, changed and retired articles from the mapped ServiceNow knowledge bases, same as Sync Now.",
+    defaultIntervalMinutes: 60,
+    appliesTo: ({ prisma, orgId }) => connected(prisma, orgId, "servicenow"),
+    run: ({ prisma, orgId, enqueue }) => queueSync({ prisma, orgId, enqueue, provider: "servicenow", name: "ServiceNow" }),
   },
 
   // A-11/A-21: the full daily pass. Re-reads every synced file's SharePoint
@@ -77,7 +90,7 @@ export const JOB_DEFINITIONS = {
       "Re-reads every synced file's and page's SharePoint permissions and re-checks which Microsoft account each member has. Sharing changes are also picked up by every sync; this is the daily safety net.",
     defaultIntervalMinutes: 1440,
     lockMinutes: 180,
-    appliesTo: ({ prisma, orgId }) => connectedSharePoint(prisma, orgId),
+    appliesTo: ({ prisma, orgId }) => connected(prisma, orgId, "sharepoint"),
     async run({ prisma, orgId }) {
       const integration = await prisma.orgIntegration.findUnique({
         where: { orgId_provider: { orgId, provider: "sharepoint" } },
