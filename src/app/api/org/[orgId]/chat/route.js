@@ -14,14 +14,23 @@ import { searchAccessWhere, getUserPrincipals } from "@/lib/access/documentAcces
 import { isDecisionQuestion, getDecisionEvidence, formatDecisionContext, DECISION_INSTRUCTION } from "@/lib/decisionIntelligence";
 import { isLessonQuestion, getLessonEvidence, formatLessonContext, LESSON_INSTRUCTION } from "@/lib/lessonsIntelligence";
 import { sourcePreviewUrl } from "@/lib/documentSource";
+import { orgExactTermSearch } from "@/lib/vectorSearch";
+import { isDocumentListingQuestion } from "@/lib/keywordSearch";
+import { LISTING_INSTRUCTION, LISTING_MAX_DOCS_PER_TERM, formatKeywordMatches } from "@/lib/documentListing";
+
 
 const SYSTEM_PROMPT = `
 You are an expert assistant that answers questions using only the
 organization's knowledge repository context provided below.
 
 Do NOT invent factual information that is not supported by the context.
-If the answer cannot be found in the context, say:
+If the context answers only part of the question, answer that part and say
+plainly which parts you could not find. Only if nothing in the context
+answers the question, say:
 "I cannot answer that based on the organization's knowledge repository."
+Whenever you say that something could not be found, end your answer with
+this sentence on its own line:
+"I only search documents you have access to."
 
 Response format:
 - For direct factual questions, answer concisely in a short paragraph or a couple of sentences. Do not force structure onto a simple answer.
@@ -345,6 +354,7 @@ export async function POST(req, { params }) {
       isSuperAdmin: isSuperAdmin(role),
       diversify: requestedDiversify,
       feedbackQuestion: question,
+      exactTermQuestion: question,
     });
 
     if (workflowRequest.action === "start") {
@@ -368,6 +378,28 @@ export async function POST(req, { params }) {
           break;
         }
       }
+    }
+  }
+
+  // "Which documents mention …": exact matches per word, and their documents
+  // as citations (at most 12 cited documents in all).
+  let keywordMatches = "";
+  if (isDocumentListingQuestion(question) && workflowRequest.action === "none") {
+    const listing = await orgExactTermSearch(question, {
+      userId: user.id,
+      orgId,
+      isSuperAdmin: isSuperAdmin(role),
+      scope,
+      departmentId,
+      maxDocsPerTerm: LISTING_MAX_DOCS_PER_TERM,
+    });
+    keywordMatches = formatKeywordMatches(listing);
+    const cited = new Set(chunks.map((c) => c.document_id));
+    for (const row of listing.rows) {
+      if (cited.size >= 12) break;
+      if (cited.has(row.document_id)) continue;
+      cited.add(row.document_id);
+      chunks.push(row);
     }
   }
 
@@ -459,6 +491,7 @@ export async function POST(req, { params }) {
     (g) => `Document: ${g.filename}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
   );
   const context = [
+    ...(keywordMatches ? [keywordMatches] : []),
     ...(decisionContext ? [decisionContext] : []),
     ...(lessonContext ? [lessonContext] : []),
     ...(contextBlocks.length > 0
@@ -478,7 +511,7 @@ export async function POST(req, { params }) {
     ...prevMsgs.map((m) => ({ role: m.role, content: m.content })),
     {
       role: "user",
-      content: `${sessionContextNote}${workflowInstruction ? `${workflowInstruction}\n\n` : ""}${decisionContext ? `${DECISION_INSTRUCTION}\n\n` : ""}${lessonContext ? `${LESSON_INSTRUCTION}\n\n` : ""}Question: ${question}\n\nContext:\n${context}`,
+      content: `${sessionContextNote}${workflowInstruction ? `${workflowInstruction}\n\n` : ""}${decisionContext ? `${DECISION_INSTRUCTION}\n\n` : ""}${lessonContext ? `${LESSON_INSTRUCTION}\n\n` : ""}${keywordMatches ? `${LISTING_INSTRUCTION}\n\n` : ""}Question: ${question}\n\nContext:\n${context}`,
     },
   ];
 

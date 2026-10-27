@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { computeBM25, tokenize } from "@/lib/keywordSearch";
+import { computeBM25, exactQueryTerms, tokenize } from "@/lib/keywordSearch";
 import { searchAccessSql } from "@/lib/access/documentAccess";
 
 export function scopeSql({ scope = "organization", departmentId = null, userId = null }) {
@@ -205,4 +205,64 @@ export async function orgFallbackTextSearch(
       AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
     LIMIT ${Prisma.raw(String(limit))}
   `;
+}
+
+/**
+ * Exact-word matches for the distinctive words of a question (code names,
+ * IDs, rare terms like "KESTREL"), so they aren't crowded out by broader
+ * matches. A word counts as distinctive when it appears (as a whole word, in
+ * text or file name) in at least 1 and at most `maxDocsPerTerm` documents
+ * the user can access; counts only ever include accessible documents.
+ *
+ * Returns { terms: [{ term, documentCount }], rows } where rows are the best
+ * chunk per (distinctive term, document), shaped like orgKeywordSearch rows
+ * plus `exactTerm`.
+ */
+export async function orgExactTermSearch(
+  question,
+  { userId, orgId, isSuperAdmin = false, scope = "organization", departmentId = null, maxDocsPerTerm = 3, db = prisma }
+) {
+  const words = exactQueryTerms(question);
+  if (!words.length) return { terms: [], rows: [] };
+  const scopeFilter = scopeSql({ scope, departmentId, userId });
+  const matches = Prisma.sql`(c.text ~* ('\\m' || q.term || '\\M') OR d.filename ~* ('\\m' || q.term || '\\M'))`;
+
+  const counts = await db.$queryRaw`
+    SELECT q.term, COUNT(DISTINCT d.id)::int AS "documentCount"
+    FROM unnest(${words}::text[]) AS q(term)
+    JOIN "Chunk" c ON TRUE
+    JOIN "Document" d ON c.document_id = d.id
+    WHERE d."orgId" = ${orgId}
+      ${scopeFilter}
+      AND ${matches}
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    GROUP BY q.term
+  `;
+  const countByTerm = new Map(counts.map((r) => [r.term, r.documentCount]));
+  const terms = words.map((term) => ({ term, documentCount: countByTerm.get(term) || 0 }));
+  const distinctive = terms.filter((t) => t.documentCount >= 1 && t.documentCount <= maxDocsPerTerm).map((t) => t.term);
+  if (!distinctive.length) return { terms, rows: [] };
+
+  const rows = await db.$queryRaw`
+    SELECT DISTINCT ON (q.term, d.id)
+           q.term AS "exactTerm",
+           c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           dept.name AS department_name,
+           proj.name AS project_name
+    FROM unnest(${distinctive}::text[]) AS q(term)
+    JOIN "Chunk" c ON TRUE
+    JOIN "Document" d ON c.document_id = d.id
+    LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    WHERE d."orgId" = ${orgId}
+      ${scopeFilter}
+      AND ${matches}
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    ORDER BY q.term, d.id, (c.text ~* ('\\m' || q.term || '\\M')) DESC, c.chunk_index
+  `;
+  // Rarest words first (most specific), then in question order.
+  const rank = (term) => countByTerm.get(term) * 100 + words.indexOf(term);
+  rows.sort((a, b) => rank(a.exactTerm) - rank(b.exactTerm));
+  return { terms, rows: rows.map((r) => ({ ...r, distance: 1, keyword_score: 1 })) };
 }

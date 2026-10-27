@@ -311,20 +311,24 @@ function fakeDb({ memberships, projects }) {
 
 const ids = (rows) => rows.map((r) => r.id).sort();
 
-async function compareSearchSql(tx, orgId, userId, isSuperAdmin) {
+// `withoutSourcePermissions`: compare only documents with no SharePoint
+// permissions (A-10 deliberately narrows the others).
+const noSourcePermissions = (on) => (on ? Prisma.sql`AND d.acl_synced_at IS NULL` : Prisma.empty);
+
+async function compareSearchSql(tx, orgId, userId, isSuperAdmin, { withoutSourcePermissions = false } = {}) {
   const run = (predicate) => tx.$queryRaw`
     SELECT d.id FROM "Document" d
     LEFT JOIN "DepartmentMember" dm ON d."departmentId" = dm."departmentId" AND dm."userId" = ${userId}
-    WHERE d."orgId" = ${orgId} AND ${predicate}`;
+    WHERE d."orgId" = ${orgId} ${noSourcePermissions(withoutSourcePermissions)} AND ${predicate}`;
   const legacy = ids(await run(LEGACY_searchSql({ userId, orgId, isSuperAdmin })));
   const current = ids(await run(searchAccessSql({ userId, orgId, isSuperAdmin })));
   assert.deepEqual(current, legacy, `search SQL differs for user ${userId} (superAdmin=${isSuperAdmin})`);
   return current.length;
 }
 
-async function compareKnowledgeSql(tx, orgId, userId, isSuperAdmin) {
+async function compareKnowledgeSql(tx, orgId, userId, isSuperAdmin, { withoutSourcePermissions = false } = {}) {
   const run = (predicate) => tx.$queryRaw`
-    SELECT d.id FROM "Document" d WHERE d."orgId" = ${orgId} AND ${predicate}`;
+    SELECT d.id FROM "Document" d WHERE d."orgId" = ${orgId} ${noSourcePermissions(withoutSourcePermissions)} AND ${predicate}`;
   const legacy = ids(await run(LEGACY_knowledgeSql({ userId, isSuperAdmin, alias: "d" })));
   const current = ids(await run(knowledgeAccessSql({ userId, isSuperAdmin, alias: "d" })));
   assert.deepEqual(current, legacy, `knowledge SQL differs for user ${userId} (superAdmin=${isSuperAdmin})`);
@@ -425,14 +429,16 @@ test("F1 central access matches every legacy copy on a seeded matrix", { skip: !
   assert.ok(visibleCounts.size > 3, `expected varied visibility, got counts ${[...visibleCounts]}`);
 });
 
+// Real data now includes synced SharePoint files, which A-10 narrows on
+// purpose: parity is required for every document without source permissions.
 test("F1 central access matches legacy SQL on existing data (read-only)", { skip: !RUN_DB_TESTS }, async () => {
   const prisma = new PrismaClient();
   try {
     const members = await prisma.organizationMember.findMany({ select: { orgId: true, userId: true, role: true } });
     for (const m of members) {
       const superAdmin = m.role === "super_admin";
-      await compareSearchSql(prisma, m.orgId, m.userId, superAdmin);
-      await compareKnowledgeSql(prisma, m.orgId, m.userId, superAdmin);
+      await compareSearchSql(prisma, m.orgId, m.userId, superAdmin, { withoutSourcePermissions: true });
+      await compareKnowledgeSql(prisma, m.orgId, m.userId, superAdmin, { withoutSourcePermissions: true });
     }
   } finally {
     await prisma.$disconnect();

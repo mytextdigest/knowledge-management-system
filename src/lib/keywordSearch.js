@@ -58,3 +58,47 @@ export function computeBM25(chunks, query) {
 
   return scores.sort((a, b) => b.score - a.score);
 }
+
+// Words that carry no search meaning in a question ("which documents
+// mention …", "can you find me …"), for exactQueryTerms below.
+const QUERY_STOPWORDS = new Set(`
+  a an and or but the of to in on at for with from by as is are was were be been being
+  this that these those there here it its they them their what which who whom whose when
+  where why how all any some each every can could would should will shall may might must
+  do does did done have has had not no nor so than then too very just also about into
+  me my mine we our you your he she his her i us please tell show give find list search
+  look looking get know need want help explain describe summarize summary
+  document documents doc docs file files page pages keyword keywords word words term terms
+  mention mentions mentioned contain contains containing include includes including
+  refer refers referring related relate regarding information info anything something
+`.split(/\s+/).filter(Boolean));
+
+/**
+ * The distinctive words of a question for exact matching: letters/digits
+ * (and inner dashes), at least 4 characters or a 3-letter acronym in
+ * capitals (KMS), not a stop word, at most `max`, lowercased, in question
+ * order. "KESTREL and KMS: which documents mention these?" → ["kestrel", "kms"].
+ */
+export function exactQueryTerms(question, { max = 8 } = {}) {
+  const terms = [];
+  for (const raw of String(question || "").split(/[^A-Za-z0-9-]+/)) {
+    const original = raw.replace(/^-+|-+$/g, "");
+    const term = original.toLowerCase();
+    const acronym = original.length === 3 && /^[A-Z0-9]+$/.test(original) && /[A-Z]/.test(original);
+    if ((term.length < 4 && !acronym) || QUERY_STOPWORDS.has(term) || /^\d+$/.test(term) || terms.includes(term)) continue;
+    terms.push(term);
+    if (terms.length >= max) break;
+  }
+  return terms;
+}
+
+/** Whether a question asks which documents match words, rather than about their content. */
+export function isDocumentListingQuestion(question) {
+  const q = String(question || "");
+  const docs = String.raw`\b(documents?|files?|pages?|docs?)\b`;
+  return [
+    new RegExp(String.raw`\b(which|what)\b[^?.]*${docs}[^?.]*\b(mention|mentions|contain|contains|have|has|include|includes|refer|refers|talk|talks|with)\b`, "i"),
+    new RegExp(String.raw`\b(list|find|show|search|give)\b[^?.]*${docs}`, "i"),
+    new RegExp(String.raw`${docs}[^?.]*\b(with|containing|mentioning|matching)\b[^?.]*\b(keywords?|words?|terms?)\b`, "i"),
+  ].some((pattern) => pattern.test(q));
+}
