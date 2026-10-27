@@ -364,7 +364,7 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 
 ### A4: ServiceNow connector (stretch) · Content Server (after award) (E2.1, E2.8, E12.2)
 
-**Status:** outlined. ServiceNow is a Phase 1 stretch for week 6; Content Server is deferred. Both are "target capability" in the RFP, not mandatory, and NYPA confirms both can be added after launch (Q&A #66).
+**Status:** ServiceNow done (A-17, 2026-10-28); Content Server is deferred. Both are "target capability" in the RFP, not mandatory, and NYPA confirms both can be added after launch (Q&A #66).
 
 **Scope for both:** read-only ingestion, the same pattern as SharePoint (`BaseConnector`). Content is indexed, searchable and citable, with a link back to the original. Nothing is written back to the source system.
 
@@ -391,9 +391,9 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 
 **Acceptance tests (ServiceNow):**
 
-- [ ] A ServiceNow KB article from the developer instance is searchable and citable, with a link back to the original.
-- [ ] An article in a knowledge base mapped to department X is visible only to users with access to department X.
-- [ ] Results from SharePoint, ServiceNow and manual uploads appear in one list, labelled by source.
+- [x] A ServiceNow KB article from the developer instance is searchable and citable, with a link back to the original.
+- [x] An article in a knowledge base mapped to department X is visible only to users with access to department X.
+- [x] Results from SharePoint, ServiceNow and manual uploads appear in one list, labelled by source.
 
 ## 5. Dependencies with Workstream B
 
@@ -438,7 +438,7 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 | `A-14` | A3 · No-copy mode + `getDocumentBytes` + preview endpoint                                                                       | `DONE`        | Johurul  | `A-13`                   | 2026-10-23 | 2026-10-27 |
 | `A-15` | A3 · SharePoint site pages ingestion (`contentType: page`)                                                                      | `DONE`        | Johurul  | `A-9`                      | 2026-10-23 | 2026-10-27 |
 | `A-16` | A1 · SAML 2.0 via embedded SAML Jackson + `BoxyHQSAMLProvider` (required by RFP §6 S2)                                         | `TODO`        | Johurul  | `A-5`                      |            |            |
-| `A-17` | A4 · ServiceNow connector, KB articles only, knowledge base → department, no per-article criteria (stretch, developer instance) | `IN PROGRESS` | Johurul  | `A-9`                      | 2026-10-28 |            |
+| `A-17` | A4 · ServiceNow connector, KB articles only, knowledge base → department, no per-article criteria (stretch, developer instance) | `DONE`        | Johurul  | `A-9`                      | 2026-10-28 | 2026-10-28 |
 | `A-18` | A4 · Content Server: design note in Phase 1; build after award (needs NYPA instance + network path)                               | `BLOCKED`     | Johurul  | NYPA                         |            |            |
 | `A-19` | Phase 1 integration & cross-testing (A + B together, all roles)                                                                    | `TODO`        | All 3    | `A-12`, `A-15`, `B-21` |            |            |
 | `A-20` | Update RTM status for E2, E12, E32 in the plan; re-score Phase 1                                                                   | `TODO`        | Johurul  | `A-19`                     |            |            |
@@ -601,3 +601,10 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
 - `2026-10-27 · Phase 4 (no-copy mode) passed:` with *Keep a copy of files* off (`storeOriginals: false`), a new file synced from the Engineering site was stored with `filePath` null (nothing written to S3), its permissions read (3 rows), its extracted text and one chunk kept for search and chat, and its Open-in-SharePoint link set. Preview and Download both work, streamed from SharePoint on each request (checked by Johurul in the UI). No-copy keeps extracted text by design; a stricter link-only mode would break search and chat and is not part of A-14.
 - `2026-10-27 · Phase 5 (daily permissions refresh) passed:` emp1 removed from Engineering Visitors in SharePoint with no Sync Now, then Scheduled Jobs → SharePoint permissions refresh → Run now. Result `ok` in 53 s: Engineering checked 16, updated 15, failed 0; Finance checked 4, updated 0; root site 0 items; email match checked the 6 members without Microsoft sign-in, none matched (no Entra accounts for them). emp1 is back to `everyone-link.docx` and the KMS Test Page; emp2 and emp3 unchanged. Phases 0–5 of the WS-A test pass are complete.
 - `2026-10-27 · Tracker:` A-9, A-10, A-11, A-12, A-13, A-14, A-15 and A-21 set to `DONE` after the Phase 0–5 test pass, ahead of the merge to `dev` (one PR for the branch, still to open). A-9 and A-10 shipped without a migration: no group table (groups cached per server, `groupCache.js`) and the drive found from the file's URL. A-21 is covered by automated tests only; a live email-match check needs a tenant user with a mailbox who has never signed in with Microsoft.
+- `2026-10-28 · A-17 ServiceNow connector done:`
+  - **Code:** `src/lib/connectors/servicenowApi.js` (read-only Table API client: basic auth or OAuth client credentials; only `*.service-now.com` / `*.servicenowservices.com`), `servicenow.js` (connector, stored-credential helpers), `servicenowSync.js` (one run), `servicenowSettings.js` (form and mapping rules); settings page `/org/[orgId]/integrations/servicenow` with its API routes; worker job `servicenow_sync`; scheduled job `servicenow.sync` (off by default). No migration.
+  - **Behaviour:** published articles of each mapped knowledge base become `contentType: "article"` documents of its department (text in `content`, no file, no ACL rows), new ones as drafts for Needs Review. Not published any more (retired, outdated) → `lifecycle: "retired"`. Remapping a knowledge base resets its cursor and moves its documents on the next sync. Credentials are per org, encrypted (`encryptJson`), entered by a super admin; nothing is read from env.
+  - **Versions:** ServiceNow keeps each article version as its own `kb_knowledge` record (new `sys_id`, the old one becomes `outdated`). A new version arrives as a new draft and the old document is retired, so a new version goes through Needs Review again.
+  - **Live test (developer instance dev424186, 2026-10-28):** the instance rejects basic auth on the REST API for every user (admin included); connected with OAuth client credentials (Application Registry → client credentials grant, application user `kms.integration`, scope `useraccount`, property `glide.oauth.inbound.client.credential.grant_type.enabled`). Engineering Procedures → Engineering: 8 articles synced, 0 failed, all `ready`, 1 chunk each, links `kb_view.do?sysparm_article=KB00100nn`. Chat answers cited the articles; remapping to Finance hid them from emp1 and mapping back restored them (checked by Johurul in the UI).
+  - **Before NYPA:** optional OAuth scope field (for a scope limited to the Table API instead of `useraccount`), and custom instance domains if NYPA uses one.
+  - Tests: `scripts/ekp/a17-servicenow.test.mjs` (`EKP_DB_TESTS=1 npm run ekp:a17:test`).

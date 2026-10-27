@@ -1,8 +1,8 @@
-# Microsoft & SharePoint in KMS: Test and Demo Manual
+# Microsoft, SharePoint & ServiceNow in KMS: Test and Demo Manual
 
 **For:** alpha testers and anyone giving a demo. No coding needed.
-**Covers:** Microsoft sign-in, SharePoint sync, SharePoint permissions in KMS, SharePoint pages, "Open in SharePoint", no-copy mode and the scheduled permission refresh.
-**Last full pass:** 27 Oct 2026, all tests passed (record: [WS_A_M365_CONNECTORS.md](WS_A_M365_CONNECTORS.md) §7).
+**Covers:** Microsoft sign-in, SharePoint sync, SharePoint permissions in KMS, SharePoint pages, "Open in SharePoint", no-copy mode, the scheduled permission refresh, and ServiceNow Knowledge Base articles (T9).
+**Last full pass:** 27 Oct 2026 (T1–T8) and 28 Oct 2026 (T9), all tests passed (record: [WS_A_M365_CONNECTORS.md](WS_A_M365_CONNECTORS.md) §7).
 
 ---
 
@@ -30,6 +30,7 @@ Admin pages used in this manual:
 - **Needs Review:** left menu. New SharePoint items wait here until approved.
 - **Scheduled Jobs:** Org Settings → Scheduled Jobs.
 - **Microsoft sign-in:** Org Settings → Integrations → Microsoft sign-in (email domains, roles from Microsoft groups).
+- **ServiceNow:** Org Settings → Integrations → ServiceNow Knowledge Base (connect, knowledge base → department, **Sync Now**). Test instance `https://dev424186.service-now.com`, knowledge base **Engineering Procedures** (8 articles, KB0010001–KB0010008). It sleeps when idle: wake it from developer.servicenow.com first.
 
 ---
 
@@ -171,6 +172,21 @@ Turn the setting back on afterwards if the next tester expects it on.
 
 *Proves:* even without anyone clicking Sync Now, a daily job re-checks every file's permissions, so nothing stays visible after access is removed. The job is off by default; an admin can turn it on.
 
+### T9. ServiceNow Knowledge Base articles
+
+Done by the KMS admin, then emp1 (who is in Engineering).
+
+1. **Connect:** ServiceNow Knowledge Base page → instance address, **OAuth client credentials**, Client ID and secret (from the tech lead) → **Test and connect**. **Expect:** "Connected to … as …" and a list of the instance's knowledge bases.
+2. **Map and sync:** set **Engineering Procedures → Engineering**, **Save**, **Sync Now**. **Expect:** the run shows *8 articles synced* (0 if they were synced before and nothing changed in ServiceNow).
+3. **Review:** in **Needs Review**, filter on **ServiceNow** and approve the articles.
+4. **As emp1:** the repository shows them with a **ServiceNow article** badge and an **Open in ServiceNow** button that opens the article on the instance. Ask chat:
+   - "How many documents can a project hold?" → **200**, citing *Using Project Chat…*
+   - "What does MTD-ERR-4012 mean?" → cites *Troubleshooting: Document Stuck in "Processing"…*
+   - "How long are generated slides kept?" → **30 days**, citing *Generating Presentation Slides…*
+5. **Department rule:** as admin, change the mapping to **Engineering Procedures → Finance**, **Save**, **Sync Now**. **Expect:** emp1 no longer sees the articles and chat can't answer the questions above. Map it back to **Engineering** and **Sync Now**: they're back, no re-approval needed.
+
+*Proves:* ServiceNow articles are searchable and citable next to SharePoint files and uploads, each labelled by source; access follows the department the knowledge base is mapped to. KMS only reads from ServiceNow. Disconnecting stops syncing but keeps approved articles; an article retired in ServiceNow is retired in KMS on the next sync.
+
 ---
 
 ## 5. Ten-minute demo script
@@ -183,6 +199,7 @@ Use emp1 and emp3 side by side in two windows.
 4. **Pages (1 min):** ask "Which SharePoint pages do we have?" in both windows. Different answers.
 5. **Live permission change (3 min):** in SharePoint, add emp1 to Engineering Visitors, then **Sync Now**. Ask emp1's question again: now it's answered. Remove emp1 again afterwards.
 6. **No-copy (1 min):** show the *Keep a copy of files in KMS* switch. "If you don't want files duplicated, KMS reads them from SharePoint on demand."
+7. **ServiceNow (3 min, optional):** show the ServiceNow page (connected, Engineering Procedures → Engineering), then **Needs Review** with the 8 articles and approve them. As emp1 ask "What does MTD-ERR-4012 mean?" and click **Open in ServiceNow**. "Knowledge articles from ServiceNow and files from SharePoint answer in the same chat, with the same department rules." Approving works once; Sync Now shows 0 unless an article was edited in ServiceNow.
 
 Talking points: KMS only reads from SharePoint, never writes. Permissions apply to chat answers too, not just lists. Dept admins don't get around SharePoint permissions.
 
@@ -198,6 +215,8 @@ Talking points: KMS only reads from SharePoint, never writes. Permissions apply 
 | A file synced but can't be found by search | It has almost no text | Add a few sentences in SharePoint and sync again |
 | Worker log says `Delta cursor no longer valid (410); listing from the beginning` | SharePoint asked KMS to re-list the site | Harmless. If it appears on **every** sync, tell the tech lead. |
 | Worker log line `Site permissions re-read … updated N` | A site group changed, so every item's permissions were re-checked | Expected after T6(c) |
+| ServiceNow **Test and connect** says 401 | Wrong credentials, or the instance allows only OAuth for API access | Use **OAuth client credentials** |
+| ServiceNow articles still "processing" | Each article is chunked and summarized after the sync | Wait a minute and refresh |
 | Someone sees a file they shouldn't | Possible bug | Note the user, the item, and what they did; screenshot; report to the tech lead right away |
 
 ---
@@ -216,6 +235,7 @@ The same behaviour is covered by automated tests (`scripts/ekp/`). Run with `EKP
 | `npm run ekp:a14:test` | No-copy mode |
 | `npm run ekp:a15:test` | SharePoint pages |
 | `npm run ekp:chat:test` | Chat keyword and listing questions |
+| `npm run ekp:a17:test` | ServiceNow connector (stubbed Table API) |
 
 Read-only check of who sees what, for any org:
 `node --import ./scripts/task-12/register-alias-hook.mjs scripts/ekp/sharepoint-access-matrix.mjs --org <orgId>`
