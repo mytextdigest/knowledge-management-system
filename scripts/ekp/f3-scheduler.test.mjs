@@ -24,6 +24,22 @@ test("job patch: only listed intervals; enabling or a new interval re-plans the 
   assert.ok(INTERVAL_CHOICES.includes(JOB_DEFINITIONS["sharepoint.sync"].defaultIntervalMinutes));
 });
 
+test("A-22: syncs can run every 5 minutes, 4 is rejected; the permissions refresh keeps a 60-minute floor", () => {
+  const now = new Date("2026-10-21T12:00:00Z");
+  const sync = { name: "sharepoint.sync", enabled: true, intervalMinutes: 60, lastRunAt: null };
+  assert.equal(validateJobPatch({ intervalMinutes: 5 }, sync, now).data.intervalMinutes, 5);
+  assert.equal(validateJobPatch({ intervalMinutes: 5 }, { ...sync, name: "servicenow.sync" }, now).data.intervalMinutes, 5);
+  assert.ok(validateJobPatch({ intervalMinutes: 4 }, sync, now).error);
+
+  const refresh = { ...sync, name: "sharepoint.acl-refresh", intervalMinutes: 1440 };
+  assert.match(validateJobPatch({ intervalMinutes: 5 }, refresh, now).error, /every 60 minutes/);
+  assert.equal(validateJobPatch({ intervalMinutes: 60 }, refresh, now).data.intervalMinutes, 60);
+  assert.deepEqual(serializeJob(refresh).intervalChoices, [60, 240, 720, 1440]);
+  // A row set to 15 minutes before the floor existed still shows its interval.
+  assert.deepEqual(serializeJob({ ...refresh, intervalMinutes: 15 }).intervalChoices, [15, 60, 240, 720, 1440]);
+  assert.deepEqual(serializeJob(sync).intervalChoices, INTERVAL_CHOICES);
+});
+
 test("serialize: a 'running' status with an expired lock isn't shown as running", () => {
   const now = new Date();
   const base = { id: "j", name: "sharepoint.sync", enabled: true, intervalMinutes: 60, nextRunAt: now };

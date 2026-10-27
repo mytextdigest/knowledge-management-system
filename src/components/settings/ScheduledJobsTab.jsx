@@ -115,7 +115,7 @@ export default function ScheduledJobsTab({ orgId }) {
                   onChange={(e) => patch(job, { intervalMinutes: Number(e.target.value) })}
                   className="p-1.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
                 >
-                  {intervalChoices.map((m) => <option key={m} value={m}>{formatInterval(m)}</option>)}
+                  {(job.intervalChoices || intervalChoices).map((m) => <option key={m} value={m}>{formatInterval(m)}</option>)}
                 </select>
                 <span><Clock className="inline h-3.5 w-3.5 mr-1" />Next run: {job.enabled ? formatWhen(job.nextRunAt) : 'off'}</span>
                 <span>Last run: {formatWhen(job.lastRunAt)}</span>

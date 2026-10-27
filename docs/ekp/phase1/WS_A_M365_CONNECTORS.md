@@ -329,7 +329,7 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 - [ ] Disabling the Entra account removes the `email_match` identity at the next `acl-refresh`.
 - [ ] Sync history shows each scheduled run. A 5,000-item sync completes without errors.
 - [ ] The F1 parity test still passes for all non-SharePoint documents.
-- [ ] A scheduled sync can be set to a 5-minute interval, and a 4-minute interval is rejected (`A-22`).
+- [x] A scheduled sync can be set to a 5-minute interval, and a 4-minute interval is rejected (`A-22`).
 - [ ] A file with a managed-metadata value in the test tenant arrives with that value stored on the document (`A-23`).
 - [ ] A file above the size limit appears in KMS with its deep link and permissions. It isn't downloaded, and the sync run reports it as skipped (`A-24`).
 
@@ -437,14 +437,14 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 | `A-13` | A3 · `externalUrl` + "Open in SharePoint" in the UI                                                                             | `DONE`        | Johurul  | `A-9`                      | 2026-10-23 | 2026-10-27 |
 | `A-14` | A3 · No-copy mode + `getDocumentBytes` + preview endpoint                                                                       | `DONE`        | Johurul  | `A-13`                   | 2026-10-23 | 2026-10-27 |
 | `A-15` | A3 · SharePoint site pages ingestion (`contentType: page`)                                                                      | `DONE`        | Johurul  | `A-9`                      | 2026-10-23 | 2026-10-27 |
-| `A-16` | A1 · SAML 2.0 via embedded SAML Jackson + `BoxyHQSAMLProvider` (required by RFP §6 S2)                                         | `TODO`        | Johurul  | `A-5`                      |            |            |
+| `A-16` | A1 · SAML 2.0 via embedded SAML Jackson + `BoxyHQSAMLProvider` (required by RFP §6 S2)                                         | `TODO`        | Johurul  | `A-5`, WS-A + WS-B merged (`jackson` schema)|            |            |
 | `A-17` | A4 · ServiceNow connector, KB articles only, knowledge base → department, no per-article criteria (stretch, developer instance) | `DONE`        | Johurul  | `A-9`                      | 2026-10-28 | 2026-10-28 |
 | `A-18` | A4 · Content Server: design note in Phase 1; build after award (needs NYPA instance + network path)                               | `BLOCKED`     | Johurul  | NYPA                         |            |            |
 | `A-19` | Phase 1 integration & cross-testing (A + B together, all roles)                                                                    | `TODO`        | All 3    | `A-12`, `A-15`, `B-21` |            |            |
 | `A-20` | Update RTM status for E2, E12, E32 in the plan; re-score Phase 1                                                                   | `TODO`        | Johurul  | `A-19`                     |            |            |
 | `A-21` | A2 · Identity by verified email (`email_match` via Graph app-only) + re-check in `acl-refresh`                                | `DONE`        | Johurul  | `A-4`                      | 2026-10-23 | 2026-10-27 |
-| `A-22` | A2 · F3: lower the minimum job interval from 15 to 5 minutes (NFR-6, NYPA Q&A #99)                                                | `TODO`        | Johurul  | `A-7`                      |            |            |
-| `A-23` | A2 · Store SharePoint managed-metadata values (raw label + term GUID) on synced documents (PRS E16.5; mapped to terms by C)       | `TODO`        | Johurul  | `A-9`                      |            |            |
+| `A-22` | A2 · F3: lower the minimum job interval from 15 to 5 minutes (NFR-6, NYPA Q&A #99)                                                | `DONE`        | Johurul  | `A-7`                      | 2026-10-28 | 2026-10-28 |
+| `A-23` | A2 · Store SharePoint managed-metadata values (raw label + term GUID) on synced documents (PRS E16.5; mapped to terms by C)       | `TODO`        | Johurul  | `A-9`, WS-A + WS-B merged (migration)|            |            |
 | `A-24` | A2 · Large-file guard: above the size limit, index metadata, ACL and link only; no download (8 GB videos, Q&A #188)               | `TODO`        | Johurul  | `A-14`                     |            |            |
 
 ## 7. Implementation Notes
@@ -608,3 +608,5 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
   - **Live test (developer instance dev424186, 2026-10-28):** the instance rejects basic auth on the REST API for every user (admin included); connected with OAuth client credentials (Application Registry → client credentials grant, application user `kms.integration`, scope `useraccount`, property `glide.oauth.inbound.client.credential.grant_type.enabled`). Engineering Procedures → Engineering: 8 articles synced, 0 failed, all `ready`, 1 chunk each, links `kb_view.do?sysparm_article=KB00100nn`. Chat answers cited the articles; remapping to Finance hid them from emp1 and mapping back restored them (checked by Johurul in the UI).
   - **Before NYPA:** optional OAuth scope field (for a scope limited to the Table API instead of `useraccount`), and custom instance domains if NYPA uses one.
   - Tests: `scripts/ekp/a17-servicenow.test.mjs` (`EKP_DB_TESTS=1 npm run ekp:a17:test`).
+- `2026-10-28 · A-22 done:` `INTERVAL_CHOICES` now starts at **5 minutes** (`src/lib/jobs/registry.js`); a job definition may set `minIntervalMinutes`, and `sharepoint.acl-refresh` uses 60 (it re-reads every file; syncs already pick up sharing changes). Each job's allowed intervals come back from the jobs API (`intervalChoices`), so the Scheduled Jobs dropdown only lists valid ones; a row already below a newer minimum keeps showing its interval. A sync every 5 minutes can't pile up: a scheduled sync isn't queued while another run of the same integration is in flight. Tests: `ekp:f3:test`.
+- `2026-10-28 · Order for tasks that change the database (Johurul):` merge WS-A → merge WS-B → then build them. Deferred on that basis: **A-23** (needs a migration) and **A-16** SAML (SAML Jackson creates its own tables in the `jackson` schema of the shared database).

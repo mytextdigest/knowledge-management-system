@@ -1,5 +1,5 @@
 // EKP Workstream A, F3: shared helpers for the Scheduled jobs admin API.
-import { JOB_DEFINITIONS, INTERVAL_CHOICES } from "./registry.js";
+import { JOB_DEFINITIONS, intervalChoicesFor } from "./registry.js";
 
 export function serializeJob(job, now = new Date()) {
   const def = JOB_DEFINITIONS[job.name];
@@ -11,6 +11,8 @@ export function serializeJob(job, now = new Date()) {
     description: def?.description ?? null,
     enabled: job.enabled,
     intervalMinutes: job.intervalMinutes,
+    // The current interval stays listed even if it's below a newer minimum.
+    intervalChoices: [...new Set([...intervalChoicesFor(job.name), job.intervalMinutes])].sort((a, b) => a - b),
     nextRunAt: job.enabled ? job.nextRunAt : null,
     lastRunAt: job.lastRunAt,
     lastStatus: running ? "running" : job.lastStatus === "running" ? null : job.lastStatus,
@@ -26,7 +28,10 @@ export function validateJobPatch(body, job, now = new Date()) {
   const data = {};
   if (body.intervalMinutes !== undefined) {
     const minutes = Number(body.intervalMinutes);
-    if (!INTERVAL_CHOICES.includes(minutes)) return { error: "Invalid interval" };
+    const choices = intervalChoicesFor(job.name);
+    if (!choices.includes(minutes)) {
+      return { error: minutes < choices[0] ? `This job can't run more often than every ${choices[0]} minutes` : "Invalid interval" };
+    }
     data.intervalMinutes = minutes;
   }
   if (body.enabled !== undefined) {

@@ -15,12 +15,21 @@
 //                                 JSON summary (stored as lastResult). Throw to fail.
 //   lockMinutes (optional)        how long a run may take before it's assumed
 //                                 crashed (default DEFAULT_LOCK_MINUTES)
+//   minIntervalMinutes (optional) the shortest interval an admin may pick, for
+//                                 jobs too heavy to run every few minutes
 
 import { createAclResolver } from "../connectors/sharepointAcl.js";
 import { refreshIntegrationAcls } from "../connectors/sharepointAclRefresh.js";
 import { getCachedAppOnlyToken } from "../msGraph.js";
 
-export const INTERVAL_CHOICES = [15, 30, 60, 240, 720, 1440];
+// A-22: down to 5 minutes (NFR-6, NYPA Q&A #99: changes within 5 minutes).
+export const INTERVAL_CHOICES = [5, 15, 30, 60, 240, 720, 1440];
+
+/** The intervals an admin may pick for a job. */
+export function intervalChoicesFor(name) {
+  const min = JOB_DEFINITIONS[name]?.minIntervalMinutes ?? 0;
+  return INTERVAL_CHOICES.filter((m) => m >= min);
+}
 
 // How long a claimed run holds its lock. A run still going after this is
 // assumed crashed and may be claimed again.
@@ -89,6 +98,7 @@ export const JOB_DEFINITIONS = {
     description:
       "Re-reads every synced file's and page's SharePoint permissions and re-checks which Microsoft account each member has. Sharing changes are also picked up by every sync; this is the daily safety net.",
     defaultIntervalMinutes: 1440,
+    minIntervalMinutes: 60, // re-reads every file; syncs already pick up sharing changes
     lockMinutes: 180,
     appliesTo: ({ prisma, orgId }) => connected(prisma, orgId, "sharepoint"),
     async run({ prisma, orgId }) {
