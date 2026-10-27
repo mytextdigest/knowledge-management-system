@@ -14,9 +14,8 @@ import { searchAccessWhere, getUserPrincipals } from "@/lib/access/documentAcces
 import { isDecisionQuestion, getDecisionEvidence, formatDecisionContext, DECISION_INSTRUCTION } from "@/lib/decisionIntelligence";
 import { isLessonQuestion, getLessonEvidence, formatLessonContext, LESSON_INSTRUCTION } from "@/lib/lessonsIntelligence";
 import { sourcePreviewUrl } from "@/lib/documentSource";
-import { orgExactTermSearch } from "@/lib/vectorSearch";
 import { isDocumentListingQuestion } from "@/lib/keywordSearch";
-import { LISTING_INSTRUCTION, LISTING_MAX_DOCS_PER_TERM, formatKeywordMatches } from "@/lib/documentListing";
+import { LISTING_INSTRUCTION, buildListing, sourceLabel, ACCESS_NOTE, needsAccessNote } from "@/lib/documentListing";
 
 
 const SYSTEM_PROMPT = `
@@ -28,9 +27,9 @@ If the context answers only part of the question, answer that part and say
 plainly which parts you could not find. Only if nothing in the context
 answers the question, say:
 "I cannot answer that based on the organization's knowledge repository."
-Whenever you say that something could not be found, end your answer with
-this sentence on its own line:
-"I only search documents you have access to."
+Each document in the context is labelled with its kind and source, e.g.
+"(SharePoint page)", "(SharePoint file)" or "(uploaded file)"; use that
+when the user asks about pages, files or where something comes from.
 
 Response format:
 - For direct factual questions, answer concisely in a short paragraph or a couple of sentences. Do not force structure onto a simple answer.
@@ -381,19 +380,21 @@ export async function POST(req, { params }) {
     }
   }
 
-  // "Which documents mention …": exact matches per word, and their documents
-  // as citations (at most 12 cited documents in all).
+  // "Which documents mention …" / "Which SharePoint pages do we have?":
+  // lookups over accessible documents, and those documents as citations
+  // (at most 12 cited documents in all).
   let keywordMatches = "";
+  let listingMissed = false;
   if (isDocumentListingQuestion(question) && workflowRequest.action === "none") {
-    const listing = await orgExactTermSearch(question, {
+    const listing = await buildListing(question, {
       userId: user.id,
       orgId,
       isSuperAdmin: isSuperAdmin(role),
       scope,
       departmentId,
-      maxDocsPerTerm: LISTING_MAX_DOCS_PER_TERM,
     });
-    keywordMatches = formatKeywordMatches(listing);
+    keywordMatches = listing.block;
+    listingMissed = listing.missed;
     const cited = new Set(chunks.map((c) => c.document_id));
     for (const row of listing.rows) {
       if (cited.size >= 12) break;
@@ -421,6 +422,7 @@ export async function POST(req, { params }) {
       externalUrl: c.externalUrl || null,
       sourceProvider: c.sourceProvider || null,
       contentType: c.contentType || "file",
+      label: sourceLabel(c),
       department: c.department_name,
       project: c.project_name,
       texts: [],
@@ -454,6 +456,7 @@ export async function POST(req, { params }) {
         : null,
       externalUrl: g.externalUrl,
       sourceProvider: g.sourceProvider,
+      label: g.label,
     }))
   );
 
@@ -488,7 +491,7 @@ export async function POST(req, { params }) {
   const sources = [...decisionSources, ...lessonSources, ...documentSources];
 
   const contextBlocks = Object.values(grouped).map(
-    (g) => `Document: ${g.filename}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
+    (g) => `Document: ${g.filename}${g.label ? ` (${g.label})` : ""}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
   );
   const context = [
     ...(keywordMatches ? [keywordMatches] : []),
@@ -543,6 +546,13 @@ export async function POST(req, { params }) {
             answer += delta;
             send("token", { text: delta });
           }
+        }
+        // Added by KMS, not the model: the same sentence whenever something
+        // wasn't found, never based on documents the user can't access.
+        if (needsAccessNote(answer, { listingMissed })) {
+          const note = `\n\n${ACCESS_NOTE}`;
+          answer += note;
+          send("token", { text: note });
         }
 
         const assistantMessage = await prisma.orgMessage.create({

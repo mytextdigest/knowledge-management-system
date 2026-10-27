@@ -774,6 +774,7 @@ export default function OrgChatPage() {
             )}
 
             <div className="space-y-1 text-sm text-gray-600 dark:text-gray-300">
+              {selectedSource.label && <p>Source: {selectedSource.label}</p>}
               {selectedSource.department && <p>Department: {selectedSource.department}</p>}
               {selectedSource.project && <p>Project: {selectedSource.project}</p>}
             </div>

@@ -47,7 +47,6 @@ test("keyword matches block: documents per word, none found, too many", () => {
     rows: [{ exactTerm: "kestrel", filename: "only-emp1.docx" }, { exactTerm: "kestrel", filename: "only-emp1.docx" }],
   });
   assert.equal(block, [
-    "Keyword matches (exact words, in documents this user can access):",
     '- "kestrel": only-emp1.docx',
     '- "osprey": no documents',
     '- "kms": found in 40 documents (too many to list)',
@@ -94,4 +93,88 @@ test("exact-word search: whole words only, counts and matches only accessible do
   } finally {
     await prisma.$disconnect();
   }
+});
+
+test("listing questions: source words filter, quoted text is a phrase, the rest are words", async () => {
+  const { parseListingQuestion, isDocumentListingQuestion: isListing } = await import("../../src/lib/keywordSearch.js");
+  assert.deepEqual(parseListingQuestion('Are there any SharePoint pages with "KMS Test Page"?'), { sourceProvider: "sharepoint", contentType: "page", phrases: ["KMS Test Page"], terms: [] });
+  assert.deepEqual(parseListingQuestion("Which SharePoint pages mention HERON?"), { sourceProvider: "sharepoint", contentType: "page", phrases: [], terms: ["heron"] });
+  assert.deepEqual(parseListingQuestion("List SharePoint files about the release"), { sourceProvider: "sharepoint", contentType: "file", phrases: [], terms: ["release"] });
+  assert.deepEqual(parseListingQuestion("Which pages don't mention what's new in HERON?").phrases, [], "apostrophes aren't quotes");
+  assert.equal(isListing('Are there any SharePoint pages with "KMS Test Page"?'), true);
+  assert.equal(isListing("Which SharePoint pages do we have?"), true);
+});
+
+test("source labels", async () => {
+  const { sourceLabel } = await import("../../src/lib/documentListing.js");
+  assert.equal(sourceLabel({ sourceProvider: "sharepoint", contentType: "page" }), "SharePoint page");
+  assert.equal(sourceLabel({ sourceProvider: "sharepoint", contentType: "file" }), "SharePoint file");
+  assert.equal(sourceLabel({ sourceProvider: "manual", contentType: "file" }), "uploaded file");
+  assert.equal(sourceLabel({}), null);
+});
+
+test("listing: SharePoint pages only, phrase in title, nothing the user can't access", { skip: !RUN_DB_TESTS }, async () => {
+  const { buildListing } = await import("../../src/lib/documentListing.js");
+  const prisma = new PrismaClient();
+  const tag = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+  const TENANT = "11111111-1111-1111-1111-111111111111";
+  try {
+    await prisma.$transaction(async (db) => {
+      const org = await db.organization.create({ data: { name: `list-${tag}` } });
+      await db.orgIntegration.create({ data: { orgId: org.id, provider: "sharepoint", scopeConfig: { tenantId: TENANT, sites: [] }, accessToken: "x", tokenExpiry: new Date() } });
+      const admin = await db.user.create({ data: { email: `admin-${tag}@contoso.test` } });
+      const viewer = await db.user.create({ data: { email: `viewer-${tag}@contoso.test` } });
+      await db.organizationMember.create({ data: { orgId: org.id, userId: viewer.id, role: "employee" } });
+      await db.userIdentity.create({ data: { userId: viewer.id, provider: "entra", source: "email_match", tenantId: TENANT, externalId: "00000000-0000-0000-0000-0000000000e1" } });
+      const mine = [["user", "00000000-0000-0000-0000-0000000000e1"]];
+      const mk = async (filename, contentType, sourceProvider, text, acl) => {
+        const d = await db.document.create({
+          data: {
+            filename, contentType, sourceProvider, userId: admin.id, orgId: org.id, scope: "repository", lifecycle: "published",
+            ...(acl ? { aclSyncedAt: new Date(), acl: { create: acl.map(([principalType, principalId]) => ({ principalType, principalId })) } } : {}),
+          },
+        });
+        await db.chunk.create({ data: { documentId: d.id, chunkIndex: 0, text } });
+      };
+      await mk(`Zed Test Page ${tag}`, "page", "sharepoint", "A page about testing.", mine);
+      await mk(`Hidden Test Page ${tag}`, "page", "sharepoint", "Secret.", [["group", "eeeeeeee-0000-0000-0000-000000000099"]]);
+      await mk(`notes-${tag}.docx`, "file", "sharepoint", `Mentions Zed Test Page ${tag} in passing.`, mine);
+      await mk(`upload-${tag}.pdf`, "file", "manual", "Uploaded.", null);
+
+      const ctx = { userId: viewer.id, orgId: org.id, db };
+      const all = await buildListing("Which SharePoint pages do we have?", ctx);
+      assert.deepEqual(all.rows.map((r) => r.filename), [`Zed Test Page ${tag}`], "pages only; the hidden page isn't listed");
+      assert.match(all.block, /all SharePoint pages \(1\)/);
+
+      const phrase = await buildListing(`Are there any SharePoint pages with "Zed Test Page ${tag}"?`, ctx);
+      assert.deepEqual(phrase.rows.map((r) => r.filename), [`Zed Test Page ${tag}`], "the file that mentions it isn't a page");
+
+      const anyKind = await buildListing(`Which documents mention "Zed Test Page ${tag}"?`, ctx);
+      assert.deepEqual(anyKind.rows.map((r) => r.filename).sort(), [`Zed Test Page ${tag}`, `notes-${tag}.docx`].sort());
+      assert.match(anyKind.block, /\(SharePoint page\)/);
+      assert.equal(anyKind.missed, false);
+      assert.equal((await buildListing(`Which documents mention "Nothing here ${tag}"?`, ctx)).missed, true);
+      throw ROLLBACK;
+    }, { timeout: 60_000, maxWait: 20_000 });
+  } catch (err) {
+    if (err !== ROLLBACK) throw err;
+  } finally {
+    await prisma.$disconnect();
+  }
+});
+
+test("access note: added when something wasn't found, not after a full answer", async () => {
+  const { needsAccessNote, ACCESS_NOTE } = await import("../../src/lib/documentListing.js");
+  for (const answer of [
+    "I cannot answer that based on the organization's knowledge repository.",
+    "No documents were found that mention **osprey**.",
+    "### OSPREY Release\nThe context does not provide any information regarding the OSPREY release date.",
+    "I couldn't find anything about PLOVER.",
+  ]) assert.equal(needsAccessNote(answer), true, answer);
+  for (const answer of [
+    "The KMS Test Page describes KMS testing with MTD as a document intelligence platform.",
+    "Project KESTREL is a personal onboarding plan for Employee One.",
+  ]) assert.equal(needsAccessNote(answer), false, answer);
+  assert.equal(needsAccessNote("Here is the list.", { listingMissed: true }), true, "a listing word with no matches");
+  assert.equal(needsAccessNote(`Nothing found.\n\n${ACCESS_NOTE}`), false, "never twice");
 });

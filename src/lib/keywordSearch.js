@@ -79,13 +79,14 @@ const QUERY_STOPWORDS = new Set(`
  * capitals (KMS), not a stop word, at most `max`, lowercased, in question
  * order. "KESTREL and KMS: which documents mention these?" → ["kestrel", "kms"].
  */
-export function exactQueryTerms(question, { max = 8 } = {}) {
+export function exactQueryTerms(question, { max = 8, exclude = [] } = {}) {
   const terms = [];
+  const skip = new Set(exclude.map((w) => w.toLowerCase()));
   for (const raw of String(question || "").split(/[^A-Za-z0-9-]+/)) {
     const original = raw.replace(/^-+|-+$/g, "");
     const term = original.toLowerCase();
     const acronym = original.length === 3 && /^[A-Z0-9]+$/.test(original) && /[A-Z]/.test(original);
-    if ((term.length < 4 && !acronym) || QUERY_STOPWORDS.has(term) || /^\d+$/.test(term) || terms.includes(term)) continue;
+    if ((term.length < 4 && !acronym) || QUERY_STOPWORDS.has(term) || skip.has(term) || /^\d+$/.test(term) || terms.includes(term)) continue;
     terms.push(term);
     if (terms.length >= max) break;
   }
@@ -97,8 +98,38 @@ export function isDocumentListingQuestion(question) {
   const q = String(question || "");
   const docs = String.raw`\b(documents?|files?|pages?|docs?)\b`;
   return [
+    new RegExp(String.raw`\b(are there|is there|do we have|do you have|have we got)\b[^?.]*${docs}`, "i"),
     new RegExp(String.raw`\b(which|what)\b[^?.]*${docs}[^?.]*\b(mention|mentions|contain|contains|have|has|include|includes|refer|refers|talk|talks|with)\b`, "i"),
     new RegExp(String.raw`\b(list|find|show|search|give)\b[^?.]*${docs}`, "i"),
     new RegExp(String.raw`${docs}[^?.]*\b(with|containing|mentioning|matching)\b[^?.]*\b(keywords?|words?|terms?)\b`, "i"),
   ].some((pattern) => pattern.test(q));
+}
+
+// Source words in a listing question that filter rather than search:
+// "Which SharePoint pages mention HERON?" → SharePoint pages containing "heron".
+const SOURCE_WORDS = { sharepoint: "sharepoint", servicenow: "servicenow" };
+
+/**
+ * A listing question split into what to filter on and what to look for:
+ * { sourceProvider, contentType ("page" | "file" | null), phrases, terms }.
+ * Quoted text is a phrase ("KMS Test Page"); the remaining distinctive
+ * words are terms; source words (SharePoint) are filters, not terms.
+ */
+export function parseListingQuestion(question) {
+  const text = String(question || "");
+  // Double quotes only: apostrophes ("what's", "don't") aren't quotes.
+  const phrases = [...text.matchAll(/["“”]([^"“”]{3,80})["“”]/g)].map((m) => m[1].trim()).filter(Boolean);
+  const unquoted = text.replace(/["“”][^"“”]{3,80}["“”]/g, " ");
+  const lower = unquoted.toLowerCase();
+
+  let sourceProvider = null;
+  for (const [word, provider] of Object.entries(SOURCE_WORDS)) {
+    if (new RegExp(String.raw`\b${word}\b`).test(lower)) sourceProvider = provider;
+  }
+  const pages = /\bpages?\b/.test(lower);
+  const files = /\b(files?|documents?|docs?)\b/.test(lower);
+  const contentType = pages && !files ? "page" : files && !pages && sourceProvider ? "file" : null;
+
+  const terms = exactQueryTerms(unquoted, { exclude: Object.keys(SOURCE_WORDS) });
+  return { sourceProvider, contentType, phrases, terms };
 }

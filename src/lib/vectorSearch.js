@@ -220,11 +220,14 @@ export async function orgFallbackTextSearch(
  */
 export async function orgExactTermSearch(
   question,
-  { userId, orgId, isSuperAdmin = false, scope = "organization", departmentId = null, maxDocsPerTerm = 3, db = prisma }
+  {
+    userId, orgId, isSuperAdmin = false, scope = "organization", departmentId = null, maxDocsPerTerm = 3, db = prisma,
+    terms: givenTerms = null, sourceProvider = null, contentType = null,
+  }
 ) {
-  const words = exactQueryTerms(question);
+  const words = givenTerms ?? exactQueryTerms(question);
   if (!words.length) return { terms: [], rows: [] };
-  const scopeFilter = scopeSql({ scope, departmentId, userId });
+  const scopeFilter = Prisma.sql`${scopeSql({ scope, departmentId, userId })} ${sourceFilterSql({ sourceProvider, contentType })}`;
   const matches = Prisma.sql`(c.text ~* ('\\m' || q.term || '\\M') OR d.filename ~* ('\\m' || q.term || '\\M'))`;
 
   const counts = await db.$queryRaw`
@@ -265,4 +268,55 @@ export async function orgExactTermSearch(
   const rank = (term) => countByTerm.get(term) * 100 + words.indexOf(term);
   rows.sort((a, b) => rank(a.exactTerm) - rank(b.exactTerm));
   return { terms, rows: rows.map((r) => ({ ...r, distance: 1, keyword_score: 1 })) };
+}
+
+// "SharePoint pages", "SharePoint files": optional source/kind filters.
+function sourceFilterSql({ sourceProvider = null, contentType = null }) {
+  return Prisma.sql`${sourceProvider ? Prisma.sql`AND d.source_provider = ${sourceProvider}` : Prisma.empty}
+    ${contentType ? Prisma.sql`AND d.content_type = ${contentType}` : Prisma.empty}`;
+}
+
+/**
+ * Documents the user can access, filtered by source/kind and optionally by a
+ * phrase (in the title or text, case-insensitive), by title; at most
+ * `limit`. Each comes with its best chunk (the one with the phrase, else the
+ * first), shaped like the other search rows, so it can be cited.
+ * Returns { total, rows }.
+ */
+export async function orgListDocuments({
+  userId, orgId, isSuperAdmin = false, scope = "organization", departmentId = null,
+  sourceProvider = null, contentType = null, phrase = null, limit = 25, db = prisma,
+}) {
+  const like = phrase ? `%${phrase.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%` : null;
+  const phraseFilter = like
+    ? Prisma.sql`AND (d.filename ILIKE ${like} OR EXISTS (SELECT 1 FROM "Chunk" pc WHERE pc.document_id = d.id AND pc.text ILIKE ${like}))`
+    : Prisma.empty;
+  const rows = await db.$queryRaw`
+    SELECT COUNT(*) OVER ()::int AS total,
+           fc.id, fc.text, fc.summary, fc.chunk_index, d.id AS document_id, fc.metadata,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           dept.name AS department_name,
+           proj.name AS project_name
+    FROM "Document" d
+    LEFT JOIN LATERAL (
+      SELECT c.id, c.text, c.summary, c.chunk_index, c.metadata
+      FROM "Chunk" c
+      WHERE c.document_id = d.id
+      ORDER BY ${like ? Prisma.sql`(c.text ILIKE ${like}) DESC,` : Prisma.empty} c.chunk_index
+      LIMIT 1
+    ) fc ON TRUE
+    LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    WHERE d."orgId" = ${orgId}
+      ${scopeSql({ scope, departmentId, userId })}
+      ${sourceFilterSql({ sourceProvider, contentType })}
+      ${phraseFilter}
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    ORDER BY d.filename
+    LIMIT ${Prisma.raw(String(Math.max(1, Math.min(100, Number(limit) || 25))))}
+  `;
+  return {
+    total: rows[0]?.total ?? 0,
+    rows: rows.map(({ total, ...r }) => ({ ...r, distance: 1, keyword_score: 1 })),
+  };
 }
