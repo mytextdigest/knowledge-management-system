@@ -1,5 +1,22 @@
 import { Prisma } from "@prisma/client";
-import { documentAclSql } from "./access/documentAcl.js";
+import { documentAclForUserColumnSql, documentAclSql } from "./access/documentAcl.js";
+import { getCachedGroups, groupsAreStale } from "./identity/groupCache.js";
+import { refreshUserGroups, sharePointTenants } from "./identity/entraIdentity.js";
+
+// A-10 (expert side): read suggested experts' Entra groups into the group
+// cache, so the SharePoint check can be applied to them too. Never throws.
+async function loadExpertGroups(prisma, { orgId, userIds }) {
+  const tenants = await sharePointTenants(prisma, { orgIds: [orgId] });
+  if (!tenants.length) return;
+  for (const userId of userIds) {
+    if (!groupsAreStale(userId)) continue;
+    try {
+      await refreshUserGroups(prisma, userId, { tenantIds: tenants.map((t) => t.tenantId) });
+    } catch (err) {
+      console.error("Couldn't read an expert's Microsoft groups:", err.message);
+    }
+  }
+}
 
 const SEMANTIC_TOPIC_THRESHOLD = 0.3;
 const SEMANTIC_TOPIC_CANDIDATES = 25;
@@ -155,7 +172,7 @@ export async function isExpertTopicAccessibleWithPrisma(prisma, { orgId, userId,
   return rows.length > 0;
 }
 
-export async function getAccessibleExpertsWithPrisma(prisma, { orgId, userId, query = "", topicId = null, isSuperAdmin = false, limit = 20, queryEmbedding = null }) {
+export async function getAccessibleExpertsWithPrisma(prisma, { orgId, userId, query = "", topicId = null, isSuperAdmin = false, limit = 20, queryEmbedding = null, loadGroups = loadExpertGroups }) {
   const access = expertTopicAccessSql({ userId, isSuperAdmin });
   const trimmed = String(query || "").trim();
   const safeLimit = Math.max(1, Math.min(50, Number(limit) || 20));
@@ -197,7 +214,7 @@ export async function getAccessibleExpertsWithPrisma(prisma, { orgId, userId, qu
   // disambiguates it. For a project-scope topic this is exact (one project
   // per topic); for a repository-scope topic spanning multiple departments,
   // MAX() picks one deterministically rather than trying to list them all.
-  return prisma.$queryRaw`
+  const run = (expertAcl) => prisma.$queryRaw`
     SELECT u.id, u.name, u.email, t.id AS "topicId", t.name AS topic, t.scope AS "topicScope",
            MAX(te.score)::float AS score, te.source, te."lastSignalAt", te.signals,
            COUNT(DISTINCT td."documentId")::int AS "documentCount",
@@ -214,8 +231,25 @@ export async function getAccessibleExpertsWithPrisma(prisma, { orgId, userId, qu
       AND (${topicId}::text IS NULL OR t.id = ${topicId})
       AND ${searchFilter}
       AND ${access}
+      ${expertAcl}
     GROUP BY u.id, u.name, u.email, t.id, t.name, t.scope, te.source, te."lastSignalAt", te.signals
     ORDER BY score DESC, "documentCount" DESC
     LIMIT ${Prisma.raw(String(safeLimit))}
   `;
+
+  // A-10: a suggested expert must also be allowed to see the SharePoint
+  // documents they're suggested for (not only share their department).
+  // Their groups aren't known until read from Graph, so: find candidates,
+  // load their groups, then run again with the check applied to the expert.
+  const hasSourcePermissions = await prisma.document.findFirst({
+    where: { orgId, aclSyncedAt: { not: null } },
+    select: { id: true },
+  });
+  if (!hasSourcePermissions) return run(Prisma.empty);
+  const candidates = await run(Prisma.empty);
+  const expertIds = [...new Set(candidates.map((row) => row.id))];
+  if (!expertIds.length) return candidates;
+  await loadGroups(prisma, { orgId, userIds: expertIds });
+  const groupsByUser = Object.fromEntries(expertIds.map((id) => [id, getCachedGroups(id)]));
+  return run(Prisma.sql`AND ${documentAclForUserColumnSql({ userColumn: Prisma.sql`te."userId"`, alias: "d", groupsByUser })}`);
 }

@@ -43,6 +43,44 @@ export function documentAclSql({ userId, isSuperAdmin = false, alias = "d" }) {
 }
 
 /**
+ * SQL: `alias` (a "Document" row) passes the ACL for the user in column
+ * `userColumn` (e.g. a suggested expert), with that user's groups passed as
+ * `groupsByUser` ({ [userId]: { groupIds, ownedGroupIds } }). super_admins
+ * and the uploader pass, as in documentAclSql.
+ */
+export function documentAclForUserColumnSql({ userColumn, alias = "d", groupsByUser = {} }) {
+  const t = Prisma.raw(`"${alias}"`);
+  const map = JSON.stringify(groupsByUser);
+  return Prisma.sql`(
+    ${t}.acl_synced_at IS NULL
+    OR ${t}."userId" = ${userColumn}
+    OR EXISTS (
+      SELECT 1 FROM "OrganizationMember" acc_om
+      WHERE acc_om."orgId" = ${t}."orgId" AND acc_om."userId" = ${userColumn} AND acc_om.role = 'super_admin'
+    )
+    OR EXISTS (
+      SELECT 1 FROM "DocumentAcl" acc_acl
+      WHERE acc_acl.document_id = ${t}.id
+        AND (
+          (acc_acl.principal_type = 'group' AND acc_acl.principal_id IN (
+            SELECT jsonb_array_elements_text(${map}::jsonb -> (${userColumn})::text -> 'groupIds')))
+          OR (acc_acl.principal_type = 'group_owners' AND acc_acl.principal_id IN (
+            SELECT jsonb_array_elements_text(${map}::jsonb -> (${userColumn})::text -> 'ownedGroupIds')))
+          OR EXISTS (
+            SELECT 1 FROM "UserIdentity" acc_ui
+            JOIN "OrgIntegration" acc_oi
+              ON acc_oi."orgId" = ${t}."orgId" AND acc_oi.provider = 'sharepoint'
+             AND acc_oi.scope_config->>'tenantId' = acc_ui.tenant_id
+            WHERE acc_ui."userId" = ${userColumn}
+              AND ((acc_acl.principal_type = 'user' AND acc_acl.principal_id = acc_ui.external_id)
+                OR (acc_acl.principal_type = 'tenant' AND acc_acl.principal_id = acc_ui.tenant_id))
+          )
+        )
+    )
+  )`;
+}
+
+/**
  * The user's principals in an org's SharePoint tenant, for Prisma `where`
  * filters: { userIds, tenantIds, groupIds, ownedGroupIds }.
  */

@@ -18,6 +18,7 @@ import {
   getUserPrincipals,
 } from "../../src/lib/access/documentAccess.js";
 import { clearCachedGroups, setCachedGroups } from "../../src/lib/identity/groupCache.js";
+import { getAccessibleExpertsWithPrisma } from "../../src/lib/expertDiscoveryQuery.mjs";
 
 const RUN_DB_TESTS = process.env.EKP_DB_TESTS === "1";
 const ROLLBACK = Symbol("rollback");
@@ -135,6 +136,22 @@ test("SharePoint permissions narrow every access path; other documents are unaff
       const own = await doc("own-upload", [], { userId: emp1.id });
       const ownRows = await db.$queryRaw`SELECT d.id FROM "Document" d WHERE d.id = ${own.id} AND ${knowledgeAccessSql({ userId: emp1.id })}`;
       assert.equal(ownRows.length, 1);
+      // Suggested experts: the expert must be allowed to see the document too,
+      // not only share its department (emp1 asks about onlyEmp1's topic).
+      const topic = await db.topic.create({ data: { orgId: org.id, scope: "repository", name: `Kestrel ${tag}` } });
+      await db.topicDocument.create({ data: { topicId: topic.id, documentId: docs.onlyEmp1.id } });
+      for (const expert of [emp1, engMember, m365Owner, noIdentity]) {
+        await db.topicExpertise.create({ data: { topicId: topic.id, userId: expert.id, score: 0.5 } });
+      }
+      const experts = await getAccessibleExpertsWithPrisma(db, {
+        orgId: org.id, userId: emp1.id, topicId: topic.id, loadGroups: async () => {}, limit: 20,
+      });
+      assert.deepEqual(
+        experts.map((e) => e.id).sort(),
+        [emp1.id, m365Owner.id].sort(),
+        "only experts who can open the document (emp1 directly, the M365 group owner) are suggested"
+      );
+
       // A cold group cache narrows access: engMember keeps only what doesn't need a group.
       clearCachedGroups(engMember.id);
       const cold = await db.$queryRaw`SELECT d.id FROM "Document" d WHERE d."orgId" = ${org.id} AND ${searchAccessSql({ userId: engMember.id, orgId: org.id })}`;
