@@ -74,7 +74,14 @@ export async function tableGet(conn, table, params, { fetchImpl = fetch } = {}) 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const detail = body?.error?.message || res.statusText;
-    const hint = res.status === 401 ? " (check the user name and password)" : res.status === 403 ? " (the integration user lacks read access)" : "";
+    const hint =
+      res.status === 401
+        ? conn.auth?.type === "basic"
+          ? " (check the user name and password; some instances allow only OAuth for API access)"
+          : " (check the OAuth client)"
+        : res.status === 403
+        ? " (the integration user lacks read access)"
+        : "";
     throw new ServiceNowError(`ServiceNow ${table} request failed (${res.status}): ${detail}${hint}`, res.status);
   }
   const body = await res.json();
