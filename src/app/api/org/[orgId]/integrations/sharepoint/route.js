@@ -31,6 +31,10 @@ export async function GET(req, { params }) {
     select: { id: true, name: true },
   });
   const deptNameById = Object.fromEntries(departments.map((d) => [d.id, d.name]));
+  // A-24: files recorded with their link only, because they're above the size limit.
+  const tooLargeCount = await prisma.document.count({
+    where: { orgId, sourceProvider: "sharepoint", status: "skipped_too_large" },
+  });
 
   return NextResponse.json({
     // "connected" reflects the actual current status, not just "a row
@@ -47,10 +51,11 @@ export async function GET(req, { params }) {
       departmentName: deptNameById[s.departmentId] || null,
     })),
     settings: sharePointSettings(integration.scopeConfig),
+    tooLargeCount,
   });
 }
 
-// EKP A-14/A-15: connector settings (keep a copy of files, include site pages).
+// EKP A-14/A-15/A-24: connector settings (keep a copy of files, include site pages, size limit).
 export async function PATCH(req, { params }) {
   const session = await getServerSession();
   if (!session?.user?.email)
@@ -72,9 +77,15 @@ export async function PATCH(req, { params }) {
   if (error) return NextResponse.json({ error }, { status: 400 });
 
   const before = sharePointSettings(integration.scopeConfig);
+  let scopeConfig = { ...integration.scopeConfig, ...data };
+  // A-24: a higher size limit means files skipped before may now fit. The
+  // change feed only lists changed files, so the next sync lists them all.
+  if (data.maxFileSizeMb > before.maxFileSizeMb) {
+    scopeConfig = { ...scopeConfig, sites: (scopeConfig.sites || []).map((s) => ({ ...s, lastSyncCursor: null })) };
+  }
   const updated = await prisma.orgIntegration.update({
     where: { id: integration.id },
-    data: { scopeConfig: { ...integration.scopeConfig, ...data } },
+    data: { scopeConfig },
     select: { scopeConfig: true },
   });
   const settings = sharePointSettings(updated.scopeConfig);

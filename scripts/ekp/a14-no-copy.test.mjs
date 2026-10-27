@@ -12,9 +12,9 @@ import { canStreamFromSource, sourcePreviewUrl } from "../../src/lib/documentSou
 import { resolveDriveId, siteForUrl } from "../../src/lib/connectors/sharepointLocate.js";
 
 test("settings: absent means today's behaviour (keep copies, include pages)", () => {
-  assert.deepEqual(sharePointSettings({ sites: [] }), { storeOriginals: true, syncPages: true });
-  assert.deepEqual(sharePointSettings(null), { storeOriginals: true, syncPages: true });
-  assert.deepEqual(sharePointSettings({ storeOriginals: false, syncPages: false }), { storeOriginals: false, syncPages: false });
+  assert.deepEqual(sharePointSettings({ sites: [] }), { storeOriginals: true, syncPages: true, maxFileSizeMb: 200 });
+  assert.deepEqual(sharePointSettings(null), { storeOriginals: true, syncPages: true, maxFileSizeMb: 200 });
+  assert.deepEqual(sharePointSettings({ storeOriginals: false, syncPages: false }), { storeOriginals: false, syncPages: false, maxFileSizeMb: 200 });
 });
 
 test("settings patch: booleans only, only known keys, something to change", () => {

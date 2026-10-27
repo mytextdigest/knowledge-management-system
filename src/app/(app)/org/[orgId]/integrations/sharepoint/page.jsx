@@ -27,6 +27,7 @@ export default function SharePointIntegrationPage() {
   const [syncing, setSyncing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [savingSetting, setSavingSetting] = useState(null);
+  const [sizeLimit, setSizeLimit] = useState('');
 
   useEffect(() => {
     fetch(`/api/org/${orgId}/settings`)
@@ -55,6 +56,7 @@ export default function SharePointIntegrationPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to load connection status.');
       setIntegration(data);
+      setSizeLimit(String(data.settings?.maxFileSizeMb ?? ''));
     } catch (err) {
       setError(err.message || 'Failed to load connection status.');
     } finally {
@@ -160,6 +162,7 @@ export default function SharePointIntegrationPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to save the setting.');
       setIntegration((prev) => ({ ...prev, settings: data.settings }));
+      setSizeLimit(String(data.settings.maxFileSizeMb));
     } catch (err) {
       setError(err.message || 'Failed to save the setting.');
     } finally {
@@ -347,6 +350,34 @@ export default function SharePointIntegrationPage() {
                     </span>
                   </label>
                 ))}
+                {/* A-24 */}
+                <div className="flex items-start justify-between gap-4 px-4 py-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">File size limit</span>
+                    <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      Larger files (such as long videos) are listed with their name, permissions and a link to SharePoint, but not downloaded or searchable by content.
+                      {integration.tooLargeCount > 0 &&
+                        ` ${integration.tooLargeCount} file${integration.tooLargeCount === 1 ? ' is' : 's are'} above the limit now.`}
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-2 flex-shrink-0">
+                    {savingSetting === 'maxFileSizeMb' && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+                    <input
+                      type="number"
+                      min={1}
+                      max={10240}
+                      className="w-24 p-1.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                      value={sizeLimit}
+                      disabled={savingSetting !== null}
+                      onChange={(e) => setSizeLimit(e.target.value)}
+                      onBlur={() => {
+                        const mb = Number(sizeLimit);
+                        if (mb !== integration.settings.maxFileSizeMb) updateSetting('maxFileSizeMb', mb);
+                      }}
+                    />
+                    <span className="text-sm text-gray-500">MB</span>
+                  </span>
+                </div>
               </div>
             )}
             <div className="flex flex-wrap gap-2">

@@ -362,7 +362,9 @@ export default function RepositoryDocumentCard({
         </div>
       ) : null}
 
-      {document?.status ? <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Status: <span className="font-medium">{document.status}</span></p> : null}
+      {document?.status === "skipped_too_large" ? (
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Larger than the SharePoint file size limit: not searchable by content. Open it in SharePoint.</p>
+      ) : document?.status ? <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Status: <span className="font-medium">{document.status}</span></p> : null}
 
       <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
         {document?.contentType !== "page" && document?.contentType !== "article" ? (

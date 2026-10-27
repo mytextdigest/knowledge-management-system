@@ -27,11 +27,12 @@ import {
   pageToText,
 } from "../src/lib/connectors/sharepointPages.js";
 import { resolveDriveId } from "../src/lib/connectors/sharepointLocate.js";
-import { sharePointSettings } from "../src/lib/connectors/sharepointSettings.js";
+import { sharePointSettings, exceedsSizeLimit } from "../src/lib/connectors/sharepointSettings.js";
 import { getConnector } from "../src/lib/connectors/index.js";
 import { createAclResolver, aclWriteData } from "../src/lib/connectors/sharepointAcl.js";
 import { refreshSiteAcls, siteGroupFingerprint } from "../src/lib/connectors/sharepointAclRefresh.js";
 import { syncServiceNow } from "../src/lib/connectors/servicenowSync.js";
+import { tooLargeFileWrites, isTooLargeToIndex, TOO_LARGE } from "../src/lib/connectors/sharepointLargeFiles.js";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 
@@ -127,6 +128,11 @@ async function processChunkJob(job) {
 
   if (!existingDoc) {
     throw new Error(`Document ${docId} not found (aborting chunk job)`);
+  }
+  // A-24: a file above the size limit is never downloaded, even on a reprocess.
+  if (isTooLargeToIndex(existingDoc)) {
+    console.log(`⏭️ CHUNK JOB skipped: ${docId} is above the size limit`);
+    return;
   }
 
   await prisma.document.update({
@@ -756,9 +762,11 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
 
   const existing = await prisma.document.findFirst({
     where: { orgId, sourceProvider: "sharepoint", externalId: change.externalId },
-    select: { id: true, filePath: true, externalModifiedAt: true, aclSyncedAt: true, externalUrl: true },
+    select: { id: true, filePath: true, externalModifiedAt: true, aclSyncedAt: true, externalUrl: true, status: true },
   });
-  if (existing?.externalModifiedAt && existing.externalModifiedAt.getTime() === new Date(change.modifiedAt).getTime()) {
+  // A-24: a file skipped as too large is indexed once the limit is raised above its size.
+  const nowFits = existing?.status === TOO_LARGE && !exceedsSizeLimit(change.size, integration.scopeConfig);
+  if (!nowFits && existing?.externalModifiedAt && existing.externalModifiedAt.getTime() === new Date(change.modifiedAt).getTime()) {
     const refreshAcl = Boolean(aclResolver) && (change.permissionsChanged || !existing.aclSyncedAt);
     const fillSource = Boolean(change.webUrl) && change.webUrl !== existing.externalUrl;
     if (refreshAcl || fillSource) {
@@ -772,6 +780,12 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
 
   const aclRows = aclResolver ? await readAcl() : null;
 
+  // A-24: above the size limit (an 8 GB video), only the name, permissions
+  // and link are kept. The file is never downloaded or indexed.
+  if (exceedsSizeLimit(change.size, integration.scopeConfig)) {
+    return recordTooLargeFile({ change, existing, integration, site, connectedByUserId, aclRows, sourceFields });
+  }
+
   // A-14: no-copy mode. Nothing goes to S3 and no storage is charged; the
   // chunk job reads the file from SharePoint. A copy kept from before the
   // switch is removed.
@@ -780,17 +794,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
     if (!subscription || !["active", "trialing"].includes(subscription.status)) {
       throw new Error("No active subscription for org");
     }
-    let freedBytes = 0n;
-    if (existing?.filePath) {
-      try {
-        const head = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: existing.filePath }));
-        freedBytes = BigInt(head.ContentLength || 0);
-        await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: existing.filePath }));
-      } catch (err) {
-        console.error(`⚠️ Couldn't remove the stored copy of ${change.name}:`, err.message);
-        freedBytes = 0n;
-      }
-    }
+    const freedBytes = await removeStoredCopy(existing?.filePath, change.name);
     const data = {
       filePath: null,
       status: "queued",
@@ -877,6 +881,42 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
 
   await enqueueChunk({ doc, s3Key, filename: change.name, connectedByUserId, orgId });
   return { skipped: false };
+}
+
+// Deletes a document's stored copy from S3. Returns the bytes freed (0 if
+// there was none or it couldn't be removed).
+async function removeStoredCopy(filePath, name) {
+  if (!filePath) return 0n;
+  try {
+    const head = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: filePath }));
+    await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: filePath }));
+    return BigInt(head.ContentLength || 0);
+  } catch (err) {
+    console.error(`⚠️ Couldn't remove the stored copy of ${name}:`, err.message);
+    return 0n;
+  }
+}
+
+// EKP A-24: a file above the size limit: name, permissions and link only.
+async function recordTooLargeFile({ change, existing, integration, site, connectedByUserId, aclRows, sourceFields }) {
+  const subscription = await prisma.subscription.findUnique({ where: { orgId: integration.orgId } });
+  if (!subscription || !["active", "trialing"].includes(subscription.status)) {
+    throw new Error("No active subscription for org");
+  }
+  const freedBytes = await removeStoredCopy(existing?.filePath, change.name);
+  await prisma.$transaction(
+    tooLargeFileWrites(prisma, {
+      existing,
+      modifiedAt: change.modifiedAt,
+      sourceFields,
+      aclRows,
+      createFields: existing ? null : newDocumentFields(change, integration, site, connectedByUserId),
+      connectedByUserId,
+      freedBytes,
+    })
+  );
+  console.log(`📦 "${change.name}" is ${Math.round(Number(change.size) / 1048576)} MB, above the size limit: link and permissions only`);
+  return { skipped: false, tooLarge: true };
 }
 
 const MIN_PAGE_TEXT = 50; // same floor as processChunkJob
@@ -1035,6 +1075,7 @@ async function processSharePointSyncJob(job) {
   let filesFound = 0;
   let filesFailed = 0;
   let aclRefreshed = 0;
+  let filesTooLarge = 0; // A-24: counted in filesFound too (they still need review)
   let runError = null;
   let scopeConfig = integration.scopeConfig;
 
@@ -1085,6 +1126,7 @@ async function processSharePointSyncJob(job) {
         try {
           const result = await syncOneFile({ change, integration, site, connectedByUserId, accessToken, aclResolver, siteDriveId });
           if (!result.skipped) filesFound++;
+          if (result.tooLarge) filesTooLarge++;
           if (result.aclRefreshed) aclRefreshed++;
         } catch (err) {
           console.error(`❌ Failed to sync file "${change.name}" (${change.externalId}):`, err.message);
@@ -1164,7 +1206,7 @@ async function processSharePointSyncJob(job) {
     },
   });
 
-  console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed} aclRefreshed=${aclRefreshed}`);
+  console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed} aclRefreshed=${aclRefreshed} tooLarge=${filesTooLarge}`);
 
   await sendDigest({ orgId: integration.orgId, source: "SharePoint", filesFound });
 }

@@ -331,7 +331,7 @@ Build this first (week 1). B's soft-delete and supersede filters also depend on 
 - [ ] The F1 parity test still passes for all non-SharePoint documents.
 - [x] A scheduled sync can be set to a 5-minute interval, and a 4-minute interval is rejected (`A-22`).
 - [ ] A file with a managed-metadata value in the test tenant arrives with that value stored on the document (`A-23`).
-- [ ] A file above the size limit appears in KMS with its deep link and permissions. It isn't downloaded, and the sync run reports it as skipped (`A-24`).
+- [x] A file above the size limit appears in KMS with its deep link and permissions. It isn't downloaded, and the sync run reports it as skipped (`A-24`). *(The skipped count is in the worker log and on the SharePoint page; a per-run count needs a `SyncRun` column, deferred with the other migrations.)*
 
 ### A3: SharePoint pages, deep links, SharePoint as master copy (E12.1, E12.3–4, E32.2–5)
 
@@ -445,7 +445,7 @@ Task IDs from the other workstream (e.g. `A-2` in B, `B-2` in A) are cross-works
 | `A-21` | A2 · Identity by verified email (`email_match` via Graph app-only) + re-check in `acl-refresh`                                | `DONE`        | Johurul  | `A-4`                      | 2026-10-23 | 2026-10-27 |
 | `A-22` | A2 · F3: lower the minimum job interval from 15 to 5 minutes (NFR-6, NYPA Q&A #99)                                                | `DONE`        | Johurul  | `A-7`                      | 2026-10-28 | 2026-10-28 |
 | `A-23` | A2 · Store SharePoint managed-metadata values (raw label + term GUID) on synced documents (PRS E16.5; mapped to terms by C)       | `TODO`        | Johurul  | `A-9`, WS-A + WS-B merged (migration)|            |            |
-| `A-24` | A2 · Large-file guard: above the size limit, index metadata, ACL and link only; no download (8 GB videos, Q&A #188)               | `TODO`        | Johurul  | `A-14`                     |            |            |
+| `A-24` | A2 · Large-file guard: above the size limit, index metadata, ACL and link only; no download (8 GB videos, Q&A #188)               | `DONE`        | Johurul  | `A-14`                     | 2026-10-28 | 2026-10-28 |
 
 ## 7. Implementation Notes
 
@@ -610,3 +610,4 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: S
   - Tests: `scripts/ekp/a17-servicenow.test.mjs` (`EKP_DB_TESTS=1 npm run ekp:a17:test`).
 - `2026-10-28 · A-22 done:` `INTERVAL_CHOICES` now starts at **5 minutes** (`src/lib/jobs/registry.js`); a job definition may set `minIntervalMinutes`, and `sharepoint.acl-refresh` uses 60 (it re-reads every file; syncs already pick up sharing changes). Each job's allowed intervals come back from the jobs API (`intervalChoices`), so the Scheduled Jobs dropdown only lists valid ones; a row already below a newer minimum keeps showing its interval. A sync every 5 minutes can't pile up: a scheduled sync isn't queued while another run of the same integration is in flight. Tests: `ekp:f3:test`.
 - `2026-10-28 · Order for tasks that change the database (Johurul):` merge WS-A → merge WS-B → then build them. Deferred on that basis: **A-23** (needs a migration) and **A-16** SAML (SAML Jackson creates its own tables in the `jackson` schema of the shared database).
+- `2026-10-28 · A-24 done:` SharePoint setting **File size limit** (`maxFileSizeMb`, default 200, 1–10,240; `sharepointSettings.js`). A file above it is recorded with its name, permissions and link and `status: "skipped_too_large"` (`sharepointLargeFiles.js`): never downloaded, never chunked, also not on a reprocess (chunk job guard). A file that grows past the limit loses its stored copy and its stale chunks; raising the limit clears the sites' delta cursors so the next sync lists every file and indexes the ones that now fit. Preview and Download already stream from SharePoint without buffering, so they stay available. The SharePoint page shows how many files are above the limit; the repository card says "not searchable by content, open it in SharePoint". Tests: `EKP_DB_TESTS=1 npm run ekp:a24:test`.
