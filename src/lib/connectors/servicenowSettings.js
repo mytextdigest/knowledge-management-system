@@ -16,9 +16,14 @@ export function validateConnectBody(body) {
     const clientId = text(body.clientId);
     const clientSecret = typeof body.clientSecret === "string" ? body.clientSecret : "";
     if (!clientId || !clientSecret) return { error: "Enter the OAuth client ID and client secret" };
+    // Optional OAuth scope, e.g. one limited to the Table API instead of "useraccount".
+    const oauthScope = text(body.oauthScope);
+    if (oauthScope && !/^[A-Za-z0-9_.:-]+( [A-Za-z0-9_.:-]+)*$/.test(oauthScope)) {
+      return { error: "The OAuth scope may only contain letters, digits, _ . : - and single spaces" };
+    }
     return {
-      connection: { instanceUrl, auth: { type: "oauth", clientId, clientSecret } },
-      scope: { instanceUrl, authType: "oauth", clientId },
+      connection: { instanceUrl, auth: { type: "oauth", clientId, clientSecret, ...(oauthScope ? { scope: oauthScope } : {}) } },
+      scope: { instanceUrl, authType: "oauth", clientId, ...(oauthScope ? { oauthScope } : {}) },
       secret: { clientSecret },
     };
   }

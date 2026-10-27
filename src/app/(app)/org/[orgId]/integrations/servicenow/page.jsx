@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 
 const inputClass =
   'w-full p-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
-const EMPTY_FORM = { instanceUrl: '', authType: 'basic', username: '', password: '', clientId: '', clientSecret: '' };
+const EMPTY_FORM = { instanceUrl: '', authType: 'basic', username: '', password: '', clientId: '', clientSecret: '', oauthScope: '' };
 
 export default function ServiceNowIntegrationPage() {
   const { orgId } = useParams();
@@ -220,6 +220,7 @@ export default function ServiceNowIntegrationPage() {
         <div className="grid gap-3 sm:grid-cols-2">
           <input className={inputClass} placeholder="Client ID" value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })} required />
           <input className={inputClass} type="password" autoComplete="new-password" placeholder="Client secret" value={form.clientSecret} onChange={(e) => setForm({ ...form, clientSecret: e.target.value })} required />
+          <input className={cn(inputClass, 'sm:col-span-2')} autoComplete="off" placeholder="OAuth scope (optional, e.g. a scope limited to the Table API)" value={form.oauthScope} onChange={(e) => setForm({ ...form, oauthScope: e.target.value })} />
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
@@ -287,7 +288,7 @@ export default function ServiceNowIntegrationPage() {
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
             <div className="flex flex-wrap items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-sm text-green-800 dark:text-green-200">
               <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-              Connected to {integration.instanceUrl} as {integration.account}.
+              Connected to {integration.instanceUrl} as {integration.account}{integration.oauthScope ? ` (scope ${integration.oauthScope})` : ''}.
               {integration.lastSyncAt && (
                 <span className="text-green-700/70 dark:text-green-300/70">
                   &middot; Last synced {new Date(integration.lastSyncAt).toLocaleString()}

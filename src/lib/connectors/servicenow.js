@@ -9,7 +9,7 @@
 //
 // OrgIntegration (provider "servicenow"):
 //   accessToken  encryptJson of the secret: { password } or { clientSecret }
-//   scopeConfig  { instanceUrl, authType: "basic" | "oauth", username | clientId,
+//   scopeConfig  { instanceUrl, authType: "basic" | "oauth", username | clientId, oauthScope?,
 //                  connectedByUserId,
 //                  knowledgeBases: [{ kbId, title, departmentId, cursor }] }
 //                cursor = sys_updated_on of the newest article seen (UTC).
@@ -27,7 +27,7 @@ export function serviceNowConnection(integration) {
   const secret = decryptJson(integration.accessToken);
   const auth =
     config.authType === "oauth"
-      ? { type: "oauth", clientId: config.clientId, clientSecret: secret.clientSecret }
+      ? { type: "oauth", clientId: config.clientId, clientSecret: secret.clientSecret, ...(config.oauthScope ? { scope: config.oauthScope } : {}) }
       : { type: "basic", username: config.username, password: secret.password };
   return { instanceUrl: config.instanceUrl, auth };
 }

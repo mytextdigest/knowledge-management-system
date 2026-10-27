@@ -49,6 +49,7 @@ export async function GET(req, { params }) {
     instanceUrl: config.instanceUrl,
     authType: config.authType,
     account: config.authType === "oauth" ? config.clientId : config.username,
+    oauthScope: config.oauthScope || null,
     knowledgeBases: kbs.map((kb) => ({
       kbId: kb.kbId,
       title: kb.title,

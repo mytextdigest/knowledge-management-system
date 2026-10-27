@@ -4,7 +4,8 @@
 //
 // A connection is { instanceUrl, auth }, where auth is
 //   { type: "basic", username, password }  or
-//   { type: "oauth", clientId, clientSecret }  (client credentials grant)
+//   { type: "oauth", clientId, clientSecret, scope? }  (client credentials grant;
+//     scope is an OAuth scope limited to the Table API, if the instance uses one)
 //
 // Imported by the worker, so relative imports only.
 
@@ -46,13 +47,18 @@ async function authorization({ instanceUrl, auth }, fetchImpl) {
     return `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString("base64")}`;
   }
   if (auth?.type === "oauth") {
-    const key = `${instanceUrl}|${auth.clientId}`;
+    const key = `${instanceUrl}|${auth.clientId}|${auth.scope || ""}`;
     const cached = tokenCache.get(key);
     if (cached && cached.expiresAt - Date.now() > 60_000) return `Bearer ${cached.token}`;
     const res = await fetchImpl(`${instanceUrl}/oauth_token.do`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: new URLSearchParams({ grant_type: "client_credentials", client_id: auth.clientId, client_secret: auth.clientSecret }),
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: auth.clientId,
+        client_secret: auth.clientSecret,
+        ...(auth.scope ? { scope: auth.scope } : {}),
+      }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.access_token) {

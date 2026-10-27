@@ -253,3 +253,35 @@ test("sync: articles land in the mapped department as drafts; access follows the
     await prisma.$disconnect();
   }
 });
+
+test("OAuth: client-credentials token, optional scope sent only when set; bearer token on Table API calls", async () => {
+  const tokenBodies = [];
+  const tableAuth = [];
+  const fetchImpl = async (url, init) => {
+    const u = new URL(url);
+    if (u.pathname === "/oauth_token.do") {
+      tokenBodies.push(Object.fromEntries(new URLSearchParams(init.body.toString())));
+      return new Response(JSON.stringify({ access_token: `tok${tokenBodies.length}`, expires_in: 1800 }), { status: 200 });
+    }
+    tableAuth.push(init.headers.Authorization);
+    return new Response(JSON.stringify({ result: [] }), { status: 200 });
+  };
+  const oauth = (extra = {}) => ({ instanceUrl: "https://oauth1.service-now.com", auth: { type: "oauth", clientId: "cid", clientSecret: "cs", ...extra } });
+
+  await listKnowledgeBases(oauth(), { fetchImpl });
+  await listKnowledgeBases(oauth(), { fetchImpl }); // cached token
+  await listKnowledgeBases(oauth({ scope: "kms_kb_read" }), { fetchImpl }); // another scope: its own token
+  assert.deepEqual(tokenBodies, [
+    { grant_type: "client_credentials", client_id: "cid", client_secret: "cs" },
+    { grant_type: "client_credentials", client_id: "cid", client_secret: "cs", scope: "kms_kb_read" },
+  ]);
+  assert.deepEqual(tableAuth, ["Bearer tok1", "Bearer tok1", "Bearer tok2"]);
+});
+
+test("connect form: OAuth scope is optional, stored in scopeConfig, and checked", () => {
+  const withScope = validateConnectBody({ instanceUrl: INSTANCE, authType: "oauth", clientId: "cid", clientSecret: "cs", oauthScope: " kms_kb_read " });
+  assert.deepEqual(withScope.scope, { instanceUrl: INSTANCE, authType: "oauth", clientId: "cid", oauthScope: "kms_kb_read" });
+  assert.equal(withScope.connection.auth.scope, "kms_kb_read");
+  assert.equal(validateConnectBody({ instanceUrl: INSTANCE, authType: "oauth", clientId: "cid", clientSecret: "cs", oauthScope: "" }).scope.oauthScope, undefined);
+  assert.ok(validateConnectBody({ instanceUrl: INSTANCE, authType: "oauth", clientId: "cid", clientSecret: "cs", oauthScope: "a&b=c" }).error);
+});
