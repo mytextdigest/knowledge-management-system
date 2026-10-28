@@ -37,9 +37,18 @@ export async function getKnowledgeGraph({ orgId, userId, isSuperAdmin = false, s
   const allowed = new Set(allowedIds);
   if (!allowedIds.length) return { nodes: [], edges: [], truncated:false };
   const docs = await prisma.document.findMany({
-    where:{id:{in:allowedIds}},
+    where:{
+      id:{in:allowedIds},
+      ...(filters.departmentId ? { OR: [
+        { departmentId: filters.departmentId },
+        { project: { departmentId: filters.departmentId } },
+      ] } : {}),
+      ...(filters.projectId ? { projectId: filters.projectId } : {}),
+    },
     select:{id:true,filename:true,departmentId:true,projectId:true, project:{select:{id:true,name:true,departmentId:true}}, department:{select:{id:true,name:true}}, topicDocument:{select:{topic:{select:{id:true,name:true}}}}, entities:{select:{id:true,name:true,type:true}}, decisions:{select:{id:true,statement:true}}, lessons:{where:{status:"published"},select:{id:true,topic:true,whatHappened:true,projectId:true,decisionId:true}}, projectLinks:{select:{projectId:true,status:true,project:{select:{id:true,name:true,departmentId:true}}}}}
   });
+  const scopedDocIds = docs.map((d) => d.id);
+  const scopedAllowed = new Set(scopedDocIds);
   const nodes=new Map(), edges=[];
   for (const d of docs) {
     addNode(nodes,"document",d.id,d.filename,{departmentId:d.departmentId,projectId:d.projectId});
@@ -51,13 +60,13 @@ export async function getKnowledgeGraph({ orgId, userId, isSuperAdmin = false, s
     for(const dec of d.decisions){addNode(nodes,"decision",dec.id,dec.statement);addEdge(edges,"document",d.id,"decision",dec.id,"contains_decision","explicit");}
     for(const lesson of d.lessons){addNode(nodes,"lesson",lesson.id,lesson.topic||lesson.whatHappened?.slice(0,80)||"Lesson");addEdge(edges,"document",d.id,"lesson",lesson.id,"contains_lesson","explicit");if(lesson.decisionId)addEdge(edges,"lesson",lesson.id,"decision",lesson.decisionId,"learned_from_decision","explicit");if(lesson.projectId)addEdge(edges,"lesson",lesson.id,"project",lesson.projectId,"lesson_for_project","explicit");}
   }
-  const relationships=await prisma.documentRelationship.findMany({where:{orgId,fromDocumentId:{in:allowedIds},toDocumentId:{in:allowedIds}},take:GRAPH_EDGE_LIMIT});
+  const relationships=await prisma.documentRelationship.findMany({where:{orgId,fromDocumentId:{in:scopedDocIds},toDocumentId:{in:scopedDocIds}},take:GRAPH_EDGE_LIMIT});
   for(const r of relationships)addEdge(edges,"document",r.fromDocumentId,"document",r.toDocumentId,r.type,"inferred",r.evidence,r.weight);
-  const conflicts=await prisma.documentConflict.findMany({where:{documentAId:{in:allowedIds},documentBId:{in:allowedIds},status:{not:"dismissed"}},take:GRAPH_EDGE_LIMIT});
+  const conflicts=await prisma.documentConflict.findMany({where:{documentAId:{in:scopedDocIds},documentBId:{in:scopedDocIds},status:{not:"dismissed"}},take:GRAPH_EDGE_LIMIT});
   for(const c of conflicts)addEdge(edges,"document",c.documentAId,"document",c.documentBId,"conflict","conflict",{summary:c.summary,status:c.status});
-  const timeline=await prisma.timelineEvent.findMany({where:{OR:[{documentId:{in:allowedIds}},{project:{documents:{some:{id:{in:allowedIds}}}}}]},take:GRAPH_EDGE_LIMIT});
-  for(const t of timeline){if(t.documentId&&!allowed.has(t.documentId))continue;if(t.documentId&&t.projectId)addEdge(edges,"document",t.documentId,"project",t.projectId,"timeline_context","explicit",{timelineEventId:t.id,description:t.description,occurredAt:t.occurredAt});if(t.documentId&&t.departmentId)addEdge(edges,"document",t.documentId,"department",t.departmentId,"timeline_context","explicit",{timelineEventId:t.id});if(t.documentId&&t.decisionId)addEdge(edges,"document",t.documentId,"decision",t.decisionId,"timeline_context","explicit",{timelineEventId:t.id});}
-  const expertise=await prisma.topicExpertise.findMany({where:{topic:{topicDocuments:{some:{documentId:{in:allowedIds}}}},source:{not:"dismissed"}},include:{user:{select:{id:true,name:true,email:true}},topic:{select:{id:true,name:true}}},take:GRAPH_EDGE_LIMIT});
+  const timeline=await prisma.timelineEvent.findMany({where:{OR:[{documentId:{in:scopedDocIds}},{project:{documents:{some:{id:{in:scopedDocIds}}}}}]},take:GRAPH_EDGE_LIMIT});
+  for(const t of timeline){if(t.documentId&&!scopedAllowed.has(t.documentId))continue;if(t.documentId&&t.projectId)addEdge(edges,"document",t.documentId,"project",t.projectId,"timeline_context","explicit",{timelineEventId:t.id,description:t.description,occurredAt:t.occurredAt});if(t.documentId&&t.departmentId)addEdge(edges,"document",t.documentId,"department",t.departmentId,"timeline_context","explicit",{timelineEventId:t.id});if(t.documentId&&t.decisionId)addEdge(edges,"document",t.documentId,"decision",t.decisionId,"timeline_context","explicit",{timelineEventId:t.id});}
+  const expertise=await prisma.topicExpertise.findMany({where:{topic:{topicDocuments:{some:{documentId:{in:scopedDocIds}}}},source:{not:"dismissed"}},include:{user:{select:{id:true,name:true,email:true}},topic:{select:{id:true,name:true}}},take:GRAPH_EDGE_LIMIT});
   for(const x of expertise){addNode(nodes,"expert",x.user.id,x.user.name||x.user.email,{score:x.score});addNode(nodes,"topic",x.topic.id,x.topic.name);addEdge(edges,"expert",x.user.id,"topic",x.topic.id,"expert_in",x.source==="inferred"?"inferred":"explicit",x.signals,x.score);}
   // Never emit dangling edges: this also prevents indirect labels/associations to inaccessible documents.
   let edgeList=edges.filter(e=>nodes.has(e.source)&&nodes.has(e.target));
@@ -66,10 +75,23 @@ export async function getKnowledgeGraph({ orgId, userId, isSuperAdmin = false, s
   if(startNode&&!nodes.has(start)) return {nodes:[],edges:[],truncated:false};
   if(startNode){const reached=new Set([start]);let frontier=new Set([start]);for(let hop=0;hop<Math.max(1,Math.min(2,Number(depth)||1));hop++){const next=new Set();for(const e of edgeList){if(frontier.has(e.source)&&!reached.has(e.target))next.add(e.target);if(frontier.has(e.target)&&!reached.has(e.source))next.add(e.source);}for(const id of next)reached.add(id);frontier=next;}edgeList=edgeList.filter(e=>reached.has(e.source)&&reached.has(e.target));for(const id of [...nodes.keys()])if(!reached.has(id))nodes.delete(id);}
   if(filters.nodeType) for(const [id,n] of nodes) if(n.type!==filters.nodeType&&id!==start) nodes.delete(id);
-  if(filters.departmentId) for(const [id,n] of nodes) if(n.departmentId&&n.departmentId!==filters.departmentId) nodes.delete(id);
-  if(filters.projectId) for(const [id,n] of nodes) if(n.projectId&&n.projectId!==filters.projectId) nodes.delete(id);
   if(filters.relationshipType) edgeList=edgeList.filter(e=>e.type===filters.relationshipType);
   edgeList=edgeList.filter(e=>nodes.has(e.source)&&nodes.has(e.target));
   const nodeList=[...nodes.values()].slice(0,GRAPH_NODE_LIMIT);const kept=new Set(nodeList.map(n=>n.id));edgeList=edgeList.filter(e=>kept.has(e.source)&&kept.has(e.target)).slice(0,GRAPH_EDGE_LIMIT);
   return {nodes:nodeList,edges:edgeList,truncated:nodes.size>GRAPH_NODE_LIMIT||edges.length>GRAPH_EDGE_LIMIT};
+}
+
+export async function getKnowledgeGraphSourceVersion({ orgId, userId, isSuperAdmin = false }) {
+  const ids = await accessibleDocumentIds({ orgId, userId, isSuperAdmin });
+  if (!ids.length) return "empty";
+  const [latestDocument, latestRelationship, latestTopic] = await Promise.all([
+    prisma.document.findFirst({ where: { id: { in: ids } }, orderBy: { createdAt: "desc" }, select: { createdAt: true, id: true } }),
+    prisma.documentRelationship.findFirst({ where: { orgId, fromDocumentId: { in: ids }, toDocumentId: { in: ids } }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true, id: true } }),
+    prisma.topic.findFirst({ where: { topicDocuments: { some: { documentId: { in: ids } } } }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true, id: true } }),
+  ]);
+  return [
+    latestDocument ? `${latestDocument.id}:${latestDocument.createdAt.toISOString()}` : "no-doc",
+    latestRelationship ? `${latestRelationship.id}:${latestRelationship.updatedAt.toISOString()}` : "no-rel",
+    latestTopic ? `${latestTopic.id}:${latestTopic.updatedAt.toISOString()}` : "no-topic",
+  ].join("|");
 }
