@@ -71,7 +71,9 @@ export default function ScheduledJobsTab({ orgId }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-500 dark:text-gray-400">
-        Background jobs that run on a schedule for this organization. New jobs start turned off.
+        Background jobs for this organization. Tick <span className="font-medium">Run automatically</span> to
+        run a job on its schedule; <span className="font-medium">Run now</span> runs it once, even when automatic runs
+        are off. New jobs start with automatic runs off.
       </p>
 
       {error && (
@@ -96,7 +98,10 @@ export default function ScheduledJobsTab({ orgId }) {
                   <p className="font-medium text-gray-900 dark:text-gray-100">{job.label}</p>
                   {job.description && <p className="text-xs text-gray-500 mt-0.5">{job.description}</p>}
                 </div>
-                <label className="flex items-center gap-2 text-sm cursor-pointer flex-shrink-0">
+                <label
+                  className="flex items-center gap-2 text-sm cursor-pointer flex-shrink-0"
+                  title={job.enabled ? 'Runs on the schedule below. Untick to stop automatic runs.' : 'Only runs when you click Run now. Tick to run on the schedule below.'}
+                >
                   <input
                     type="checkbox"
                     checked={job.enabled}
@@ -104,7 +109,10 @@ export default function ScheduledJobsTab({ orgId }) {
                     onChange={(e) => patch(job, { enabled: e.target.checked })}
                     className="h-4 w-4"
                   />
-                  {job.enabled ? 'On' : 'Off'}
+                  <span className="text-gray-700 dark:text-gray-300">Run automatically</span>
+                  <span className={cn('font-semibold', job.enabled ? 'text-green-700 dark:text-green-300' : 'text-gray-500')}>
+                    {job.enabled ? 'On' : 'Off'}
+                  </span>
                 </label>
               </div>
 
@@ -117,7 +125,7 @@ export default function ScheduledJobsTab({ orgId }) {
                 >
                   {(job.intervalChoices || intervalChoices).map((m) => <option key={m} value={m}>{formatInterval(m)}</option>)}
                 </select>
-                <span><Clock className="inline h-3.5 w-3.5 mr-1" />Next run: {job.enabled ? formatWhen(job.nextRunAt) : 'off'}</span>
+                <span><Clock className="inline h-3.5 w-3.5 mr-1" />Next run: {job.enabled ? formatWhen(job.nextRunAt) : 'not scheduled (Run now only)'}</span>
                 <span>Last run: {formatWhen(job.lastRunAt)}</span>
                 {job.lastStatus && (
                   <span className={cn(
