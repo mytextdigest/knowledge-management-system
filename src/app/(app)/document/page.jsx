@@ -19,6 +19,7 @@ import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
 import MessageActions from "@/components/chat/MessageActions";
 import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
 import { useToast, ToastProvider } from "@/components/ui/Toast";
+import OpenInSourceLink from '@/components/documents/OpenInSourceLink';
 
 
 
@@ -802,7 +803,8 @@ function DocumentContent() {
 
     const ext = doc.filename.split(".").pop().toLowerCase();
 
-    if (ext === "txt") {
+    // A SharePoint page (A-15) or ServiceNow article (A-17) has no file; show its text.
+    if (ext === "txt" || doc.contentType === "page" || doc.contentType === "article") {
       return (
         <div ref={docScrollRef} onScroll={handleDocScroll} className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
           <pre className="whitespace-pre-wrap text-gray-900 dark:text-gray-100 p-6 font-mono text-sm leading-relaxed max-w-5xl mx-auto">
@@ -931,6 +933,11 @@ function DocumentContent() {
         <p className="text-gray-600 dark:text-gray-400">
           Document Preview
         </p>
+        {doc.externalUrl && (
+          <div className="mt-2 flex justify-center">
+            <OpenInSourceLink url={doc.externalUrl} sourceProvider={doc.sourceProvider} />
+          </div>
+        )}
       </div>
 
       {/* Document Content */}

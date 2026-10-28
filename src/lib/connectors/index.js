@@ -1,7 +1,9 @@
 import { SharePointConnector } from "./sharepoint.js";
+import { ServiceNowConnector } from "./servicenow.js";
 
 const CONNECTORS = {
   sharepoint: SharePointConnector,
+  servicenow: ServiceNowConnector,
 };
 
 // Factory used by the sync job (7-C) — provider comes from OrgIntegration.provider.

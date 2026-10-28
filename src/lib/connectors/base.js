@@ -4,7 +4,8 @@
 // scheduler, Needs-Review queue, and ingest path never need to know which
 // provider they're talking to.
 export class BaseConnector {
-  // Returns { changes: [{ externalId, name, modifiedAt, size, deleted }], cursor }
+  // Returns { changes: [{ externalId, name, modifiedAt, size, deleted,
+  //   webUrl, driveId, permissionsChanged }], cursor }
   // `cursor` is opaque to callers — pass back whatever was last returned here
   // to resume from that point; omit it for an initial full listing.
   async listChanges(_cursor) {

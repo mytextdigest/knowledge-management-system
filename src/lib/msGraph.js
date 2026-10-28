@@ -101,18 +101,45 @@ export async function getAppOnlyToken(tenantId) {
 
 // --- Graph calls -----------------------------------------------------------
 
-async function graphFetch(path, { accessToken, method = "GET", body } = {}) {
-  const res = await fetch(`${GRAPH_BASE}${path}`, {
+// Graph throttles with 429 (and sometimes 503) plus Retry-After. A full ACL
+// pass makes one permissions call per item, so honour it instead of failing.
+const MAX_RETRIES = 4;
+
+async function fetchWithRetry(url, init) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init);
+    if ((res.status !== 429 && res.status !== 503) || attempt >= MAX_RETRIES) return res;
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2 ** attempt * 1000;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 60_000)));
+  }
+}
+
+async function graphFetch(path, { accessToken, method = "GET", body, headers = {} } = {}) {
+  const res = await fetchWithRetry(path.startsWith("http") ? path : `${GRAPH_BASE}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${accessToken}`,
       ...(body ? { "Content-Type": "application/json" } : {}),
+      ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw await parseGraphError(res);
   if (res.status === 204) return null;
   return res.json();
+}
+
+// GET every page of a collection (follows @odata.nextLink).
+async function graphGetAll(path, { accessToken, headers } = {}) {
+  const values = [];
+  let next = path;
+  while (next) {
+    const data = await graphFetch(next, { accessToken, headers });
+    values.push(...(data.value || []));
+    next = data["@odata.nextLink"] || null;
+  }
+  return values;
 }
 
 // Delegated-token call: enumerate sites the signed-in admin can see (which,
@@ -151,24 +178,205 @@ export async function getFolderTree({ accessToken, siteId }) {
 
 // App-only-token call: delta query for FR-2/FR-4. Pass `cursor` (a full
 // `@odata.deltaLink` URL) to resume from the last sync; omit it to do the
-// initial full listing.
-export async function getDelta({ accessToken, siteId, cursor }) {
-  const url = cursor || `${GRAPH_BASE}/sites/${siteId}/drive/root/delta`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (!res.ok) throw await parseGraphError(res);
-  const data = await res.json();
-  return {
-    items: data.value || [],
-    nextLink: data["@odata.nextLink"] || null,
-    deltaLink: data["@odata.deltaLink"] || null,
-  };
+// initial full listing. Follows every @odata.nextLink page, so large
+// libraries aren't cut off after the first page.
+//
+// A-9: with `sharingChanges`, Graph also returns items whose permissions
+// changed, marked `@microsoft.graph.sharedChanged` (verified in the A-8
+// spike). Without `hierarchicalsharing`, a folder's sharing change is
+// reported on the items below it too.
+export async function getDelta({ accessToken, siteId, cursor, sharingChanges = false }) {
+  return getDriveDelta({ accessToken, rootUrl: `${GRAPH_BASE}/sites/${siteId}/drive/root/delta`, cursor, sharingChanges });
+}
+
+// A-15: the same delta walk for any drive (e.g. a site's Site Pages library).
+//
+// A cursor Graph no longer accepts (410 resyncRequired: it expired, or was
+// made without the sharing-changes header) restarts the walk from the
+// beginning. Safe: unchanged items are recognised and skipped by the sync.
+export async function getDriveDelta({ accessToken, driveId, rootUrl, cursor, sharingChanges = false }) {
+  const headers = sharingChanges ? { Prefer: "deltashowsharingchanges" } : {};
+  const start = rootUrl || `${GRAPH_BASE}/drives/${driveId}/root/delta`;
+  let url = cursor || start;
+  const items = [];
+  let deltaLink = null;
+  let restarted = false;
+  while (url) {
+    let data;
+    try {
+      data = await graphFetch(url, { accessToken, headers });
+    } catch (err) {
+      if (err.status !== 410 || !cursor || restarted) throw err;
+      console.warn("Delta cursor no longer valid (410); listing from the beginning");
+      restarted = true;
+      items.length = 0;
+      url = start;
+      continue;
+    }
+    items.push(...(data.value || []));
+    url = data["@odata.nextLink"] || null;
+    deltaLink = data["@odata.deltaLink"] || deltaLink;
+  }
+  return { items, deltaLink, restarted };
+}
+
+// A-9: app-only-token call: the id of a site's default document library.
+export async function getSiteDriveId({ accessToken, siteId }) {
+  const drive = await graphFetch(`/sites/${siteId}/drive?$select=id`, { accessToken });
+  return drive.id;
+}
+
+// A-9: app-only-token call: an item's permissions (direct and inherited).
+export async function getItemPermissions({ accessToken, driveId, itemId }) {
+  return graphGetAll(`/drives/${driveId}/items/${itemId}/permissions`, { accessToken });
+}
+
+// A-9: app-only-token call: an Entra user's object id from their UPN, or
+// null if there's no such user. Needs User.Read.All on the connector app.
+export async function getUserIdByUpn({ accessToken, upn }) {
+  try {
+    const user = await graphFetch(`/users/${encodeURIComponent(upn)}?$select=id`, { accessToken });
+    return user.id;
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
+}
+
+// A-9: app-only-token call: one drive item (null if it no longer exists).
+export async function getDriveItem({ accessToken, driveId, itemId, select = "id,name,webUrl,lastModifiedDateTime,size,file,parentReference" }) {
+  try {
+    return await graphFetch(`/drives/${driveId}/items/${itemId}?$select=${select}`, { accessToken });
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
 }
 
 // App-only-token call: download a file's binary content for FR-2's ingest step.
 export async function downloadFileContent({ accessToken, siteId, itemId }) {
-  const res = await fetch(`${GRAPH_BASE}/sites/${siteId}/drive/items/${itemId}/content`, {
+  const res = await fetchWithRetry(`${GRAPH_BASE}/sites/${siteId}/drive/items/${itemId}/content`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw await parseGraphError(res);
   return Buffer.from(await res.arrayBuffer());
+}
+
+// --- Identity lookups (A-21 / A-10), app-only, SharePoint connector app ----
+
+const appTokenCache = new Map(); // tenantId → { token, expiresAt }
+
+// getAppOnlyToken, reused until two minutes before it expires.
+export async function getCachedAppOnlyToken(tenantId) {
+  const cached = appTokenCache.get(tenantId);
+  if (cached && cached.expiresAt - Date.now() > 2 * 60_000) return cached.token;
+  const { accessToken, expiresIn } = await getAppOnlyToken(tenantId);
+  appTokenCache.set(tenantId, { token: accessToken, expiresAt: Date.now() + expiresIn * 1000 });
+  return accessToken;
+}
+
+// Entra users whose UPN or mail is one of `emails`, matched case-insensitively.
+// Returns Map(lowercased email → [{ id, accountEnabled, userType }]).
+const EMAILS_PER_QUERY = 7; // 2 terms per email; Graph allows 15 `in` values per clause
+export async function findUsersByEmails({ accessToken, emails }) {
+  const wanted = [...new Set(emails.map((e) => String(e).trim().toLowerCase()).filter(Boolean))];
+  const result = new Map(wanted.map((e) => [e, []]));
+  for (let i = 0; i < wanted.length; i += EMAILS_PER_QUERY) {
+    const batch = wanted.slice(i, i + EMAILS_PER_QUERY);
+    const list = batch.map((e) => `'${e.replace(/'/g, "''")}'`).join(",");
+    const params = new URLSearchParams({
+      $filter: `userPrincipalName in (${list}) or mail in (${list})`,
+      $select: "id,accountEnabled,mail,userPrincipalName,userType",
+      $top: "999",
+    });
+    const users = await graphGetAll(`/users?${params}`, { accessToken });
+    for (const user of users) {
+      const keys = new Set([user.userPrincipalName, user.mail].filter(Boolean).map((v) => v.toLowerCase()));
+      for (const key of keys) {
+        const list = result.get(key);
+        if (list && !list.some((u) => u.id === user.id)) {
+          list.push({ id: user.id, accountEnabled: user.accountEnabled, userType: user.userType });
+        }
+      }
+    }
+  }
+  return result;
+}
+
+// An Entra user's transitive group ids and the ids of groups they own.
+// Returns null if the user no longer exists.
+export async function getUserGroupIds({ accessToken, userId }) {
+  try {
+    const [memberOf, owned] = await Promise.all([
+      graphGetAll(`/users/${userId}/transitiveMemberOf/microsoft.graph.group?$select=id&$top=999`, { accessToken }),
+      graphGetAll(`/users/${userId}/ownedObjects/microsoft.graph.group?$select=id&$top=999`, { accessToken }),
+    ]);
+    return {
+      groupIds: [...new Set(memberOf.map((g) => g.id.toLowerCase()))].sort(),
+      ownedGroupIds: [...new Set(owned.map((g) => g.id.toLowerCase()))].sort(),
+    };
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
+}
+
+// --- No-copy mode (A-14) ----------------------------------------------------
+
+// App-only-token call: a drive item's content as a fetch Response (Graph
+// redirects to a short-lived download URL; fetch follows it). For streaming.
+export async function fetchDriveItemContent({ accessToken, driveId, itemId }) {
+  const res = await fetchWithRetry(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}/content`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw await parseGraphError(res);
+  return res;
+}
+
+// App-only-token call: a drive item's content as a Buffer.
+export async function downloadDriveItemContent({ accessToken, driveId, itemId }) {
+  const res = await fetchDriveItemContent({ accessToken, driveId, itemId });
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// --- Site pages (A-15) ------------------------------------------------------
+
+// The drive behind a site's pages library, or null if the site has none.
+// Graph's /lists hides this system library, so it's addressed by its id
+// (from SharePoint REST, base template 119) or, failing that, by its
+// English title. Its items carry the pages' permissions, like files.
+export async function getPagesDriveId({ accessToken, siteId, listId = null }) {
+  try {
+    const list = encodeURIComponent(listId || "Site Pages");
+    const drive = await graphFetch(`/sites/${siteId}/lists/${list}/drive?$select=id`, { accessToken });
+    return drive.id;
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
+}
+
+// The site's modern pages: [{ id, name, title, description, webUrl, lastModifiedDateTime }].
+export async function listSitePages({ accessToken, siteId }) {
+  return graphGetAll(
+    `/sites/${siteId}/pages/microsoft.graph.sitePage?$select=id,name,title,description,webUrl,lastModifiedDateTime`,
+    { accessToken }
+  );
+}
+
+// One page with its content (canvasLayout).
+export async function getSitePage({ accessToken, siteId, pageId }) {
+  return graphFetch(`/sites/${siteId}/pages/${pageId}/microsoft.graph.sitePage?$expand=canvasLayout`, { accessToken });
+}
+
+// A-15 (classic pages): a drive item's list fields (e.g. WikiField,
+// PublishingPageContent), or null if it no longer exists.
+export async function getDriveItemFields({ accessToken, driveId, itemId }) {
+  try {
+    const listItem = await graphFetch(`/drives/${driveId}/items/${itemId}/listItem?$expand=fields`, { accessToken });
+    return listItem.fields || {};
+  } catch (err) {
+    if (err.status === 404) return null;
+    throw err;
+  }
 }

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { ensureFreshPrincipals } from "@/lib/identity/entraIdentity";
 
 export async function resolveOrgRole(email, orgId) {
   const user = await prisma.user.findUnique({
@@ -11,6 +12,10 @@ export async function resolveOrgRole(email, orgId) {
     where: { orgId_userId: { orgId, userId: user.id } },
     select: { role: true },
   });
+  // A-10: SharePoint per-file access is checked against the Entra groups
+  // stored on the user's identities; refresh them when stale (at most once a
+  // minute per user, a Graph call at most every 15 minutes, never throws).
+  if (member) await ensureFreshPrincipals(prisma, user.id);
   return { user, role: member?.role ?? null };
 }
 

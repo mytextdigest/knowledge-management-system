@@ -23,10 +23,18 @@
 //
 // Other differences between the old copies are listed in WS_A §7 (A-2 note)
 // and preserved here.
+//
+// A-10: every rule below is narrowed by the per-file permission clause
+// (src/lib/access/documentAcl.js): a document with source permissions
+// (aclSyncedAt set, e.g. a SharePoint file) also needs a DocumentAcl row
+// matching the user. super_admin and the uploader skip it.
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isSuperAdmin } from "@/lib/orgGuard";
+import { documentAclSql, documentAclWhere, documentIdsPassingAcl, getUserPrincipals } from "@/lib/access/documentAcl";
+
+export { getUserPrincipals };
 
 // --- SQL --------------------------------------------------------------------
 
@@ -58,7 +66,7 @@ export function documentAccessSql({
   const superAdminAll = superAdminSeesAll ? Prisma.sql`${isSuperAdmin} OR` : Prisma.empty;
   const own = includeOwn ? Prisma.sql`OR ${t}."userId" = ${userId}` : Prisma.empty;
 
-  return Prisma.sql`(
+  return Prisma.sql`((
     ${superAdminAll}
     (${t}.scope = 'repository'
      AND ${t}.lifecycle = 'published'
@@ -71,7 +79,7 @@ export function documentAccessSql({
         AND (${isSuperAdmin} OR ${departmentMemberSql(Prisma.sql`acc_p."departmentId"`, userId)})
     )
     ${own}
-  )`;
+  ) AND (${documentAclSql({ userId, isSuperAdmin, alias })} ${own}))`;
 }
 
 // Search, chat retrieval and decision evidence/browse.
@@ -86,23 +94,30 @@ export function knowledgeAccessSql({ userId, isSuperAdmin = false, alias = "d" }
 
 // Prisma `where` equivalent of searchAccessSql, for routes that load
 // documents with the Prisma client (e.g. the chat workflow document).
-export function searchAccessWhere({ userId, orgId, isSuperAdmin = false }) {
+// `principals` comes from getUserPrincipals; without it, documents with
+// source permissions are excluded.
+export function searchAccessWhere({ userId, orgId, isSuperAdmin = false, principals }) {
   const member = isSuperAdmin ? {} : { department: { members: { some: { userId } } } };
   return {
-    OR: [
+    AND: [
       {
-        scope: "repository",
-        lifecycle: "published",
-        ...(isSuperAdmin ? {} : { OR: [{ departmentId: null }, member] }),
+        OR: [
+          {
+            scope: "repository",
+            lifecycle: "published",
+            ...(isSuperAdmin ? {} : { OR: [{ departmentId: null }, member] }),
+          },
+          { project: { scope: "org", orgId, ...member } },
+        ],
       },
-      { project: { scope: "org", orgId, ...member } },
+      documentAclWhere({ principals, isSuperAdmin }),
     ],
   };
 }
 
 // Prisma `where` for the org repository listing (browse policy). userDeptIds
 // are the user's departments; adminDeptIds the ones they administer.
-export function repositoryAccessWhere({ orgId, role, userDeptIds, adminDeptIds = [] }) {
+export function repositoryAccessWhere({ orgId, role, userDeptIds, adminDeptIds = [], principals }) {
   if (isSuperAdmin(role)) {
     return { OR: [{ scope: "repository", orgId }, { project: { scope: "org", orgId } }] };
   }
@@ -121,6 +136,7 @@ export function repositoryAccessWhere({ orgId, role, userDeptIds, adminDeptIds =
         ],
       },
       { OR: [{ lifecycle: { not: "draft" } }, ...draftAllowed] },
+      documentAclWhere({ principals }),
     ],
   };
 }
@@ -141,6 +157,15 @@ async function isDepartmentAdmin(db, departmentId, userId) {
     select: { role: true },
   });
   return membership?.role === "admin";
+}
+
+// A-10: the per-file permission clause for one loaded document (needs `id`;
+// a document without one fails closed). A document loaded with
+// aclSyncedAt null has no source permissions, so no query is needed.
+async function passesAcl(db, document, userId) {
+  if (!document?.id) return false;
+  if (document.aclSyncedAt === null) return true;
+  return (await documentIdsPassingAcl(db, [document.id], { userId })).has(document.id);
 }
 
 // The department that governs a document: its own, else its project's.
@@ -169,7 +194,7 @@ export async function canManageDocument(document, { userId, role, db = prisma })
   if (role !== "dept_admin") return false;
   const departmentId = effectiveDepartmentId(document);
   if (!departmentId) return false;
-  return isDepartmentAdmin(db, departmentId, userId);
+  return (await isDepartmentAdmin(db, departmentId, userId)) && passesAcl(db, document, userId);
 }
 
 /**
@@ -179,23 +204,26 @@ export async function canManageDocument(document, { userId, role, db = prisma })
  */
 export async function canAccessDocument(document, { userId, isSuperAdmin = false, db = prisma }) {
   if (isSuperAdmin) return true;
+  return (await passesRoleRules()) && passesAcl(db, document, userId);
 
-  if (document.scope === "repository" && document.lifecycle === "published") {
-    if (!document.departmentId) return true;
-    return isDepartmentMember(db, document.departmentId, userId);
-  }
-
-  if (document.projectId) {
-    const project = await db.project.findUnique({
-      where: { id: document.projectId },
-      select: { scope: true, departmentId: true },
-    });
-    if (project?.scope === "org" && project.departmentId) {
-      return isDepartmentMember(db, project.departmentId, userId);
+  async function passesRoleRules() {
+    if (document.scope === "repository" && document.lifecycle === "published") {
+      if (!document.departmentId) return true;
+      return isDepartmentMember(db, document.departmentId, userId);
     }
-  }
 
-  return false;
+    if (document.projectId) {
+      const project = await db.project.findUnique({
+        where: { id: document.projectId },
+        select: { scope: true, departmentId: true },
+      });
+      if (project?.scope === "org" && project.departmentId) {
+        return isDepartmentMember(db, project.departmentId, userId);
+      }
+    }
+
+    return false;
+  }
 }
 
 /**
@@ -206,17 +234,21 @@ export async function canAccessDocument(document, { userId, isSuperAdmin = false
  */
 export async function canInteractWithDocument(document, { userId, isSuperAdmin = false, db = prisma }) {
   if (document.userId === userId || isSuperAdmin) return true;
-  if (document.scope === "repository" && document.lifecycle === "published") {
-    if (!document.departmentId || (await isDepartmentMember(db, document.departmentId, userId))) return true;
-  }
-  if (document.project) {
-    if (document.project.userId === userId) return true;
-    if (document.project.scope === "org") {
-      if (!document.project.departmentId) return true;
-      return isDepartmentMember(db, document.project.departmentId, userId);
+  return (await passesRoleRules()) && passesAcl(db, document, userId);
+
+  async function passesRoleRules() {
+    if (document.scope === "repository" && document.lifecycle === "published") {
+      if (!document.departmentId || (await isDepartmentMember(db, document.departmentId, userId))) return true;
     }
+    if (document.project) {
+      if (document.project.userId === userId) return true;
+      if (document.project.scope === "org") {
+        if (!document.project.departmentId) return true;
+        return isDepartmentMember(db, document.project.departmentId, userId);
+      }
+    }
+    return false;
   }
-  return false;
 }
 
 /**
@@ -226,12 +258,16 @@ export async function canInteractWithDocument(document, { userId, isSuperAdmin =
  */
 export async function canViewDocument(document, { userId, role, db = prisma }) {
   if (isSuperAdmin(role)) return true;
-  const departmentId = effectiveDepartmentId(document);
-  if (document.lifecycle === "draft") {
-    return role === "dept_admin" && Boolean(departmentId) && isDepartmentAdmin(db, departmentId, userId);
+  return (await passesRoleRules()) && passesAcl(db, document, userId);
+
+  async function passesRoleRules() {
+    const departmentId = effectiveDepartmentId(document);
+    if (document.lifecycle === "draft") {
+      return role === "dept_admin" && Boolean(departmentId) && isDepartmentAdmin(db, departmentId, userId);
+    }
+    if (!departmentId) return true;
+    return isDepartmentMember(db, departmentId, userId);
   }
-  if (!departmentId) return true;
-  return isDepartmentMember(db, departmentId, userId);
 }
 
 /**
@@ -261,10 +297,13 @@ export async function filterAccessibleDocuments(documents, { userId, role, db = 
     role === "dept_admin" ? memberships.filter((m) => m.role === "admin").map((m) => m.departmentId) : []
   );
 
-  return documents.filter((d) => {
+  const allowed = documents.filter((d) => {
     if (d.userId === userId) return true;
     if (d.lifecycle === "draft") return adminDeptIds.has(d.departmentId);
     if (!d.departmentId) return true;
     return memberDeptIds.has(d.departmentId);
   });
+  const needsAcl = allowed.filter((d) => d.userId !== userId && d.aclSyncedAt !== null);
+  const passing = await documentIdsPassingAcl(db, needsAcl.map((d) => d.id), { userId });
+  return allowed.filter((d) => d.userId === userId || d.aclSyncedAt === null || passing.has(d.id));
 }

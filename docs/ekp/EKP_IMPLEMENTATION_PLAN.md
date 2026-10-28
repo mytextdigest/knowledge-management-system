@@ -24,7 +24,7 @@ NYPA's RFP lists **32 requirements** for an Enterprise Knowledge Platform (EKP).
 |---|---|---|
 | 14 Oct | Questions to NYPA due | Some requirements wait on NYPA's answers (marked ❓ below) |
 | 19 Oct | NYPA answers | Update affected requirement docs that week |
-| **28 Oct** | **Proposal due** | Phase 1 (Workstreams A and B) in progress |
+| **4 Nov** | **Proposal due** (moved from 28 Oct; NYPA Q&A #82) | Phase 1 (Workstreams A and B) in progress |
 | ~Nov | Demo, within 2 weeks of shortlisting | Show whatever is merged from Phase 1 |
 | Q1 2027 | Project start | Later phases continue |
 
@@ -50,14 +50,16 @@ NYPA's RFP lists **32 requirements** for an Enterprise Knowledge Platform (EKP).
 | **1** | **B**: Governance & lifecycle | E19, E21, E22, E23, E24, E25, E26, E31 | **Sandeep & Simran** (B has the most requirements) |
 | Later | C: Taxonomy & semantic layer | E3, E4, E15, E16 | TBD |
 | Later | D: Analytics & dashboards | E28, E29, E30, A5 | TBD |
-| Later | E: Content coverage | E11, E13, E14 | TBD |
+| **2** | **E (part 1): PowerPoint and video** | E11.1, E11.3, E11.5–E11.7 (PPTX, MP4/MP3, VTT transcripts, large files, video segments) | TBD |
+| Later | E (rest): images, previews, templates | E11.2, E13, E14 | TBD |
 | Later | F: Personalization & experience | E1, E5, E7, E10, A7 | TBD |
 | Later | G: Platform & security (RFP §6) | A1–A8, S1, S3–S9 | TBD |
 
 - **Workstream G is new.** It covers the RFP §6 architecture and security guidelines, which weren't in the RFI or the deck.
 - **Single sign-on (S2) moved into Workstream A,** because SharePoint permissions need users mapped to Microsoft identities.
 - **Sandeep and Simran agree how to split B between them** when they write the B requirements doc (see §6).
-- **Order and owners for C–G are decided at the end of Phase 1.**
+- **PowerPoint and video are Phase 2** (decided 2026-10-23). NYPA's in-scope content is mostly PPT, PDF and MP4 with VTT transcripts (NYPA Q&A #44, #132, #185), and KMS can't extract text from PPT or video today. Phase 1 stays A + B. Phase 2 starts with E part 1 as soon as Phase 1 is merged.
+- **Order and owners for C, D, F, G and the rest of E are decided at the end of Phase 1.**
 
 ---
 
@@ -183,8 +185,14 @@ The owner details these entries in their workstream document under `docs/ekp/pha
 
 **E11: Supports documents, PPTs, PDFs, videos, images, etc.** 🟡
 - **Done when:** PPTX, images (OCR + caption) and video (transcribed) are ingested, searchable and citable, with the timestamp for video.
-- **Today:** PDF (+OCR), DOCX, XLSX/XLS/CSV, TXT (`worker/index.js`).
-- **Suggested order:** PPTX → images → video.
+- **Today:** PDF (+OCR), DOCX, XLSX/XLS/CSV, TXT (`worker/index.js`). PPTX, MP4, MP3 and VTT produce no text.
+- **Phase 2 (PowerPoint and video), in this order:**
+  1. **PPTX:** slide text and speaker notes, one chunk per slide, cited as "slide N" (E11.1).
+  2. **VTT and Word transcripts:** timestamped text, linked to their recording when both exist (E11.5). NYPA says transcripts usually reach SharePoint as VTT or Word files, and we may work from them instead of transcribing (Q&A #18).
+  3. **Video and audio:** use the transcript when there is one, otherwise transcribe. Citations link to the timestamp (E11.3). Topic segments with start and end times are NYPA's accepted form of segmentation (E11.7, Q&A #18).
+  4. **Large files:** stream up to 8 GB; never load a whole video into memory (E11.6, Q&A #188). This replaces Phase 1's size guard (`A-24`).
+- **Later:** images (OCR + caption, E11.2).
+- **NYPA volumes:** ~1,500 SharePoint files (mostly PPT, PDF, MP4); ~300 hours of recordings today, +120 hours a year (Q&A #62, #132).
 
 **E13: Indexing and previews of common file types, thumbnails for visual content** 🟡
 - **Done when:** repository and search cards show thumbnails for PDFs, slides and images. Images and video preview in-app.
@@ -309,7 +317,7 @@ The single status board. **Update it in the same PR that completes a requirement
 | E8 | Cited, permission-aware answers | — | — | — | ✅ |
 | E9 | Follow-up questions | — | — | — | ✅ |
 | E10 | Confidence & explainability | F | TBD | TBD | 🟡 |
-| E11 | PPT, images, video | E | TBD | TBD | 🟡 |
+| E11 | PPT, images, video | E | TBD | 2 (PPTX, video, VTT) · later (images) | 🟡 |
 | E12 | Site pages, wikis, KB articles | A | Johurul | 1 | ❌ |
 | E13 | Previews & thumbnails | E | TBD | TBD | 🟡 |
 | E14 | Asset templates | E | TBD | TBD | ❌ |

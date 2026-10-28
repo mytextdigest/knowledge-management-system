@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Eye, Download, Info, Loader2, Check, X, AlertTriangle } from "lucide-react";
 import { Modal, ModalHeader, ModalTitle, ModalContent } from "@/components/ui/Modal";
+import OpenInSourceLink, { sourceLabel } from "@/components/documents/OpenInSourceLink";
 
 const CATEGORIES = [
   "Policies",
@@ -274,6 +275,11 @@ export default function RepositoryDocumentCard({
         ) : (
           <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">Org-wide</span>
         )}
+        {document?.sourceProvider && document.sourceProvider !== "manual" ? (
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+            {sourceLabel(document.sourceProvider)} {document.contentType || "file"}
+          </span>
+        ) : null}
         <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${document?.category ? "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-800 dark:bg-purple-900/40 dark:text-purple-300" : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-300"}`}>
           {document?.category || "Uncategorized"}
         </span>
@@ -356,12 +362,19 @@ export default function RepositoryDocumentCard({
         </div>
       ) : null}
 
-      {document?.status ? <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Status: <span className="font-medium">{document.status}</span></p> : null}
+      {document?.status === "skipped_too_large" ? (
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Larger than the SharePoint file size limit: not searchable by content. Open it in SharePoint.</p>
+      ) : document?.status ? <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Status: <span className="font-medium">{document.status}</span></p> : null}
 
       <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
-        <button type="button" onClick={handlePreview} disabled={pendingAction === "preview"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "preview" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />} Preview</button>
-        <button type="button" onClick={handleDownload} disabled={pendingAction === "download"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "download" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download</button>
+        {document?.contentType !== "page" && document?.contentType !== "article" ? (
+          <>
+          <button type="button" onClick={handlePreview} disabled={pendingAction === "preview"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "preview" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />} Preview</button>
+          <button type="button" onClick={handleDownload} disabled={pendingAction === "download"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "download" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download</button>
+          </>
+        ) : null}
         <button type="button" onClick={() => router.push(`/document?id=${document.id}`)} title="Open the full document viewer to read, chat with, and summarize this document" className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"><Info className="h-3.5 w-3.5" /> View</button>
+        <OpenInSourceLink url={document?.externalUrl} sourceProvider={document?.sourceProvider} />
       </div>
       {actionError ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{actionError}</p> : null}
 

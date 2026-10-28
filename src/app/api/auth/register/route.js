@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import { sendOtpEmail } from "@/lib/mailer";
+import { findSsoConfigForEmail } from "@/lib/sso/discovery";
 
 const prisma = new PrismaClient();
 
@@ -10,6 +11,12 @@ function generateOtp() {
 
 export async function POST(req) {
   const { email, password } = await req.json();
+
+  // EKP A-5: emails on a Microsoft sign-in domain sign up through Microsoft,
+  // never with a password (that would bypass the org's sign-in and MFA).
+  if (await findSsoConfigForEmail(email)) {
+    return Response.json({ useMicrosoft: true, email }, { status: 409 });
+  }
 
   const existing = await prisma.user.findUnique({ where: { email } });
 

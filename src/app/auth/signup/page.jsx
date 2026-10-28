@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -36,6 +37,15 @@ export default function SignupPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
+
+      if (res.status === 409) {
+        // EKP A-5: this email's organization uses Microsoft sign-in.
+        const data = await res.json().catch(() => ({}));
+        if (data.useMicrosoft) {
+          await signIn("azure-ad", { callbackUrl: "/welcome-back" }, { login_hint: email });
+          return;
+        }
+      }
 
       if (res.ok) {
         const data = await res.json();

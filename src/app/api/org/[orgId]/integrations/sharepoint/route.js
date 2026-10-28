@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
+import { logAudit } from "@/lib/auditLog";
+import { sharePointSettings, validateSharePointSettingsPatch } from "@/lib/connectors/sharepointSettings";
 
 // Current connection status for the settings UI — used to render "connect"
 // vs "already connected, here's what's mapped" without re-running OAuth.
@@ -29,6 +31,10 @@ export async function GET(req, { params }) {
     select: { id: true, name: true },
   });
   const deptNameById = Object.fromEntries(departments.map((d) => [d.id, d.name]));
+  // A-24: files recorded with their link only, because they're above the size limit.
+  const tooLargeCount = await prisma.document.count({
+    where: { orgId, sourceProvider: "sharepoint", status: "skipped_too_large" },
+  });
 
   return NextResponse.json({
     // "connected" reflects the actual current status, not just "a row
@@ -44,7 +50,48 @@ export async function GET(req, { params }) {
       departmentId: s.departmentId,
       departmentName: deptNameById[s.departmentId] || null,
     })),
+    settings: sharePointSettings(integration.scopeConfig),
+    tooLargeCount,
   });
+}
+
+// EKP A-14/A-15/A-24: connector settings (keep a copy of files, include site pages, size limit).
+export async function PATCH(req, { params }) {
+  const session = await getServerSession();
+  if (!session?.user?.email)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { orgId } = await params;
+  const { user, role } = await resolveOrgRole(session.user.email, orgId);
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  if (!isSuperAdmin(role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const integration = await prisma.orgIntegration.findUnique({
+    where: { orgId_provider: { orgId, provider: "sharepoint" } },
+    select: { id: true, scopeConfig: true },
+  });
+  if (!integration) return NextResponse.json({ error: "Not connected" }, { status: 404 });
+
+  const body = await req.json().catch(() => ({}));
+  const { data, error } = validateSharePointSettingsPatch(body);
+  if (error) return NextResponse.json({ error }, { status: 400 });
+
+  const before = sharePointSettings(integration.scopeConfig);
+  let scopeConfig = { ...integration.scopeConfig, ...data };
+  // A-24: a higher size limit means files skipped before may now fit. The
+  // change feed only lists changed files, so the next sync lists them all.
+  if (data.maxFileSizeMb > before.maxFileSizeMb) {
+    scopeConfig = { ...scopeConfig, sites: (scopeConfig.sites || []).map((s) => ({ ...s, lastSyncCursor: null })) };
+  }
+  const updated = await prisma.orgIntegration.update({
+    where: { id: integration.id },
+    data: { scopeConfig },
+    select: { scopeConfig: true },
+  });
+  const settings = sharePointSettings(updated.scopeConfig);
+  await logAudit({ orgId, actorUserId: user.id, action: "sharepoint.settings_updated", metadata: { before, after: settings } });
+
+  return NextResponse.json({ settings });
 }
 
 // Disconnect: stops future syncs (POST .../sync already rejects anything

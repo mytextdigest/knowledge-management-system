@@ -1,0 +1,218 @@
+{
+ "_note": "Graph GET /drives/{d}/items/{i}/permissions from the NGI Engineering site, 2026-10-23 (A-8 spike test files). Ids are test-tenant ids.",
+ "tenantId": "b41fe2d1-e572-462f-8149-a7edccd01e9f",
+ "siteUrl": "https://nextgenerationinnovation.sharepoint.com/sites/Engineering",
+ "siteGroups": {
+  "3": [
+   {
+    "loginName": "c:0o.c|federateddirectoryclaimprovider|9e8c1fde-0258-4fdf-91fb-f33345e105e3_o",
+    "principalType": 4
+   },
+   {
+    "loginName": "SHAREPOINT\\system",
+    "principalType": 1
+   }
+  ],
+  "4": [],
+  "5": [
+   {
+    "loginName": "c:0o.c|federateddirectoryclaimprovider|9e8c1fde-0258-4fdf-91fb-f33345e105e3",
+    "principalType": 4
+   }
+  ]
+ },
+ "siteGroupEntries": [
+  {
+   "id": "RW5naW5lZXJpbmcgT3duZXJz",
+   "roles": [
+    "owner"
+   ],
+   "grantedToV2": {
+    "siteGroup": {
+     "displayName": "Engineering Owners",
+     "id": "3",
+     "loginName": "Engineering Owners"
+    },
+    "sharePointGroup": {
+     "id": "NTY4MjdhMjEtMzhjNC00MGQ1LWI4YmMtMGQyOTkyNzFjM2ZkXzM",
+     "title": "Engineering Owners",
+     "principalId": "3"
+    }
+   },
+   "grantedTo": {
+    "user": {
+     "displayName": "Engineering Owners"
+    }
+   }
+  },
+  {
+   "id": "RW5naW5lZXJpbmcgVmlzaXRvcnM",
+   "roles": [
+    "read"
+   ],
+   "grantedToV2": {
+    "siteGroup": {
+     "displayName": "Engineering Visitors",
+     "id": "4",
+     "loginName": "Engineering Visitors"
+    },
+    "sharePointGroup": {
+     "id": "NTY4MjdhMjEtMzhjNC00MGQ1LWI4YmMtMGQyOTkyNzFjM2ZkXzQ",
+     "title": "Engineering Visitors",
+     "principalId": "4"
+    }
+   },
+   "grantedTo": {
+    "user": {
+     "displayName": "Engineering Visitors"
+    }
+   }
+  },
+  {
+   "id": "RW5naW5lZXJpbmcgTWVtYmVycw",
+   "roles": [
+    "write"
+   ],
+   "grantedToV2": {
+    "siteGroup": {
+     "displayName": "Engineering Members",
+     "id": "5",
+     "loginName": "Engineering Members"
+    },
+    "sharePointGroup": {
+     "id": "NTY4MjdhMjEtMzhjNC00MGQ1LWI4YmMtMGQyOTkyNzFjM2ZkXzU",
+     "title": "Engineering Members",
+     "principalId": "5"
+    }
+   },
+   "grantedTo": {
+    "user": {
+     "displayName": "Engineering Members"
+    }
+   }
+  },
+  {
+   "id": "Yzowby5jfGZlZGVyYXRlZGRpcmVjdG9yeWNsYWltcHJvdmlkZXJ8OWU4YzFmZGUtMDI1OC00ZmRmLTkxZmItZjMzMzQ1ZTEwNWUzX28",
+   "roles": [
+    "owner"
+   ],
+   "grantedToV2": {
+    "group": {
+     "@odata.type": "#microsoft.graph.sharePointIdentity",
+     "displayName": "Engineering Owners",
+     "email": "Engineering@nextgenerationinnovation.onmicrosoft.com",
+     "id": "9e8c1fde-0258-4fdf-91fb-f33345e105e3"
+    },
+    "siteUser": {
+     "displayName": "Engineering Owners",
+     "email": "Engineering@nextgenerationinnovation.onmicrosoft.com",
+     "id": "6",
+     "loginName": "c:0o.c|federateddirectoryclaimprovider|9e8c1fde-0258-4fdf-91fb-f33345e105e3_o"
+    }
+   },
+   "grantedTo": {
+    "user": {
+     "displayName": "Engineering Owners",
+     "email": "Engineering@nextgenerationinnovation.onmicrosoft.com",
+     "id": "9e8c1fde-0258-4fdf-91fb-f33345e105e3"
+    }
+   }
+  }
+ ],
+ "extraEntries": {
+  "only-emp1.docx": [
+   {
+    "id": "aTowIy5mfG1lbWJlcnNoaXB8ZW1wMUBuZXh0Z2VuZXJhdGlvbmlubm92YXRpb24ub25taWNyb3NvZnQuY29t",
+    "roles": [
+     "write"
+    ],
+    "grantedToV2": {
+     "user": {
+      "@odata.type": "#microsoft.graph.sharePointIdentity",
+      "displayName": "Employee one",
+      "id": "0c6fc2ea-cee9-4616-848e-61e37d8ead94"
+     },
+     "siteUser": {
+      "displayName": "Employee one",
+      "id": "13",
+      "loginName": "i:0#.f|membership|emp1@nextgenerationinnovation.onmicrosoft.com"
+     }
+    },
+    "grantedTo": {
+     "user": {
+      "displayName": "Employee one",
+      "id": "0c6fc2ea-cee9-4616-848e-61e37d8ead94"
+     }
+    }
+   }
+  ],
+  "engineering-group.docx": [
+   {
+    "id": "YzowdC5jfHRlbmFudHxkNDllMDM5NS05NjEwLTRkNjctOWU4OS02YjY1ZmJlMmJlOTY",
+    "roles": [
+     "write"
+    ],
+    "grantedToV2": {
+     "group": {
+      "@odata.type": "#microsoft.graph.sharePointIdentity",
+      "displayName": "KMS-Engineering",
+      "id": "d49e0395-9610-4d67-9e89-6b65fbe2be96"
+     },
+     "siteUser": {
+      "displayName": "KMS-Engineering",
+      "id": "12",
+      "loginName": "c:0t.c|tenant|d49e0395-9610-4d67-9e89-6b65fbe2be96"
+     }
+    },
+    "grantedTo": {
+     "user": {
+      "displayName": "KMS-Engineering",
+      "id": "d49e0395-9610-4d67-9e89-6b65fbe2be96"
+     }
+    }
+   }
+  ],
+  "everyone-link.docx": [
+   {
+    "id": "81d6249f-9c4f-41e3-8463-8f5a76388b59",
+    "roles": [
+     "write"
+    ],
+    "hasPassword": false,
+    "grantedToIdentitiesV2": [],
+    "grantedToIdentities": [],
+    "link": {
+     "scope": "organization",
+     "type": "edit",
+     "preventsDownload": false
+    }
+   }
+  ],
+  "site-default.docx": [
+   {
+    "id": "aTowIy5mfG1lbWJlcnNoaXB8ZW1wMkBuZXh0Z2VuZXJhdGlvbmlubm92YXRpb24ub25taWNyb3NvZnQuY29t",
+    "roles": [
+     "write"
+    ],
+    "grantedToV2": {
+     "user": {
+      "@odata.type": "#microsoft.graph.sharePointIdentity",
+      "displayName": "Employee Two",
+      "id": "2e67824a-f6fd-4aa1-914e-d32a598914d4"
+     },
+     "siteUser": {
+      "displayName": "Employee Two",
+      "id": "17",
+      "loginName": "i:0#.f|membership|emp2@nextgenerationinnovation.onmicrosoft.com"
+     }
+    },
+    "grantedTo": {
+     "user": {
+      "displayName": "Employee Two",
+      "id": "2e67824a-f6fd-4aa1-914e-d32a598914d4"
+     }
+    }
+   }
+  ]
+ }
+}
