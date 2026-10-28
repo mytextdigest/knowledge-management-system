@@ -240,23 +240,44 @@ async function processChunkJob(job) {
   // 5. Insert chunks (atomic)
   // -----------------------------
   try {
-    // Remove any partial leftovers (idempotency)
-    await prisma.chunk.deleteMany({
-      where: { documentId: docId },
-    });
-
-    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-      const batch = chunks.slice(i, i + BATCH_SIZE);
-
-      await prisma.chunk.createMany({
-        data: batch.map((c, idx) => ({
-          documentId: docId,
-          chunkIndex: i + idx,
-          text: c.text,
-          metadata: c.metadata,
-        })),
+    // Preserve chunk IDs referenced by decisions and other features.
+    // No composite unique constraint exists, so reject ambiguous legacy rows.
+    // Serialize chunk writes for the same document across worker processes.
+    // Transaction-scoped advisory lock requires no schema migration.
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${docId}))`;
+      const existingChunks = await tx.chunk.findMany({
+        where: { documentId: docId },
+        select: { id: true, chunkIndex: true },
       });
-    }
+      const byIndex = new Map();
+      for (const row of existingChunks) {
+        if (row.chunkIndex == null || byIndex.has(row.chunkIndex)) {
+          throw new Error(`Ambiguous existing chunks for document ${docId}; manual review required`);
+        }
+        byIndex.set(row.chunkIndex, row.id);
+      }
+      if ([...byIndex.keys()].some((index) => index >= chunks.length || index < 0)) {
+        throw new Error(`Document ${docId} has stale chunk indices; manual review required`);
+      }
+
+      for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+        const batch = chunks.slice(i, i + BATCH_SIZE);
+        for (let j = 0; j < batch.length; j++) {
+          const index = i + j;
+          const data = { text: batch[j].text, metadata: batch[j].metadata };
+          const existingId = byIndex.get(index);
+          if (existingId) {
+            await tx.chunk.update({ where: { id: existingId }, data });
+          } else {
+            const created = await tx.chunk.create({
+              data: { documentId: docId, chunkIndex: index, ...data },
+            });
+            byIndex.set(index, created.id);
+          }
+        }
+      }
+    }, { maxWait: 10000, timeout: 120000 });
   } catch (err) {
     console.error("❌ Chunk insertion failed", {
       docId,
@@ -291,15 +312,19 @@ async function processChunkJob(job) {
   });
 
   if (doc?.user?.email) {
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM,
-      to: doc.user.email,
-      subject: "Chat is Ready",
-      html: `
-        <p>Your document <strong>${filename}</strong> is ready for chat.</p>
-        <p>Embeddings are being generated in the background.</p>
-      `,
-    });
+    try {
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM,
+        to: doc.user.email,
+        subject: "Chat is Ready",
+        html: `
+          <p>Your document <strong>${filename}</strong> is ready for chat.</p>
+          <p>Embeddings are being generated in the background.</p>
+        `,
+      });
+    } catch (mailError) {
+      console.error("Non-fatal chunk notification failure:", mailError.message);
+    }
   }
 
   // -----------------------------
@@ -435,6 +460,10 @@ async function processSummarizationJob(job) {
     : chunks.map(c => c.text || "");
 
   console.log(`📄 Summarizing ${chunkTexts.length} chunks (regenerate: ${regenerate})`);
+
+  if (!chunkTexts.length || chunkTexts.every((text) => !text.trim())) {
+    throw new Error(`Cannot summarize document ${docId}: no readable chunks`);
+  }
 
   // Generate per-chunk summaries
   const chunkSummaries = await summarizeChunks(openai, chunkTexts, filename);
@@ -609,6 +638,8 @@ async function processSummarizationJob(job) {
     include: { user: true },
   });
 
+  // Notifications must never block downstream clustering.
+  try {
   // No email? Skip
   if (!doc?.user?.email) {
     console.log("⚠️ No user email found, skipping notification");
@@ -649,6 +680,10 @@ async function processSummarizationJob(job) {
 
       console.log(`📧 Completion email sent to ${doc.user.email}`);
     }
+  }
+
+  } catch (mailError) {
+    console.error("Non-fatal summary notification failure:", mailError.message);
   }
 
   // Enqueue clustering for first-time documents (not regeneration)
@@ -923,23 +958,58 @@ async function mainLoop() {
   console.log("Worker started. Waiting for jobs...");
 
   while (true) {
-    const res = await sqs.send(
-      new ReceiveMessageCommand({
-        QueueUrl: QUEUE_URL,
-        MaxNumberOfMessages: 1,
-        WaitTimeSeconds: 20,
-        VisibilityTimeout: 600,
-      })
-    );
+    let res;
+    try {
+      res = await sqs.send(
+        new ReceiveMessageCommand({
+          QueueUrl: QUEUE_URL,
+          MaxNumberOfMessages: 1,
+          WaitTimeSeconds: 20,
+          VisibilityTimeout: 600,
+        })
+      );
+    } catch (err) {
+      console.error("SQS receive failed; retrying after 5 seconds:", err);
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      continue;
+    }
 
     if (!res.Messages || res.Messages.length === 0) continue;
 
     const msg = res.Messages[0];
-    const body = JSON.parse(msg.Body);
+    let body;
 
     try {
-      await processJob(body);
+      body = JSON.parse(msg.Body);
 
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        throw new Error("Invalid SQS job payload");
+      }
+
+      try {
+        await processJob(body);
+      } catch (err) {
+        console.error("Worker job failed (SQS will retry):", err);
+        // Only mark an in-flight document as failed. Never regress a ready,
+        // completed, or otherwise advanced document due to a late retry.
+        if (["embed", "summarize"].includes(body.type) && body.docId) {
+          try {
+            const allowedStatuses = body.type === "embed"
+              ? ["chunked", "embedding"]
+              : ["embedded", "summarizing"];
+            await prisma.document.updateMany({
+              where: { id: body.docId, status: { in: allowedStatuses } },
+              data: { status: "error" },
+            });
+          } catch (statusError) {
+            console.error("Failed to persist worker error status:", statusError);
+          }
+        }
+        continue;
+      }
+
+      // A failed SQS acknowledgment is not a failed processing job.
+      // Do not overwrite a successfully processed document's status.
       await sqs.send(
         new DeleteMessageCommand({
           QueueUrl: QUEUE_URL,
@@ -947,7 +1017,7 @@ async function mainLoop() {
         })
       );
     } catch (err) {
-      console.error("❌ Worker error:", err);
+      console.error("SQS message parse/acknowledgment error:", err);
     }
   }
 }

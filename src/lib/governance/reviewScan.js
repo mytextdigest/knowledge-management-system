@@ -10,7 +10,13 @@ export async function scanDueReviews({orgId,actorUserId,now=new Date(),limit=100
  let created=0,skipped=0;
  for(const doc of docs){const policy=policies.find(p=>matchesPolicy(doc,p));if(!policy){skipped++;continue;}const due=doc.nextReviewAt||addDays(doc.lastReviewedAt||doc.createdAt,policy.intervalDays);if(due>now){skipped++;continue;}const reviewerId=reviewerFor(doc,policy);if(!reviewerId){skipped++;continue;}
  try{const record=await prisma.$transaction(async tx=>{
-  const live=await tx.document.findFirst({where:{id:doc.id,orgId,scope:'repository',deletedAt:null,lifecycle:'published'},select:{id:true,nextReviewAt:true}});if(!live||live.nextReviewAt&&live.nextReviewAt>now)return null;
+  const live=await tx.document.findFirst({where:{id:doc.id,orgId,scope:'repository',deletedAt:null,lifecycle:'published'},select:{id:true,ownerId:true,departmentId:true,category:true,createdAt:true,lastReviewedAt:true,nextReviewAt:true,stewards:{select:{userId:true}}}});
+   if(!live)return null;
+   const activePolicy=await tx.reviewPolicy.findFirst({where:{id:policy.id,orgId,active:true}});
+   if(!activePolicy||!matchesPolicy(live,activePolicy))return null;
+   const liveDue=live.nextReviewAt||addDays(live.lastReviewedAt||live.createdAt,activePolicy.intervalDays);
+   if(liveDue>now)return null;
+   if(reviewerFor(live,activePolicy)!==reviewerId)return null;
   const open=await tx.reviewRecord.findFirst({where:{orgId,documentId:doc.id,status:'pending'},select:{id:true}});if(open)return null;
   const member=await tx.organizationMember.findUnique({where:{orgId_userId:{orgId,userId:reviewerId}},select:{userId:true}});if(!member)return null;
   const item=await tx.reviewRecord.create({data:{orgId,documentId:doc.id,policyId:policy.id,reviewerId,dueAt:due}});

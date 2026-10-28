@@ -45,6 +45,25 @@ export async function POST(req, { params }) {
       return NextResponse.json({ error: "Invalid department selection" }, { status: 400 });
   }
 
+  // Never issue an invitation with a placeholder or malformed base URL.
+  const rawAppUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || (process.env.NODE_ENV === "production" ? "" : "http://localhost:3000")).trim();
+  let appUrl;
+  try {
+    const parsed = new URL(rawAppUrl);
+    if (!(["http:", "https:"].includes(parsed.protocol)) ||
+        !parsed.hostname ||
+        /replace_with|placeholder|example\.com/i.test(parsed.hostname) ||
+        (process.env.NODE_ENV === "production" && parsed.protocol !== "https:")) {
+      throw new Error("Invalid application URL");
+    }
+    appUrl = parsed.origin;
+  } catch {
+    return NextResponse.json(
+      { error: "Invitation URL is not configured. Set NEXT_PUBLIC_APP_URL to the actual application origin." },
+      { status: 503 }
+    );
+  }
+
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
@@ -58,11 +77,6 @@ export async function POST(req, { params }) {
       expiresAt,
     },
   });
-
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.NEXTAUTH_URL ||
-    "http://localhost:3000";
 
   await transporter.sendMail({
     from: `"KMS" <${process.env.EMAIL_USER}>`,

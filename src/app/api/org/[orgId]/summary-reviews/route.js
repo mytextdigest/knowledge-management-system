@@ -9,9 +9,20 @@ export async function GET(req, { params }) {
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { orgId } = await params;
   const { user, role } = await resolveOrgRole(session.user.email, orgId);
-  if (!user || role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!user || !['super_admin', 'dept_admin'].includes(role))
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  let departmentFilter = {};
+  if (role === 'dept_admin') {
+    const memberships = await prisma.departmentMember.findMany({
+      where: { userId: user.id, role: 'admin', department: { orgId } },
+      select: { departmentId: true },
+    });
+    const departmentIds = memberships.map(m => m.departmentId);
+    departmentFilter = { departmentId: { in: departmentIds } };
+  }
   const docs = await prisma.document.findMany({
-    where: { orgId, scope: 'repository', deletedAt: null, summary: { not: null } },
+    where: { orgId, scope: 'repository', deletedAt: null, summary: { not: null }, ...departmentFilter },
     select: { id: true, filename: true, summary: true, departmentId: true,
       summaryReview: { select: { status: true, summaryHash: true, reviewedAt: true } } },
     orderBy: { createdAt: 'desc' }, take: 200,

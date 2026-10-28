@@ -1,5 +1,6 @@
-import GovernanceSettings from '@/components/governance/GovernanceSettings';
 'use client';
+
+import GovernanceSettings from '@/components/governance/GovernanceSettings';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';

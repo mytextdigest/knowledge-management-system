@@ -16,7 +16,7 @@ export const SETTINGS_REGISTRY = Object.freeze({
  'classification.categoryThreshold': { label:'Category classification threshold', default:Number(process.env.CLASSIFICATION_CATEGORY_THRESHOLD || 0.72), validate:x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1 },
  'classification.departmentThreshold': { label:'Department classification threshold', default:Number(process.env.CLASSIFICATION_DEPARTMENT_THRESHOLD || 0.78), validate:x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1 },
  'duplicates.threshold': { label:'Duplicate similarity threshold', default:Number(process.env.CLASSIFICATION_DUPLICATE_THRESHOLD || 0.92), validate:x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1 },
- 'sharepoint.storeOriginals': { label:'Store SharePoint originals', default:false, validate:validSummaryApprovalRules },
+ 'sharepoint.storeOriginals': { label:'Store SharePoint originals', default:false, validate:boolean },
  'sharepoint.syncIntervalMinutes': { label:'SharePoint sync interval (minutes)', default:60, validate:positiveInt },
 });
 export function validateSetting(key, value) {

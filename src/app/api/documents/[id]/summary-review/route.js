@@ -1,17 +1,21 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { prisma } from '@/lib/prisma';
-import { resolveOrgRole } from '@/lib/orgGuard';
+import { resolveOrgRole, canManageDepartment } from '@/lib/orgGuard';
 import { summaryHash, effectiveSummaryStatus, validateSummaryEdit } from '@/lib/governance/summaryReview.mjs';
 import { AUDIT_EVENTS } from '@/lib/audit/events';
 
 const fail = (error, status) => NextResponse.json({ error }, { status });
 async function authorize(email, id) {
   const doc = await prisma.document.findFirst({ where: { id, scope: 'repository', deletedAt: null },
-    select: { id: true, orgId: true, summary: true, summaryReview: true } });
+    select: { id: true, orgId: true, departmentId: true, summary: true, summaryReview: true } });
   if (!doc?.orgId) return { error: fail('Not found', 404) };
   const { user, role } = await resolveOrgRole(email, doc.orgId);
-  if (!user || role !== 'super_admin') return { error: fail('Forbidden', 403) };
+  if (!user || !role) return { error: fail('Forbidden', 403) };
+  if (!doc.departmentId && role !== 'super_admin')
+    return { error: fail('Forbidden', 403) };
+  if (doc.departmentId && !(await canManageDepartment(role, doc.departmentId, user.id)))
+    return { error: fail('Forbidden', 403) };
   return { doc, user };
 }
 export async function GET(_req, { params }) {
@@ -41,6 +45,50 @@ export async function PATCH(req, { params }) {
   try {
     const result = await prisma.$transaction(async (tx) => {
       // A serializable transaction plus a compare-and-swap guards concurrent edits.
+      // Recheck current permissions inside the approval transaction.
+      const currentDoc = await tx.document.findFirst({
+        where: {
+          id,
+          orgId: doc.orgId,
+          scope: 'repository',
+          deletedAt: null,
+        },
+        select: { departmentId: true },
+      });
+
+      if (!currentDoc) throw new Error('SUMMARY_CONFLICT');
+
+      const currentMember = await tx.organizationMember.findUnique({
+        where: {
+          orgId_userId: {
+            orgId: doc.orgId,
+            userId: user.id,
+          },
+        },
+        select: { role: true },
+      });
+
+      const currentRole = currentMember?.role;
+
+      if (currentRole !== 'super_admin') {
+        if (currentRole !== 'dept_admin' || !currentDoc.departmentId) {
+          throw new Error('SUMMARY_FORBIDDEN');
+        }
+
+        const departmentMember = await tx.departmentMember.findUnique({
+          where: {
+            departmentId_userId: {
+              departmentId: currentDoc.departmentId,
+              userId: user.id,
+            },
+          },
+          select: { role: true },
+        });
+
+        if (departmentMember?.role !== 'admin') {
+          throw new Error('SUMMARY_FORBIDDEN');
+        }
+      }
       const current = await tx.document.findFirst({ where: { id, orgId: doc.orgId, scope: 'repository', deletedAt: null },
         select: { summary: true } });
       if (!current || current.summary !== doc.summary) throw new Error('SUMMARY_CONFLICT');
@@ -76,6 +124,9 @@ export async function PATCH(req, { params }) {
     }, { isolationLevel: 'Serializable' });
     return NextResponse.json(result);
   } catch (error) {
+    if (error.message === 'SUMMARY_FORBIDDEN') {
+      return fail('Forbidden', 403);
+    }
     if (['SUMMARY_CONFLICT', 'SUMMARY_ALREADY_APPROVED'].includes(error.message) || error.code === 'P2034')
       return fail('Summary changed or already approved; reload and retry', 409);
     console.error('Summary review failed', error);

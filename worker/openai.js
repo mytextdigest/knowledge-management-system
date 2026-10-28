@@ -19,7 +19,12 @@ export async function getOpenAIForDocument(docId) {
     throw new Error("DOCUMENT_NOT_FOUND");
   }
 
-  const orgKey = doc.organization?.openaiApiKey?.trim();
+  const validKey = (key) => {
+    const value = typeof key === "string" ? key.trim() : "";
+    return value && !/REPLACE_|YOUR_API_KEY|PLACEHOLDER|^sk-test/i.test(value) ? value : null;
+  };
+
+  const orgKey = validKey(doc.organization?.openaiApiKey);
   if (orgKey) {
     return new OpenAI({ apiKey: orgKey });
   }
@@ -35,13 +40,13 @@ export async function getOpenAIForDocument(docId) {
       select: { value: true },
     });
 
-    const userKey = setting?.value?.trim();
+    const userKey = validKey(setting?.value);
     if (userKey) {
       return new OpenAI({ apiKey: userKey });
     }
   }
 
-  const envKey = process.env.OPENAI_API_KEY?.trim();
+  const envKey = validKey(process.env.OPENAI_API_KEY);
   if (envKey) {
     return new OpenAI({ apiKey: envKey });
   }

@@ -23,7 +23,7 @@ export async function GET(request,{params}){
  const docWhere={orgId,scope:'repository',deletedAt:null,...(departmentId?{departmentId}:{})};
  const window={gte:from,lt:to};
  try{
-  const documents=await allRows(prisma.document,docWhere,{select:{id:true,departmentId:true,ownerId:true,category:true,summary:true,filename:true,content:true,stewards:{select:{id:true}},summaryReview:{select:{status:true}}}});
+  const documents=await allRows(prisma.document,docWhere,{select:{id:true,departmentId:true,ownerId:true,category:true,summary:true,filename:true,content:true,stewards:{select:{userId:true}},summaryReview:{select:{status:true}}}});
   const ids=new Set(documents.map(d=>d.id));
   const reviews=(await allRows(prisma.reviewRecord,{orgId,createdAt:window},{include:{policy:{select:{name:true}}}})).filter(r=>ids.has(r.documentId));
   const workflows=(await allRows(prisma.workflowInstance,{orgId,createdAt:window},{include:{tasks:{select:{status:true,stage:{select:{name:true}}}}}})).filter(w=>ids.has(w.documentId));

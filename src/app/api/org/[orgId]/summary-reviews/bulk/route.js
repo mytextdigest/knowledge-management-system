@@ -11,7 +11,7 @@ export async function POST(req, { params }) {
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { orgId } = await params;
   const { user, role } = await resolveOrgRole(session.user.email, orgId);
-  if (!user || role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!user || !['super_admin', 'dept_admin'].includes(role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   let body;
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
   if (!Array.isArray(body?.items) || body.items.length < 1 || body.items.length > 50 ||
