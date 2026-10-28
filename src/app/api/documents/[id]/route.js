@@ -5,6 +5,8 @@ import { AUDIT_EVENTS } from "@/lib/audit/events";
 import { getSetting } from "@/lib/settings";
 import { calculatePurgeAfter } from "@/lib/lifecycle/softDelete.mjs";
 import { generateSignedUrl, generateSignedDownloadUrl } from "@/lib/s3SignedUrl";
+import { canStreamFromSource, sourcePreviewUrl } from "@/lib/documentSource";
+import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
 import { resolveOrgRole, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
 import { canViewDocument, filterAccessibleDocuments } from "@/lib/access/documentAccess";
 import { getAccessibleRelatedDocuments, getAccessibleExperts } from "@/lib/knowledgeContext";
@@ -78,6 +80,10 @@ export async function GET(req, { params }) {
       generateSignedUrl(doc.filePath),
       generateSignedDownloadUrl(doc.filePath, doc.filename || "document"),
     ]);
+  } else if (canStreamFromSource(doc)) {
+    // A-14 no-copy: served from SharePoint through KMS.
+    signedUrl = sourcePreviewUrl(doc.id);
+    downloadUrl = sourcePreviewUrl(doc.id, { download: true });
   }
 
   const PROCESSING_STATUSES = new Set([
@@ -175,7 +181,7 @@ export async function GET(req, { params }) {
     created_at: doc.createdAt.toISOString(),
     permissions: {
       canManage,
-      canRegenerate: canManage && !!doc.filePath && !PROCESSING_STATUSES.has(doc.status),
+      canRegenerate: canManage && (!!doc.filePath || canStreamFromSource(doc)) && !PROCESSING_STATUSES.has(doc.status),
       canAsk: canManage,
       canClearChat: canManage,
       canStar: canManage,

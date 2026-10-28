@@ -10,17 +10,26 @@ import { getRecentMemory, recordMemoryTopics } from "@/lib/orgMemberMemory";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 import { generateSignedUrl } from "@/lib/s3SignedUrl";
 import { classifyWorkflowRequest, formatWorkflowInstruction, getWorkflowSteps } from "@/lib/workflowAssistance";
-import { searchAccessWhere } from "@/lib/access/documentAccess";
+import { searchAccessWhere, getUserPrincipals } from "@/lib/access/documentAccess";
 import { isDecisionQuestion, getDecisionEvidence, formatDecisionContext, DECISION_INSTRUCTION } from "@/lib/decisionIntelligence";
 import { isLessonQuestion, getLessonEvidence, formatLessonContext, LESSON_INSTRUCTION } from "@/lib/lessonsIntelligence";
+import { sourcePreviewUrl } from "@/lib/documentSource";
+import { isDocumentListingQuestion } from "@/lib/keywordSearch";
+import { LISTING_INSTRUCTION, buildListing, sourceLabel, ACCESS_NOTE, needsAccessNote } from "@/lib/documentListing";
+
 
 const SYSTEM_PROMPT = `
 You are an expert assistant that answers questions using only the
 organization's knowledge repository context provided below.
 
 Do NOT invent factual information that is not supported by the context.
-If the answer cannot be found in the context, say:
+If the context answers only part of the question, answer that part and say
+plainly which parts you could not find. Only if nothing in the context
+answers the question, say:
 "I cannot answer that based on the organization's knowledge repository."
+Each document in the context is labelled with its kind and source, e.g.
+"(SharePoint page)", "(SharePoint file)" or "(uploaded file)"; use that
+when the user asks about pages, files or where something comes from.
 
 Response format:
 - For direct factual questions, answer concisely in a short paragraph or a couple of sentences. Do not force structure onto a simple answer.
@@ -290,7 +299,12 @@ export async function POST(req, { params }) {
       where: {
         id: activeWorkflowDocumentId,
         orgId,
-        ...searchAccessWhere({ userId: user.id, orgId, isSuperAdmin: isSuperAdmin(role) }),
+        ...searchAccessWhere({
+          userId: user.id,
+          orgId,
+          isSuperAdmin: isSuperAdmin(role),
+          principals: await getUserPrincipals(prisma, user.id, { orgId }),
+        }),
       },
       select: { id: true, filename: true, filePath: true, summary: true, content: true },
     });
@@ -339,6 +353,7 @@ export async function POST(req, { params }) {
       isSuperAdmin: isSuperAdmin(role),
       diversify: requestedDiversify,
       feedbackQuestion: question,
+      exactTermQuestion: question,
     });
 
     if (workflowRequest.action === "start") {
@@ -365,6 +380,30 @@ export async function POST(req, { params }) {
     }
   }
 
+  // "Which documents mention …" / "Which SharePoint pages do we have?":
+  // lookups over accessible documents, and those documents as citations
+  // (at most 12 cited documents in all).
+  let keywordMatches = "";
+  let listingMissed = false;
+  if (isDocumentListingQuestion(question) && workflowRequest.action === "none") {
+    const listing = await buildListing(question, {
+      userId: user.id,
+      orgId,
+      isSuperAdmin: isSuperAdmin(role),
+      scope,
+      departmentId,
+    });
+    keywordMatches = listing.block;
+    listingMissed = listing.missed;
+    const cited = new Set(chunks.map((c) => c.document_id));
+    for (const row of listing.rows) {
+      if (cited.size >= 12) break;
+      if (cited.has(row.document_id)) continue;
+      cited.add(row.document_id);
+      chunks.push(row);
+    }
+  }
+
   // Reflects what actually happened, not just the keyword-based request above
   // — hybridOrgSearch can also diversify on its own when the retrieved
   // context is naturally multi-source, even without a keyword match here.
@@ -380,6 +419,10 @@ export async function POST(req, { params }) {
       documentId: c.document_id,
       filename: c.filename,
       filePath: c.filePath,
+      externalUrl: c.externalUrl || null,
+      sourceProvider: c.sourceProvider || null,
+      contentType: c.contentType || "file",
+      label: sourceLabel(c),
       department: c.department_name,
       project: c.project_name,
       texts: [],
@@ -406,7 +449,14 @@ export async function POST(req, { params }) {
       department: g.department || null,
       project: g.project || null,
       preview: g.texts.join(" ").slice(0, 900),
-      url: g.filePath ? await generateSignedUrl(g.filePath).catch(() => null) : null,
+      url: g.filePath
+        ? await generateSignedUrl(g.filePath).catch(() => null)
+        : g.externalUrl && g.sourceProvider === "sharepoint" && g.contentType !== "page"
+        ? sourcePreviewUrl(g.documentId) // A-14 no-copy: KMS checks access, then streams it
+        : null,
+      externalUrl: g.externalUrl,
+      sourceProvider: g.sourceProvider,
+      label: g.label,
     }))
   );
 
@@ -441,9 +491,10 @@ export async function POST(req, { params }) {
   const sources = [...decisionSources, ...lessonSources, ...documentSources];
 
   const contextBlocks = Object.values(grouped).map(
-    (g) => `Document: ${g.filename}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
+    (g) => `Document: ${g.filename}${g.label ? ` (${g.label})` : ""}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
   );
   const context = [
+    ...(keywordMatches ? [keywordMatches] : []),
     ...(decisionContext ? [decisionContext] : []),
     ...(lessonContext ? [lessonContext] : []),
     ...(contextBlocks.length > 0
@@ -463,7 +514,7 @@ export async function POST(req, { params }) {
     ...prevMsgs.map((m) => ({ role: m.role, content: m.content })),
     {
       role: "user",
-      content: `${sessionContextNote}${workflowInstruction ? `${workflowInstruction}\n\n` : ""}${decisionContext ? `${DECISION_INSTRUCTION}\n\n` : ""}${lessonContext ? `${LESSON_INSTRUCTION}\n\n` : ""}Question: ${question}\n\nContext:\n${context}`,
+      content: `${sessionContextNote}${workflowInstruction ? `${workflowInstruction}\n\n` : ""}${decisionContext ? `${DECISION_INSTRUCTION}\n\n` : ""}${lessonContext ? `${LESSON_INSTRUCTION}\n\n` : ""}${keywordMatches ? `${LISTING_INSTRUCTION}\n\n` : ""}Question: ${question}\n\nContext:\n${context}`,
     },
   ];
 
@@ -495,6 +546,13 @@ export async function POST(req, { params }) {
             answer += delta;
             send("token", { text: delta });
           }
+        }
+        // Added by KMS, not the model: the same sentence whenever something
+        // wasn't found, never based on documents the user can't access.
+        if (needsAccessNote(answer, { listingMissed })) {
+          const note = `\n\n${ACCESS_NOTE}`;
+          answer += note;
+          send("token", { text: note });
         }
 
         const assistantMessage = await prisma.orgMessage.create({

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
+import OpenInSourceLink from '@/components/documents/OpenInSourceLink';
 
 const CONFIDENCE_STYLES = {
   high: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
@@ -773,20 +774,24 @@ export default function OrgChatPage() {
             )}
 
             <div className="space-y-1 text-sm text-gray-600 dark:text-gray-300">
+              {selectedSource.label && <p>Source: {selectedSource.label}</p>}
               {selectedSource.department && <p>Department: {selectedSource.department}</p>}
               {selectedSource.project && <p>Project: {selectedSource.project}</p>}
             </div>
 
-            {selectedSource.url && (
-              <a
-                href={selectedSource.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-4 inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                Open Source Document
-              </a>
-            )}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {selectedSource.url && (
+                <a
+                  href={selectedSource.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  Open Source Document
+                </a>
+              )}
+              <OpenInSourceLink url={selectedSource.externalUrl} sourceProvider={selectedSource.sourceProvider} className="py-2 text-sm" />
+            </div>
           </div>
         </div>
       )}

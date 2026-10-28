@@ -4,7 +4,7 @@ import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { orgSearch } from "@/lib/vectorSearch";
-import { repositoryAccessWhere } from "@/lib/access/documentAccess";
+import { repositoryAccessWhere, getUserPrincipals } from "@/lib/access/documentAccess";
 import { resolveOpenAIKey } from "@/utils/key_helper";
 
 const PAGE_SIZE = 20;
@@ -50,7 +50,8 @@ export async function GET(req, { params }) {
   // Repository documents plus documents of org-scope projects in the user's
   // departments (all for super_admin). Drafts only for super_admin and for a
   // dept_admin in the departments they administer (F1 browse policy).
-  const andConditions = [repositoryAccessWhere({ orgId, role, userId: user.id, userDeptIds, adminDeptIds }), { deletedAt: null }];
+  const principals = await getUserPrincipals(prisma, user.id, { orgId });
+  const andConditions = [repositoryAccessWhere({ orgId, role, userId: user.id, userDeptIds, adminDeptIds, principals }), { deletedAt: null }];
 
   if (lifecycle === "suggested_review") {
     andConditions.push({ lifecycleSuggestion: { not: null } });
@@ -157,6 +158,9 @@ export async function GET(req, { params }) {
   const documentSelect = {
     id: true,
     filename: true,
+    sourceProvider: true,
+    externalUrl: true,
+    contentType: true,
     status: true,
     scope: true,
     lifecycle: true,

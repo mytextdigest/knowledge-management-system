@@ -8,6 +8,7 @@ import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
+import { canStreamFromSource } from "@/lib/documentSource";
 
 export async function POST(req, { params }) {
   try {
@@ -43,7 +44,9 @@ export async function POST(req, { params }) {
       );
     }
 
-    if (!doc.filePath)
+    // A-14: a no-copy SharePoint document has no filePath; the summary is
+    // rebuilt from its stored chunks, so it can still be regenerated.
+    if (!doc.filePath && !canStreamFromSource(doc))
       return NextResponse.json(
         { error: "Document filePath missing (cannot regenerate)" },
         { status: 400 }

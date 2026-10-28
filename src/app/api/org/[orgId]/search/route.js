@@ -55,6 +55,7 @@ export async function POST(req, { params }) {
     scope,
     departmentId,
     isSuperAdmin: isSuperAdmin(role),
+    exactTermQuestion: query,
   });
 
   return NextResponse.json({

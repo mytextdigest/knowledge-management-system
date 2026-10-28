@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { computeBM25, tokenize } from "@/lib/keywordSearch";
+import { computeBM25, exactQueryTerms, tokenize } from "@/lib/keywordSearch";
 import { searchAccessSql } from "@/lib/access/documentAccess";
 
 export function scopeSql({ scope = "organization", departmentId = null, userId = null }) {
@@ -76,7 +76,7 @@ export async function orgSearch(
 
   return prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
-           d.filename, d.file_path AS "filePath", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
            dept.name AS department_name,
            proj.name AS project_name,
            (c.embedding_vec <=> ${embStr}::vector) AS distance,
@@ -130,7 +130,7 @@ export async function orgKeywordSearch(
 
   const candidates = await prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
-           d.filename, d.file_path AS "filePath", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
            dept.name AS department_name,
            proj.name AS project_name
     FROM "Chunk" c
@@ -188,7 +188,7 @@ export async function orgFallbackTextSearch(
 
   return prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
-           d.filename, d.file_path AS "filePath", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
            dept.name AS department_name,
            proj.name AS project_name,
            1::float AS distance,
@@ -205,4 +205,118 @@ export async function orgFallbackTextSearch(
       AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
     LIMIT ${Prisma.raw(String(limit))}
   `;
+}
+
+/**
+ * Exact-word matches for the distinctive words of a question (code names,
+ * IDs, rare terms like "KESTREL"), so they aren't crowded out by broader
+ * matches. A word counts as distinctive when it appears (as a whole word, in
+ * text or file name) in at least 1 and at most `maxDocsPerTerm` documents
+ * the user can access; counts only ever include accessible documents.
+ *
+ * Returns { terms: [{ term, documentCount }], rows } where rows are the best
+ * chunk per (distinctive term, document), shaped like orgKeywordSearch rows
+ * plus `exactTerm`.
+ */
+export async function orgExactTermSearch(
+  question,
+  {
+    userId, orgId, isSuperAdmin = false, scope = "organization", departmentId = null, maxDocsPerTerm = 3, db = prisma,
+    terms: givenTerms = null, sourceProvider = null, contentType = null,
+  }
+) {
+  const words = givenTerms ?? exactQueryTerms(question);
+  if (!words.length) return { terms: [], rows: [] };
+  const scopeFilter = Prisma.sql`${scopeSql({ scope, departmentId, userId })} ${sourceFilterSql({ sourceProvider, contentType })}`;
+  const matches = Prisma.sql`(c.text ~* ('\\m' || q.term || '\\M') OR d.filename ~* ('\\m' || q.term || '\\M'))`;
+
+  const counts = await db.$queryRaw`
+    SELECT q.term, COUNT(DISTINCT d.id)::int AS "documentCount"
+    FROM unnest(${words}::text[]) AS q(term)
+    JOIN "Chunk" c ON TRUE
+    JOIN "Document" d ON c.document_id = d.id
+    WHERE d."orgId" = ${orgId}
+      ${scopeFilter}
+      AND ${matches}
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    GROUP BY q.term
+  `;
+  const countByTerm = new Map(counts.map((r) => [r.term, r.documentCount]));
+  const terms = words.map((term) => ({ term, documentCount: countByTerm.get(term) || 0 }));
+  const distinctive = terms.filter((t) => t.documentCount >= 1 && t.documentCount <= maxDocsPerTerm).map((t) => t.term);
+  if (!distinctive.length) return { terms, rows: [] };
+
+  const rows = await db.$queryRaw`
+    SELECT DISTINCT ON (q.term, d.id)
+           q.term AS "exactTerm",
+           c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           dept.name AS department_name,
+           proj.name AS project_name
+    FROM unnest(${distinctive}::text[]) AS q(term)
+    JOIN "Chunk" c ON TRUE
+    JOIN "Document" d ON c.document_id = d.id
+    LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    WHERE d."orgId" = ${orgId}
+      ${scopeFilter}
+      AND ${matches}
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    ORDER BY q.term, d.id, (c.text ~* ('\\m' || q.term || '\\M')) DESC, c.chunk_index
+  `;
+  // Rarest words first (most specific), then in question order.
+  const rank = (term) => countByTerm.get(term) * 100 + words.indexOf(term);
+  rows.sort((a, b) => rank(a.exactTerm) - rank(b.exactTerm));
+  return { terms, rows: rows.map((r) => ({ ...r, distance: 1, keyword_score: 1 })) };
+}
+
+// "SharePoint pages", "SharePoint files": optional source/kind filters.
+function sourceFilterSql({ sourceProvider = null, contentType = null }) {
+  return Prisma.sql`${sourceProvider ? Prisma.sql`AND d.source_provider = ${sourceProvider}` : Prisma.empty}
+    ${contentType ? Prisma.sql`AND d.content_type = ${contentType}` : Prisma.empty}`;
+}
+
+/**
+ * Documents the user can access, filtered by source/kind and optionally by a
+ * phrase (in the title or text, case-insensitive), by title; at most
+ * `limit`. Each comes with its best chunk (the one with the phrase, else the
+ * first), shaped like the other search rows, so it can be cited.
+ * Returns { total, rows }.
+ */
+export async function orgListDocuments({
+  userId, orgId, isSuperAdmin = false, scope = "organization", departmentId = null,
+  sourceProvider = null, contentType = null, phrase = null, limit = 25, db = prisma,
+}) {
+  const like = phrase ? `%${phrase.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%` : null;
+  const phraseFilter = like
+    ? Prisma.sql`AND (d.filename ILIKE ${like} OR EXISTS (SELECT 1 FROM "Chunk" pc WHERE pc.document_id = d.id AND pc.text ILIKE ${like}))`
+    : Prisma.empty;
+  const rows = await db.$queryRaw`
+    SELECT COUNT(*) OVER ()::int AS total,
+           fc.id, fc.text, fc.summary, fc.chunk_index, d.id AS document_id, fc.metadata,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           dept.name AS department_name,
+           proj.name AS project_name
+    FROM "Document" d
+    LEFT JOIN LATERAL (
+      SELECT c.id, c.text, c.summary, c.chunk_index, c.metadata
+      FROM "Chunk" c
+      WHERE c.document_id = d.id
+      ORDER BY ${like ? Prisma.sql`(c.text ILIKE ${like}) DESC,` : Prisma.empty} c.chunk_index
+      LIMIT 1
+    ) fc ON TRUE
+    LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    WHERE d."orgId" = ${orgId}
+      ${scopeSql({ scope, departmentId, userId })}
+      ${sourceFilterSql({ sourceProvider, contentType })}
+      ${phraseFilter}
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    ORDER BY d.filename
+    LIMIT ${Prisma.raw(String(Math.max(1, Math.min(100, Number(limit) || 25))))}
+  `;
+  return {
+    total: rows[0]?.total ?? 0,
+    rows: rows.map(({ total, ...r }) => ({ ...r, distance: 1, keyword_score: 1 })),
+  };
 }

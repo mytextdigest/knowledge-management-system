@@ -344,16 +344,34 @@ Common approach: an `/org/[orgId]/analytics` section with tabs (Content health, 
 - **Design:** no-results list from `SearchEvent.resultCount = 0`. CTR@1/3/10. Reformulation rate (a new query within 60 s by the same user). Answer feedback from E10.4. Gaps link to the triggering queries (`KnowledgeGap.queryIds`). The gap scan becomes an F3 job.
 - **Tests:** a zero-result query appears in the no-results list. The metrics are correct on fixtures.
 
-### 5.5 Workstream E: Content Coverage (later phase, owner TBD)
+### 5.5 Workstream E: Content Coverage (E11 PowerPoint and video in Phase 2; the rest later; owner TBD)
 
 #### E11: More formats (Partial)
 - **Built:** `worker/index.js` extraction branches (PDF + OCR, DOCX, spreadsheets, TXT). Upload allow-list in `UploadToRepositoryModal.jsx`.
-- **Design:**
+- **Phase 2 design (PowerPoint and video; updated 2026-10-23 with NYPA's Q&A answers):**
   - **PPTX:** unzip the slide XML (`ppt/slides/slideN.xml`, `ppt/notesSlides/`), one chunk per slide with `metadata.slide`. Citations show "slide N".
+  - **VTT / Word transcripts (E11.5):**
+    - Parse VTT cues into `{ start, end, text }` and chunk by time window, with `metadata.start` / `metadata.end`. A Word transcript uses the speaker/time lines when present.
+    - Link a transcript to its recording: same folder and same base name, or the Teams naming pattern. The link is stored as `Document.transcriptOfId`, and citations open the recording at `?t=<start>`.
+    - NYPA's Teams transcripts usually land in SharePoint as VTT or Word files (Q&A #18).
+  - **Audio/video (E11.3):**
+    - If a linked transcript exists, use it and don't transcribe.
+    - Otherwise extract the audio with `ffmpeg` and transcribe it (Whisper API, or a US-region equivalent for S9; the provider needs NYPA's approval, NFR-11) with segment timestamps, chunked by time.
+    - Citations link to `?t=`. Large media are processed as separate jobs with progress.
+  - **Large files (E11.6):**
+    - Stream from S3 or Graph to a temp file and extract the audio from that file. Never hold the video in a `Buffer`.
+    - Only the audio track (a few hundred MB at most) goes to transcription. NYPA's videos reach 8 GB (Q&A #188).
+    - This replaces Workstream A's Phase 1 size guard (`A-24`): files that guard skipped are picked up on their next sync.
+  - **Video segments (E11.7):**
+    - An LLM pass over the timestamped transcript produces topic segments `{ title, start, end }`, stored on the document and shown as a chapter list that links into the player.
+    - NYPA accepts this as video segmentation (Q&A #18).
+  - Extend the upload allow-list and the SharePoint mime-type filter (`.pptx`, `.mp4`, `.mp3`, `.m4a`, `.vtt`).
+- **Later (not Phase 2):**
   - **Images:** Tesseract OCR (already a dependency) plus a vision-model caption. `metadata.kind = image`.
-  - **Audio/video:** transcription (Whisper API, or a US-region equivalent for S9) with segment timestamps, chunked by time. Citations link to `?t=`. Large media are processed as separate jobs with progress.
-  - Extend the upload allow-list and the SharePoint mime-type filter.
-- **Tests:** a fixture per format is ingested and cited with the correct slide or timestamp.
+- **Tests:**
+  - A fixture per format is ingested and cited with the correct slide or timestamp.
+  - A video with a VTT transcript is cited at the right timestamp without calling the transcription API.
+  - A 2 GB test video is processed with flat worker memory.
 
 #### E13: Previews and thumbnails (Partial)
 - **Design:** the worker generates thumbnails (PDF first page via `pdfjs-dist`, PPTX rendered or the first slide's image, image downscale, video frame at 1 s) into S3 `thumbnails/{docId}.jpg`, stored as `Document.thumbnailPath`. Preview components for images, slides and video. Previews for M365 items come from Graph when there's no copy (E32.4).

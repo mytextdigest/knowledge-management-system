@@ -71,7 +71,7 @@ test(
 
     assert.match(
       s,
-      /d\."projectId" = \$\{doc\.projectId\}/
+      /d\."projectId" = \$\{doc\.projectId\}/,
     );
 
     assert.doesNotMatch(

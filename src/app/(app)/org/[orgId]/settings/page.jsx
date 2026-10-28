@@ -9,9 +9,10 @@ import {
   Building2, Users, Key, Eye, EyeOff, Loader2,
   CheckCircle2, ArrowLeft, Mail, Shield, Layers,
   Plus, ChevronDown, ChevronUp, UserPlus, Trash2, ExternalLink,
-  ScrollText, Pencil, Check, X as XIcon, Plug, Unplug,
+  ScrollText, Pencil, Check, X as XIcon, Plug, Unplug, Clock,
 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
+import ScheduledJobsTab from '@/components/settings/ScheduledJobsTab';
 import { cn } from '@/lib/utils';
 
 const ROLE_LABELS = {
@@ -132,7 +133,7 @@ export default function OrgSettingsPage() {
       }
 
       const validTabs = settingsData.role === 'super_admin'
-        ? ['general', 'members', 'departments', 'apikey', 'integrations', 'audit', 'governance']
+        ? ['general', 'members', 'departments', 'apikey', 'integrations', 'jobs', 'audit', 'governance']
         : ['members', 'departments', 'governance'];
       setActiveTab(
         validTabs.includes(requestedTab)
@@ -524,6 +525,7 @@ export default function OrgSettingsPage() {
     { id: 'departments', label: 'Departments', icon: Layers },
     ...(org?.role === 'super_admin' ? [{ id: 'apikey', label: 'API Key', icon: Key }] : []),
     ...(org?.role === 'super_admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
+    ...(org?.role === 'super_admin' ? [{ id: 'jobs', label: 'Scheduled Jobs', icon: Clock }] : []),
     ...(org?.role === 'super_admin' ? [{ id: 'audit', label: 'Audit Log', icon: ScrollText }] : []),
     ...(org?.role === 'super_admin' || org?.role === 'dept_admin' ? [{ id: 'governance', label: 'Governance', icon: Shield }] : []),
   ];
@@ -1120,7 +1122,7 @@ export default function OrgSettingsPage() {
         {activeTab === 'integrations' && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Connect external platforms to automatically bring their Knowledge into this org&apos;s repository.
+              Set up Microsoft sign-in and connect external platforms to bring their knowledge into this org&apos;s repository.
             </p>
 
             {integrationsError ? (
@@ -1159,7 +1161,9 @@ export default function OrgSettingsPage() {
                           </span>
                         </div>
                         <p className="text-xs text-gray-500 mt-0.5">
-                          {integ.connected
+                          {integ.summary
+                            ? integ.summary
+                            : integ.connected
                             ? `${integ.siteCount} site${integ.siteCount === 1 ? '' : 's'}${integ.lastSyncAt ? ` · last synced ${new Date(integ.lastSyncAt).toLocaleDateString()}` : ''}`
                             : integ.status === 'disconnected'
                             ? 'Sync paused — reconnect to resume'
@@ -1178,6 +1182,12 @@ export default function OrgSettingsPage() {
                 ))}
               </div>
             )}
+          </motion.div>
+        )}
+
+        {activeTab === 'jobs' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+            <ScheduledJobsTab orgId={orgId} />
           </motion.div>
         )}
 

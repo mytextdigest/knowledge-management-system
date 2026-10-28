@@ -1,4 +1,4 @@
-import { orgSearch, orgKeywordSearch, orgFallbackTextSearch } from "@/lib/vectorSearch";
+import { orgSearch, orgKeywordSearch, orgFallbackTextSearch, orgExactTermSearch } from "@/lib/vectorSearch";
 import { prisma } from "@/lib/prisma";
 import { expandWithRelatedDocuments } from "@/lib/knowledgeContext";
 import { filterCurrentKnowledge } from "@/lib/governance/retrievalEligibility.mjs";
@@ -120,6 +120,25 @@ function applyFeedbackWeights(rows, weights) {
     .sort((a, b) => Number(b.hybridScore || 0) - Number(a.hybridScore || 0));
 }
 
+/**
+ * Keep the best chunk of each document matched by a distinctive word of
+ * the question (orgExactTermSearch), up to half of the slots, ahead of the
+ * rest; documents already in the results aren't added twice.
+ */
+export function pinExactMatches(rows, exactRows, limit) {
+  if (!exactRows.length) return rows;
+  const present = new Set(rows.map((r) => r.document_id));
+  const pinned = [];
+  const maxPinned = Math.max(1, Math.ceil(limit / 2));
+  for (const row of exactRows) {
+    if (pinned.length >= maxPinned) break;
+    if (present.has(row.document_id)) continue;
+    present.add(row.document_id);
+    pinned.push({ ...row, vectorScore: 0, keywordScore: 1, hybridScore: 1, pinnedByExactTerm: true });
+  }
+  return [...pinned, ...rows].slice(0, limit);
+}
+
 function sourceKey(row) {
   if (row.projectId || row.project_id) return `project:${row.projectId || row.project_id}`;
   if (row.departmentId || row.department_id) {
@@ -172,6 +191,9 @@ export async function hybridOrgSearch({
   isSuperAdmin = false,
   diversify = false,
   feedbackQuestion = null,
+  // The user's own question: its distinctive words (code names, IDs) keep a
+  // place in the results even when broader matches outrank them.
+  exactTermQuestion = null,
 }) {
   const safeQueries = Array.isArray(queries) ? queries.filter(Boolean) : [];
   const safeEmbeddings = Array.isArray(embeddings) ? embeddings.filter(Boolean) : [];
@@ -240,13 +262,14 @@ export async function hybridOrgSearch({
     effectiveDiversify = distinctSources >= 2;
   }
 
-  const base = effectiveDiversify ? diversifyResults(ranked, limit) : ranked.slice(0, limit);
+  let base = effectiveDiversify ? diversifyResults(ranked, limit) : ranked.slice(0, limit);
+  if (exactTermQuestion) {
+    const { rows: exact } = await orgExactTermSearch(exactTermQuestion, { userId, orgId, isSuperAdmin, scope, departmentId });
+    base = pinExactMatches(base, exact, limit);
+  }
   const expanded = await expandWithRelatedDocuments({ rows: base, orgId, userId, isSuperAdmin, limit });
   const ids = [...new Set(expanded.map((row) => row.document_id).filter(Boolean))];
   if (!ids.length) return [];
-  // Fail closed if the source document was removed/superseded after SQL retrieval.
-  // This also validates relationship-expanded rows, which do not pass through
-  // the primary chunk retrieval query.
   const documents = await prisma.document.findMany({
     where: { id: { in: ids }, orgId },
     select: { id: true, deletedAt: true, supersededById: true, lifecycle: true, lifecycleSuggestion: true },

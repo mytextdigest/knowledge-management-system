@@ -5,6 +5,7 @@ import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { grantSitePermission, getAppOnlyToken } from "@/lib/msGraph";
 import { encrypt } from "@/lib/crypto";
 import { readSetupCookie, clearSetupCookie } from "@/lib/integrationSetup";
+import { pickSharePointSettings } from "@/lib/connectors/sharepointSettings";
 
 const APP_DISPLAY_NAME = "KMS SharePoint Connector";
 
@@ -75,6 +76,9 @@ export async function POST(req, { params }) {
   const sitesById = new Map(existingSites.map((s) => [s.siteId, s]));
   for (const s of selections) {
     sitesById.set(s.siteId, {
+      // Keep what syncs recorded for an already-connected site (cursors,
+      // drive ids, permission fingerprint).
+      ...sitesById.get(s.siteId),
       siteId: s.siteId,
       siteUrl: s.siteUrl || null,
       departmentId: s.departmentId,
@@ -82,10 +86,12 @@ export async function POST(req, { params }) {
       // re-confirmed (e.g. department reassignment) — only a genuinely new
       // site starts with no cursor.
       lastSyncCursor: sitesById.get(s.siteId)?.lastSyncCursor ?? null,
+      aclFingerprint: sitesById.get(s.siteId)?.aclFingerprint ?? null,
     });
   }
 
   const scopeConfig = {
+    ...pickSharePointSettings(existing?.scopeConfig),
     tenantId: setup.tenantId,
     connectedByUserId: user.id,
     sites: [...sitesById.values()],
