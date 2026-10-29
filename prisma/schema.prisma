@@ -50,6 +50,14 @@ model User {
   lessonsAuthored   Lesson[]
   decisionsReviewed Decision[] @relation("DecisionReviewedBy")
   identities        UserIdentity[]
+
+  // EKP Phase 2 (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md)
+  termSetsCreated         TermSet[]         @relation("TermSetCreatedBy")
+  documentTermsCreated    DocumentTerm[]    @relation("DocumentTermCreatedBy")
+  documentTermsAccepted   DocumentTerm[]    @relation("DocumentTermAcceptedBy")
+  searchEvents            SearchEvent[]
+  reportingApiKeysCreated ReportingApiKey[] @relation("ReportingApiKeyCreatedBy")
+  assetTemplatesCreated   AssetTemplate[]   @relation("AssetTemplateCreatedBy")
 }
 
 // EKP Workstream A (A1/A2): a KMS user's Microsoft (Entra ID) identity. The
@@ -134,6 +142,17 @@ model Organization {
   documentInteractions DocumentInteraction[]
   lessons           Lesson[]
   topicSnapshots    TopicSnapshot[]
+
+  // EKP Phase 2 (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md)
+  termSets          TermSet[]
+  metadataFields    MetadataField[]
+  termCandidates    TermCandidate[]
+  taxonomyImports   TaxonomyImport[]
+  searchEvents      SearchEvent[]
+  analyticsDaily    AnalyticsDaily[]
+  reportingApiKeys  ReportingApiKey[]
+  mediaJobs         MediaJob[]
+  assetTemplates    AssetTemplate[]
 
   @@index([name])
 }
@@ -246,6 +265,7 @@ model OrgMessage {
   createdAt      DateTime @default(now()) @map("created_at")
 
   conversation OrgConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  searchEvent  SearchEvent?
 
   @@index([conversationId])
 }
@@ -384,6 +404,29 @@ model Document {
   acl                DocumentAcl[]
   externalModifiedAt DateTime? @map("external_modified_at")
 
+  // EKP Phase 2 / WS-D: when the content last changed (upload, replace, version
+  // restore, source modified). Not @updatedAt: classification, ACL sync and
+  // starring also update the row.
+  contentUpdatedAt DateTime? @map("content_updated_at")
+  // EKP Phase 2 / WS-E: a transcript points to its recording (E11.5); media
+  // length and chapters (E11.7); thumbnail (E13); authored assets (E14).
+  transcriptOfId       String?    @map("transcript_of_id")
+  transcriptOf         Document?  @relation("DocumentTranscript", fields: [transcriptOfId], references: [id], onDelete: SetNull)
+  transcripts          Document[] @relation("DocumentTranscript")
+  transcriptLinkSource String?    @map("transcript_link_source") // "auto" | "manual": a sync never overwrites "manual"
+  durationSeconds      Float?     @map("duration_seconds")
+  mediaSegments        Json?      @map("media_segments") // [{ title, start, end }]
+  thumbnailPath        String?    @map("thumbnail_path") // S3 thumbnails/{docId}.jpg
+  templateVersionId    String?    @map("template_version_id")
+  templateVersion      AssetTemplateVersion? @relation(fields: [templateVersionId], references: [id], onDelete: Restrict)
+  assetData            Json?      @map("asset_data") // { sections: { key: richTextJson } }; content holds the rendered text
+
+  terms           DocumentTerm[]
+  searchClicks    SearchClick[]
+  links           DocumentLink[]
+  sourceTags      DocumentSourceTag[]
+  mediaJobs       MediaJob[]
+
   chunks          Chunk[]
   conversations   Conversation[]
   topicDocument   TopicDocument?
@@ -420,6 +463,9 @@ model Document {
   @@index([contentHash])
   @@index([lifecycleSuggestion])
   @@index([sourceProvider, externalId])
+  @@index([orgId, contentUpdatedAt])
+  @@index([transcriptOfId])
+  @@index([templateVersionId])
 }
 
 
@@ -533,6 +579,7 @@ model Topic {
   topicDocuments TopicDocument[]
   expertise      TopicExpertise[]
   snapshots      TopicSnapshot[]
+  termCandidates TermCandidate[]
 
   @@index([projectId])
   @@index([orgId, scope])
@@ -888,6 +935,8 @@ model KnowledgeGap {
   occurrenceCount    Int
   zeroCitationCount  Int
   lowConfidenceCount Int
+  // EKP Phase 2 / WS-D: SearchEvent ids that produced this gap (E30.4); keep the latest 50.
+  queryIds           String[] @default([]) @map("query_ids")
   createdAt          DateTime @default(now()) @map("created_at")
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -1012,6 +1061,7 @@ model SyncRun {
   trigger       String    @default("manual") // "manual" | "scheduled" (EKP F3)
   filesFound    Int       @default(0) @map("files_found")
   filesFailed   Int       @default(0) @map("files_failed")
+  filesSkipped  Int       @default(0) @map("files_skipped") // A-24: files above the size limit
   error         String?
 
   integration OrgIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
@@ -1242,4 +1292,364 @@ model ReviewRecord {
   @@index([reviewerId,status])
   reviewer User @relation("PeriodicReviewReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
   @@index([documentId,status])
+}
+
+// ===== EKP Phase 2 / Workstream C: taxonomy (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md) =====
+
+model TermSet {
+  id             String    @id @default(cuid())
+  orgId          String    @map("org_id")
+  name           String
+  description    String?
+  source         String    @default("local") // "local" | "external"
+  readOnly       Boolean   @default(false) @map("read_only") // true while an external tool is master (E16.4)
+  externalId     String?   @map("external_id") // SKOS ConceptScheme URI or term-store set GUID
+  importFormat   String?   @map("import_format") // "skos_ttl" | "skos_rdfxml" | "csv" | "termstore"
+  lastImportedAt DateTime? @map("last_imported_at")
+  createdById    String?   @map("created_by_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy    User?             @relation("TermSetCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  terms        Term[]
+  fields       MetadataField[]
+  imports      TaxonomyImport[]
+
+  @@unique([orgId, name])
+  @@index([orgId, source])
+}
+
+model Term {
+  id              String    @id @default(cuid())
+  termSetId       String    @map("term_set_id")
+  parentId        String?   @map("parent_id")
+  label           String
+  normalizedLabel String    @map("normalized_label")
+  description     String?
+  status          String    @default("active") // "active" | "deprecated"
+  mergedIntoId    String?   @map("merged_into_id")
+  // Materialized ancestry (root first). Subtree and facet roll-up: ancestor_ids @> ARRAY[termId].
+  ancestorIds     String[]  @default([]) @map("ancestor_ids")
+  depth           Int       @default(0)
+  sortOrder       Int       @default(0) @map("sort_order")
+  externalId      String?   @map("external_id") // SKOS concept URI
+  termStoreGuid   String?   @map("term_store_guid") // SharePoint term-store GUID (joins DocumentSourceTag)
+  // Candidate shortlist for classification (C-10). ~2,600 rows: no ANN index needed.
+  embeddingVec    Unsupported("vector(1536)")? @map("embedding_vec")
+  embeddedAt      DateTime? @map("embedded_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  termSet       TermSet        @relation(fields: [termSetId], references: [id], onDelete: Cascade)
+  parent        Term?          @relation("TermHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children      Term[]         @relation("TermHierarchy")
+  mergedInto    Term?          @relation("TermMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom    Term[]         @relation("TermMerge")
+  synonyms      TermSynonym[]
+  relationsFrom TermRelation[] @relation("TermRelationFrom")
+  relationsTo   TermRelation[] @relation("TermRelationTo")
+  documentTerms DocumentTerm[]
+
+  @@unique([termSetId, externalId]) // NULL externalId (local terms) is allowed many times
+  @@index([termSetId, parentId])
+  @@index([termSetId, normalizedLabel])
+  @@index([ancestorIds], type: Gin)
+  @@index([termStoreGuid])
+  @@index([status])
+}
+
+model TermSynonym {
+  id              String @id @default(cuid())
+  termId          String @map("term_id")
+  label           String
+  normalizedLabel String @map("normalized_label")
+  kind            String @default("alt") // "alt" | "hidden" (SKOS altLabel / hiddenLabel)
+
+  term Term @relation(fields: [termId], references: [id], onDelete: Cascade)
+
+  @@unique([termId, normalizedLabel])
+  @@index([normalizedLabel])
+}
+
+model TermRelation {
+  id         String @id @default(cuid())
+  fromTermId String @map("from_term_id")
+  toTermId   String @map("to_term_id")
+  kind       String @default("related") // SKOS related (E3.3)
+
+  from Term @relation("TermRelationFrom", fields: [fromTermId], references: [id], onDelete: Cascade)
+  to   Term @relation("TermRelationTo", fields: [toTermId], references: [id], onDelete: Cascade)
+
+  @@unique([fromTermId, toTermId, kind])
+  @@index([toTermId])
+}
+
+model MetadataField {
+  id         String   @id @default(cuid())
+  orgId      String   @map("org_id")
+  key        String   // stable key, e.g. "category", "asset_type"
+  name       String   // display name
+  termSetId  String   @map("term_set_id")
+  multi      Boolean  @default(false)
+  required   Boolean  @default(false) // see decision SQ-3
+  facet      Boolean  @default(false) // E4.4
+  facetOrder Int      @default(0) @map("facet_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  organization  Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  termSet       TermSet        @relation(fields: [termSetId], references: [id], onDelete: Restrict)
+  documentTerms DocumentTerm[]
+
+  @@unique([orgId, key])
+  @@index([orgId, facet])
+}
+
+model DocumentTerm {
+  id           String    @id @default(cuid())
+  documentId   String    @map("document_id")
+  termId       String    @map("term_id")
+  fieldId      String    @map("field_id") // required: keeps the unique key NULL-free
+  source       String    // "manual" | "auto" | "source_system" | "import"
+  status       String    @default("accepted") // "suggested" | "accepted"
+  confidence   Float?
+  createdById  String?   @map("created_by_id")
+  acceptedById String?   @map("accepted_by_id")
+  acceptedAt   DateTime? @map("accepted_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  document   Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  term       Term          @relation(fields: [termId], references: [id], onDelete: Restrict)
+  field      MetadataField @relation(fields: [fieldId], references: [id], onDelete: Restrict)
+  createdBy  User?         @relation("DocumentTermCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  acceptedBy User?         @relation("DocumentTermAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+
+  @@unique([documentId, fieldId, termId])
+  @@index([termId, status])
+  @@index([fieldId, termId])
+  @@index([documentId])
+}
+
+// E15.6: auto-discovered topics proposed as terms; a reviewer accepts or dismisses.
+model TermCandidate {
+  id                String    @id @default(cuid())
+  orgId             String    @map("org_id")
+  topicId           String?   @map("topic_id")
+  label             String
+  normalizedLabel   String    @map("normalized_label")
+  suggestedTermSetId String?  @map("suggested_term_set_id")
+  suggestedParentId String?   @map("suggested_parent_id")
+  status            String    @default("pending") // "pending" | "accepted" | "dismissed"
+  acceptedTermId    String?   @map("accepted_term_id")
+  decidedById       String?   @map("decided_by_id")
+  decidedAt         DateTime? @map("decided_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  topic        Topic?       @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, normalizedLabel])
+  @@index([orgId, status])
+}
+
+// E16.3: an import is parsed into a preview (dry run) and applied later.
+model TaxonomyImport {
+  id          String    @id @default(cuid())
+  orgId       String    @map("org_id")
+  termSetId   String?   @map("term_set_id") // null until applied for a new set
+  format      String    // "skos_ttl" | "skos_rdfxml" | "csv" | "termstore"
+  fileKey     String?   @map("file_key") // S3 key of the uploaded file
+  status      String    @default("parsing") // "parsing" | "preview" | "applying" | "applied" | "failed" | "discarded"
+  summary     Json?     // { added, updated, moved, deprecated, unchanged, errors[] }
+  error       String?
+  createdById String?   @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  appliedAt   DateTime? @map("applied_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  termSet      TermSet?     @relation(fields: [termSetId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+}
+
+// ===== EKP Phase 2 / Workstream D: analytics (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md) =====
+
+model SearchEvent {
+  id              String    @id @default(cuid())
+  orgId           String    @map("org_id")
+  userId          String?   @map("user_id") // SetNull: aggregates survive a user deletion
+  kind            String    // "search" | "repository" | "chat"
+  query           String
+  normalizedQuery String    @map("normalized_query")
+  filters         Json?
+  resultCount     Int       @map("result_count")
+  answerShown     Boolean   @default(false) @map("answer_shown")
+  confidence      String?   // chat: "high" | "medium" | "low" (as OrgMessage.confidence)
+  latencyMs       Int?      @map("latency_ms") // proposal performance figures (Q&A #230)
+  firstTokenMs    Int?      @map("first_token_ms")
+  departmentId    String?   @map("department_id") // searcher's primary department at the time
+  role            String?   // searcher's org role at the time (E29.3)
+  previousEventId String?   @map("previous_event_id") // reformulation link (same user, < 60 s)
+  orgMessageId    String?   @unique @map("org_message_id") // chat answer, for feedback (E30.2)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  organization  Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user          User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  previous      SearchEvent?  @relation("SearchReformulation", fields: [previousEventId], references: [id], onDelete: SetNull)
+  reformulations SearchEvent[] @relation("SearchReformulation")
+  orgMessage    OrgMessage?   @relation(fields: [orgMessageId], references: [id], onDelete: SetNull)
+  clicks        SearchClick[]
+
+  @@index([orgId, createdAt])
+  @@index([orgId, normalizedQuery])
+  @@index([orgId, resultCount, createdAt])
+  @@index([userId, createdAt])
+}
+
+model SearchClick {
+  id            String   @id @default(cuid())
+  searchEventId String   @map("search_event_id")
+  documentId    String?  @map("document_id") // SetNull: CTR history survives a purge
+  rank          Int
+  chunkRef      Json?    @map("chunk_ref") // { slide } or { start } from Chunk.metadata (E)
+  dwellSeconds  Int?     @map("dwell_seconds") // capped at 1,200 s like DocumentInteraction
+  clickedAt     DateTime @default(now()) @map("clicked_at")
+
+  searchEvent SearchEvent @relation(fields: [searchEventId], references: [id], onDelete: Cascade)
+  document    Document?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([searchEventId])
+  @@index([documentId])
+}
+
+model AnalyticsDaily {
+  id            String   @id @default(cuid())
+  orgId         String   @map("org_id")
+  date          DateTime @db.Date
+  metric        String   // "searches" | "ctr" | "bounce_rate" | "p95_latency_ms" | …
+  departmentKey String   @default("all") @map("department_key") // department id or "all"
+  sourceSystem  String   @default("all") @map("source_system") // "sharepoint" | "manual" | … | "all"
+  value         Float
+  dims          Json?    // extra breakdown, e.g. { role: "member" }
+  computedAt    DateTime @default(now()) @map("computed_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, date, metric, departmentKey, sourceSystem])
+  @@index([orgId, metric, date])
+}
+
+model DocumentLink {
+  id            String    @id @default(cuid())
+  documentId    String    @map("document_id")
+  url           String
+  urlHash       String    @map("url_hash") // sha256(url): long URLs don't fit a btree unique key
+  status        String    @default("unknown") // "ok" | "broken" | "unknown"
+  httpStatus    Int?      @map("http_status")
+  checkedAt     DateTime? @map("checked_at")
+  firstBrokenAt DateTime? @map("first_broken_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, urlHash])
+  @@index([status, checkedAt])
+}
+
+// A5: read-only key for the Power BI reporting API. Never stored in clear.
+model ReportingApiKey {
+  id          String    @id @default(cuid())
+  orgId       String    @map("org_id")
+  name        String
+  keyHash     String    @unique @map("key_hash") // sha256 of the key
+  keyPrefix   String    @map("key_prefix") // first 8 chars, shown in the UI
+  createdById String?   @map("created_by_id")
+  lastUsedAt  DateTime? @map("last_used_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("ReportingApiKeyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+}
+
+// ===== EKP Phase 2 / Workstream E part 1: SharePoint tags (A-23) and media (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md) =====
+
+// A-23 / PRS E16.5: managed-metadata values already on the source item (Semaphore tags at NYPA).
+// Raw values only; Workstream C maps them to Term rows (C-8) by termGuid = Term.termStoreGuid.
+model DocumentSourceTag {
+  id               String   @id @default(cuid())
+  documentId       String   @map("document_id")
+  sourceSystem     String   @default("sharepoint") @map("source_system")
+  fieldName        String   @map("field_name") // internal column name
+  fieldDisplayName String?  @map("field_display_name")
+  label            String
+  termGuid         String   @map("term_guid")
+  termSetGuid      String?  @map("term_set_guid")
+  syncedAt         DateTime @default(now()) @map("synced_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, fieldName, termGuid])
+  @@index([termGuid])
+}
+
+// Media work per document (audio extraction, transcription, segments). Keeps history,
+// retries and cost; the document page shows the latest job's status and progress.
+model MediaJob {
+  id           String    @id @default(cuid())
+  orgId        String    @map("org_id")
+  documentId   String    @map("document_id")
+  kind         String    // "extract_audio" | "transcribe" | "segment"
+  status       String    @default("queued") // "queued" | "running" | "done" | "failed"
+  progress     Int       @default(0) // 0–100
+  provider     String?   // "openai-whisper" | "azure-openai" (EQ-1)
+  audioSeconds Float?    @map("audio_seconds")
+  costUsd      Decimal?  @db.Decimal(10, 4) @map("cost_usd")
+  attempts     Int       @default(0)
+  error        String?
+  startedAt    DateTime? @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  document     Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt])
+  @@index([status, createdAt])
+}
+
+// ===== EKP Phase 2 / Workstream E part 2: asset templates (E14) (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md) =====
+
+model AssetTemplate {
+  id          String   @id @default(cuid())
+  orgId       String   @map("org_id")
+  name        String   // "How-To Guide", "FAQ", "SOP", "Key Takeaways"
+  status      String   @default("active") // "active" | "retired"
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  organization Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy    User?                  @relation("AssetTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  versions     AssetTemplateVersion[]
+
+  @@unique([orgId, name])
+}
+
+// E14.4: each saved change is a new immutable version; assets keep the version they were made from.
+model AssetTemplateVersion {
+  id             String   @id @default(cuid())
+  templateId     String   @map("template_id")
+  version        Int
+  sections       Json     // [{ key, title, guidance, required }]
+  requiredFields Json     @default("[]") @map("required_fields") // metadata field keys (E21 / C)
+  createdById    String?  @map("created_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  template  AssetTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@unique([templateId, version])
 }
