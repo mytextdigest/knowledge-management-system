@@ -50,7 +50,8 @@ Every milestone is **demoable**: it ends with a merged PR into `dev` and a short
 - **Commit per change** on the branch. Don't open a PR per task.
 - **One PR per milestone** into `dev`, titled `WS-C M1: Taxonomy exists` and so on. The description lists the E-numbers/FRs covered, the tracker tasks closed, how it was tested, the demo steps and any schema changes. Open it at least **one working day before** the due date so review fits in.
 - **After a milestone PR merges, merge `dev` back into your branch** and continue on the same branch. Don't rebase a branch while its PR is open.
-- **Schema changes land on `dev` first.** A milestone that adds models or fields starts with a **schema-only PR** (the `schema.prisma` change plus its migration folder) into `dev`. Only after it merges is `prisma migrate deploy` run against the shared database. Otherwise a teammate's `migrate dev` sees an unknown migration and asks for a reset. One migration per schema PR.
+- **The planned Phase 2 schema is already in.** Every model and field in [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) for C, D and E landed in one migration, `20261029070816_ekp_p2_schema` (`P2-1`, 2026-10-29), so nobody needs a schema PR to start. Merge `dev` into your branch and run `npx prisma generate`.
+- **Any further schema change lands on `dev` first.** It starts with a **schema-only PR** (the `schema.prisma` change plus its migration folder) into `dev`. Only after it merges is `prisma migrate deploy` run against the shared database. Otherwise a teammate's `migrate dev` sees an unknown migration and asks for a reset. One migration per schema PR.
 - Database rules from the plan §4.3 still apply: never `migrate reset`, never accept a reset prompt, never pass the live database as `--shadow-database-url`, unset any stray `DATABASE_URL` before prisma commands. Create migrations with `npm run ekp:migration:diff -- --name <name>`, not a plain `prisma migrate diff` (see [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §2).
 
 ## 4. Shared files and who changes them in Phase 2
@@ -70,10 +71,10 @@ All schema changes, their order and the migration checklist are in [PHASE2_SCHEM
 
 | Needs | From | By | For |
 | --- | --- | --- | --- |
-| `A-23` raw SharePoint managed-metadata values (`DocumentSourceTag`) | E (`E-2`, `E-3`) | Fri 6 Nov | C-M2 mapping of existing Semaphore tags to terms (E16.5) |
+| `A-23` raw SharePoint managed-metadata values (`DocumentSourceTag`) | E (`E-3`; table in `P2-1`) | Fri 6 Nov | C-M2 mapping of existing Semaphore tags to terms (E16.5) |
 | F7 `searchService` + `SearchEvent` | D (`D-3`, `D-4`) | Fri 6 Nov | C-M3 query expansion and boost, C-M4 facets |
 | Offline search evaluation set + runner | D (`D-13`) and C (`C-11`) build it together | Fri 20 Nov | E3 "measurably better" (C) and E30.5 (D) |
-| Term sets + `DocumentTerm` | C (`C-2`, `C-3`) | Fri 6 Nov | D: content-health and usage breakdowns by term (nice-to-have) |
+| Term sets + `DocumentTerm` | C (`C-3`; tables in `P2-1`) | Fri 6 Nov | D: content-health and usage breakdowns by term (nice-to-have) |
 | Slide and timestamp chunk metadata (`metadata.slide`, `metadata.start`) | E (E-M1, E-M2) | 13 Nov | D: click and citation events record the slide or timestamp |
 | Thumbnails (`Document.thumbnailPath`) | E (`E-15`) | 26 Nov | Search and repository cards (C facet panel sits next to them) |
 

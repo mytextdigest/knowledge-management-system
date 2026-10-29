@@ -78,20 +78,22 @@
 
 ## 4. Shared design (decided once for the workstream)
 
-### 4.1 Data model (schema-only PR `C-2`)
+### 4.1 Data model (in `P2-1`)
 
-> **Final field list:** [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §4. Where it differs from this section, it wins (its §7 lists the differences).
+> **Already in the schema (`P2-1`, 2026-10-29).** All Phase 2 models and fields for C, D and E are in `prisma/schema.prisma` and one migration, `20261029070816_ekp_p2_schema`. You don't write a migration for them. Field-level detail and the reasons for each shape: [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §4. If you need a change, see that doc's §8.
 
-| Model | Fields | Notes |
+| Model | Key fields | Notes |
 | --- | --- | --- |
-| `TermSet` | `id`, `orgId`, `name`, `description`, `source` (`local` \| `external`), `externalId`, `readOnly`, `lastImportedAt`, `createdBy`, timestamps | `readOnly` is true for externally mastered sets (E16.4) |
-| `Term` | `id`, `termSetId`, `parentId`, `label`, `description`, `status` (`active` \| `deprecated`), `mergedIntoId`, `externalId` (SKOS URI), `termStoreGuid`, `path` (materialized, e.g. `/a/b/c`), `depth`, `sortOrder` | `path` makes subtree queries and facet roll-ups one `LIKE 'path%'` |
-| `TermSynonym` | `id`, `termId`, `label`, `kind` (`alt` \| `hidden`) | SKOS `altLabel` / `hiddenLabel` |
-| `TermRelation` | `id`, `fromTermId`, `toTermId`, `kind` (`related`) | SKOS `related`, used by E3.3 |
-| `MetadataField` | `id`, `orgId`, `name`, `termSetId`, `multi`, `required`, `facet`, `facetOrder` | E15.3, E4.4; `required` feeds B's completeness gate (E21) |
-| `DocumentTerm` | `id`, `documentId`, `termId`, `fieldId`, `source` (`manual` \| `auto` \| `source_system` \| `import`), `confidence`, `status` (`suggested` \| `accepted`), `createdBy`, `createdAt` | Unique on (`documentId`, `termId`, `fieldId`) |
+| `TermSet` | `orgId`, `name`, `description`, `source` (`local` \| `external`), `readOnly`, `externalId`, `importFormat`, `lastImportedAt`, `createdById` | Unique (`orgId`, `name`). `readOnly` is true while an external tool is master (E16.4) |
+| `Term` | `termSetId`, `parentId`, `label`, `normalizedLabel`, `description`, `status` (`active` \| `deprecated`), `mergedIntoId`, `ancestorIds String[]` (root first), `depth`, `sortOrder`, `externalId` (SKOS URI), `termStoreGuid`, `embeddingVec vector(1536)`, `embeddedAt` | Subtree and facet roll-up: `ancestor_ids @> ARRAY[termId]` (GIN index). A move rewrites `ancestorIds` for the subtree in one transaction. `parent` is `Restrict`: deprecate or merge, never delete with children. `embeddingVec` is read/written with `$queryRaw`, no ANN index |
+| `TermSynonym` | `termId`, `label`, `normalizedLabel`, `kind` (`alt` \| `hidden`) | SKOS `altLabel` / `hiddenLabel`. Look up by `normalizedLabel` (lower-case, trimmed, single spaces) |
+| `TermRelation` | `fromTermId`, `toTermId`, `kind` (`related`) | SKOS `related`, used by E3.3 |
+| `MetadataField` | `orgId`, `key`, `name`, `termSetId`, `multi`, `required`, `facet`, `facetOrder` | Unique (`orgId`, `key`). E15.3, E4.4. Whether `required` or B's `metadata.requiredFields` setting drives the publish gate is open (schema doc SQ-3) |
+| `DocumentTerm` | `documentId`, `termId`, `fieldId` (required), `source` (`manual` \| `auto` \| `source_system` \| `import`), `status` (`suggested` \| `accepted`), `confidence`, `createdById`, `acceptedById`, `acceptedAt` | Unique (`documentId`, `fieldId`, `termId`). `term` is `Restrict`: merge re-points tags before a term can go |
+| `TermCandidate` | `orgId`, `topicId`, `label`, `normalizedLabel`, `suggestedTermSetId`, `suggestedParentId`, `status` (`pending` \| `accepted` \| `dismissed`), `acceptedTermId`, `decidedById`, `decidedAt` | E15.6 approvals. Unique (`orgId`, `normalizedLabel`) |
+| `TaxonomyImport` | `orgId`, `termSetId`, `format` (`skos_ttl` \| `skos_rdfxml` \| `csv` \| `termstore`), `fileKey` (S3), `status` (`parsing` → `preview` → `applying` → `applied`, or `failed` / `discarded`), `summary Json`, `error`, `appliedAt` | E16.3 dry run: parse to a preview, apply later |
 
-Indexes: `Term(termSetId, parentId)`, `Term(termSetId, path)`, `Term(externalId)`, `Term(termStoreGuid)`, `TermSynonym(label)` (lower-case), `DocumentTerm(termId)`, `DocumentTerm(documentId)`.
+Unique label under one parent is enforced by the API, not the database (root terms have `parentId = NULL`, and Postgres treats NULLs as distinct).
 
 **Merge and deprecate (E15.5):** merging term X into Y sets `X.status = deprecated`, `X.mergedIntoId = Y` and moves X's `DocumentTerm` rows to Y in one transaction. Deprecating without a target keeps the tags but hides the term from new tagging. Both write `taxonomy.changed` audit events with before/after.
 
@@ -111,7 +113,7 @@ Each milestone ends with a PR from `feature/ekp-ws-c` into `dev`, opened one wor
 
 ### C-M1 Taxonomy exists (due Fri 6 Nov)
 
-- **Build:** `C-2` schema-only PR (merge after E's `A-23` schema PR, see overview §4). `C-3` default Category term set: migration seeds the 7 categories per org, backfills `DocumentTerm` from `Document.category`, and `classify.js` dual-writes. `C-4` admin page **Settings → Taxonomy**: term-set list, lazy tree editor (create, nest, rename, reorder, deprecate, merge), synonyms and description per term, tree search; every change audited. `C-5` metadata fields (bound to a term set, single/multi, required) and manual tagging on the document page.
+- **Build:** `C-2` schema: already done in `P2-1` (§4.1). `C-3` default Category term set: an idempotent script (`scripts/ekp/p2/c3-default-category-termset.mjs`, schema doc §4.3) seeds the 7 categories per org, backfills `DocumentTerm` from `Document.category`, and `classify.js` dual-writes. `C-4` admin page **Settings → Taxonomy**: term-set list, lazy tree editor (create, nest, rename, reorder, deprecate, merge), synonyms and description per term, tree search; every change audited. `C-5` metadata fields (bound to a term set, single/multi, required) and manual tagging on the document page.
 - **Edge cases:** a cycle when moving a term (reject); deleting a term set that has tags (block, offer deprecate); a guest or member calling write APIs (403); duplicate labels under one parent (reject).
 - **Demo script:** (1) As org admin, create term set "Asset Type" with 3 levels and synonyms. (2) Merge two terms; a document tagged with the old one now shows the new one. (3) Open an existing document: its category shows as a term. (4) As a member, the editor is read-only.
 - **Acceptance:** 3-level term set with synonyms built through the UI; merge re-points tags; all changes appear in the audit log; member and guest can't write.
@@ -132,7 +134,7 @@ Each milestone ends with a PR from `feature/ekp-ws-c` into `dev`, opened one wor
 
 ### C-M4 Facets + tuning (due Tue 24 Nov)
 
-- **Build:** `C-12` F7 returns `facets: [{ fieldId, buckets: [{ termId, label, count, children }] }]` for admin-selected facet fields; counts roll up through `Term.path` and are computed with the F1 predicate. A shared facet panel on the search page and the repository (expand/collapse, counts, combinable with department, source system, file type, date, lifecycle, owner). `C-13` E3.4 weights (`w_keyword`, `w_vector`, `w_term`, `w_graph`) in F5 settings with a reset-to-default. `C-14` export a term set as SKOS TTL and CSV (stretch).
+- **Build:** `C-12` F7 returns `facets: [{ fieldId, buckets: [{ termId, label, count, children }] }]` for admin-selected facet fields; counts roll up through `Term.ancestorIds` (`ancestor_ids @> ARRAY[termId]`) and are computed with the F1 predicate. A shared facet panel on the search page and the repository (expand/collapse, counts, combinable with department, source system, file type, date, lifecycle, owner). `C-13` E3.4 weights (`w_keyword`, `w_vector`, `w_term`, `w_graph`) in F5 settings with a reset-to-default. `C-14` export a term set as SKOS TTL and CSV (stretch).
 - **Demo script:** (1) Search "transformer maintenance", pick the parent facet, then a child; counts update. (2) Same search as a guest: the counts are lower and don't reveal restricted documents. (3) Change a facet field's order in settings; the panel follows.
 - **Acceptance:** PRS E4 acceptance; E4.3 checked with a member and a guest.
 
@@ -161,7 +163,7 @@ Each milestone ends with a PR from `feature/ekp-ws-c` into `dev`, opened one wor
 | Task ID | Milestone · Title | Status | Assignee | Depends On | PR | Started | Completed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `C-1` | Finalize this document (shared design + C-M1), reviewed by Johurul | `TODO` | Sandeep | — | | | |
-| `C-2` | C-M1 · Schema-only PR: `TermSet`, `Term`, `TermSynonym`, `TermRelation`, `MetadataField`, `DocumentTerm` | `TODO` | Sandeep | `C-1`, `E-2` schema PR merged | | | |
+| `C-2` | C-M1 · Schema: `TermSet`, `Term`, `TermSynonym`, `TermRelation`, `MetadataField`, `DocumentTerm`, `TermCandidate`, `TaxonomyImport` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
 | `C-3` | C-M1 · Default Category term set, backfill `DocumentTerm` from `Document.category`, dual-write in `classify.js` | `TODO` | Sandeep | `C-2` | | | |
 | `C-4` | C-M1 · Taxonomy admin: lazy tree editor, synonyms, deprecate/merge, search, audit | `TODO` | Sandeep | `C-2` | | | |
 | `C-5` | C-M1 · Metadata fields + manual tagging on the document page | `TODO` | Sandeep | `C-2` | | | |

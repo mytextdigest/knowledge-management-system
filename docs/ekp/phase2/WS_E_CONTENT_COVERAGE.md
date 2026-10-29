@@ -53,17 +53,19 @@ Workstream E has two parts. Both are in this document. Part 1 is NYPA's main con
 
 ## 3. Shared design
 
-### 3.1 Data model
+### 3.1 Data model (in `P2-1`)
 
-> **Final field list:** [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §6. Where it differs from this section, it wins (its §7 lists the differences).
+> **Already in the schema (`P2-1`, 2026-10-29).** All Phase 2 models and fields for C, D and E are in `prisma/schema.prisma` and one migration, `20261029070816_ekp_p2_schema`. You don't write a migration for them. Field-level detail and the reasons for each shape: [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §6. If you need a change, see that doc's §8.
 
-Two schema-only PRs, so C can reference `DocumentSourceTag` in week 1:
-
-| PR | Model / field | Notes |
+| Part | Model / field | Notes |
 | --- | --- | --- |
-| `E-2` (E-M1, first schema PR of the phase) | `DocumentSourceTag` (`id`, `documentId`, `sourceSystem`, `field`, `label`, `termGuid`, `termSetGuid?`, `raw Json`, `syncedAt`) | `A-23`. Unique on (`documentId`, `field`, `termGuid`). C maps rows to `DocumentTerm` (`C-8`). |
-| `E-2` | `Document.transcriptOfId` (self-relation), `Document.durationSeconds`, `Document.mediaSegments Json` (`[{ title, start, end }]`), `Document.mediaStatus` (`queued` \| `extracting` \| `transcribing` \| `segmenting` \| `done` \| `failed`), `Document.mediaProgress Int` | Part 1. Added together so part 1 needs one migration. |
-| `E-13` (E-M4) | `Document.thumbnailPath`, `AssetTemplate` (`id`, `orgId`, `name`, `version`, `sections Json`, `requiredFields Json`, `status`, `createdBy`, timestamps), `Document.templateId`, `templateVersion` | Part 2. |
+| 1 (`A-23`) | `DocumentSourceTag`: `documentId`, `sourceSystem` (default `sharepoint`), `fieldName`, `fieldDisplayName`, `label`, `termGuid`, `termSetGuid`, `syncedAt` | Raw values only. Unique (`documentId`, `fieldName`, `termGuid`). C maps rows to `DocumentTerm` by `termGuid = Term.termStoreGuid` (`C-8`) |
+| 1 | `MediaJob`: `orgId`, `documentId`, `kind` (`extract_audio` \| `transcribe` \| `segment`), `status` (`queued` \| `running` \| `done` \| `failed`), `progress` 0–100, `provider`, `audioSeconds`, `costUsd`, `attempts`, `error`, `startedAt`, `finishedAt` | One row per job: history, retries, minutes and cost (Q&A #230, EQ-1). The document page shows the latest job |
+| 1 | `Document.transcriptOfId` (self-relation, `SetNull`), `transcriptLinkSource` (`auto` \| `manual`), `durationSeconds`, `mediaSegments Json` (`[{ title, start, end }]`) | A sync never overwrites a `manual` link (§3.4) |
+| 1 | `SyncRun.filesSkipped` | `A-24` per-run skipped count, deferred from Phase 1 |
+| 2 | `Document.thumbnailPath` | S3 `thumbnails/{docId}.jpg` (E13) |
+| 2 | `AssetTemplate` (`orgId`, `name`, `status`, `createdById`) + `AssetTemplateVersion` (`templateId`, `version`, `sections Json`, `requiredFields Json`) | Versions are immutable (E14.4). `Document.templateVersionId` is `Restrict`: a version in use can't be deleted |
+| 2 | `Document.templateVersionId`, `Document.assetData Json` | `assetData` holds the structured sections; `content` keeps the rendered text for search and chunking |
 
 SAML Jackson (`A-16`) creates its own tables in the separate `jackson` Postgres schema, outside Prisma. Run its first start against the shared database only after telling the team, and confirm `prisma migrate diff` still reports no drift.
 
@@ -92,7 +94,7 @@ source (S3 or Graph) ──stream──▶ temp file ──ffmpeg──▶ audio
 
 - Temp files live under the worker's temp dir and are deleted in a `finally`. Worker memory must stay flat regardless of file size (E11.6 test).
 - `ffmpeg` is on the dev machine (`/usr/bin/ffmpeg`); the worker image must include it (check the deploy image in `E-6`).
-- Media jobs are separate from the normal document job, report `mediaStatus` and `mediaProgress`, and can be retried from the document page.
+- Media jobs are separate from the normal document job, write a `MediaJob` row per step (status, progress, attempts, cost), and can be retried from the document page.
 - `A-24` stays for non-media files above the size limit. For media types, the guard no longer skips: the file is streamed. Files the guard skipped earlier are picked up on their next sync (clear their skip status in `E-6`).
 
 ### 3.4 Transcript ↔ recording linking (E11.5)
@@ -105,7 +107,7 @@ Each milestone ends with a PR from `feature/ekp-ws-e` into `dev`, opened one wor
 
 ### E-M1 PowerPoint searchable + SharePoint tags kept (due Fri 6 Nov)
 
-- **Build:** `E-2` schema-only PR (first of the phase, merged on Mon 2 / Tue 3 Nov). `E-3` `A-23`: during SharePoint sync read `/drives/{d}/items/{i}/listItem?$expand=fields`, store taxonomy-field values as `DocumentSourceTag` rows, show them on the document page (raw, until C maps them). `E-4` E11.4: one allow-list module shared by upload (`UploadToRepositoryModal.jsx`), the upload API and the SharePoint mime filter; unsupported files are rejected with "KMS can't read .xyz files yet" (upload) or listed as skipped with a reason (sync). `E-5` E11.1 PPTX: unzip with `jszip` (add it as a direct dependency; today it only comes in through `mammoth`), read `ppt/slides/slideN.xml` and `ppt/notesSlides/notesSlideN.xml` in presentation order, one chunk per slide (title + body + notes), `metadata.slide`; viewer opens at a slide.
+- **Build:** `E-2` schema: already done in `P2-1` (§3.1). `E-3` `A-23`: during SharePoint sync read `/drives/{d}/items/{i}/listItem?$expand=fields`, store taxonomy-field values as `DocumentSourceTag` rows, show them on the document page (raw, until C maps them). `E-4` E11.4: one allow-list module shared by upload (`UploadToRepositoryModal.jsx`), the upload API and the SharePoint mime filter; unsupported files are rejected with "KMS can't read .xyz files yet" (upload) or listed as skipped with a reason (sync). `E-5` E11.1 PPTX: unzip with `jszip` (add it as a direct dependency; today it only comes in through `mammoth`), read `ppt/slides/slideN.xml` and `ppt/notesSlides/notesSlideN.xml` in presentation order, one chunk per slide (title + body + notes), `metadata.slide`; viewer opens at a slide.
 - **Edge cases:** a slide with no text (skip, keep numbering); hidden slides (index, mark hidden); a password-protected PPTX (fail with a clear status); a SharePoint item with several taxonomy fields or multi-value fields (one row per value); a tag removed in SharePoint (row deleted on the next sync).
 - **Demo script:** (1) Upload a 20-slide PPTX; ask a question answered on slide 7; the citation says "slide 7" and opens there. (2) Upload a `.ppt` and a `.exe`: both refused with a clear message. (3) In the test tenant, set a managed-metadata value on a SharePoint file, sync, and show it on the KMS document page.
 - **Acceptance:** E11.1 and E11.4; `A-23` acceptance from WS-A ("a file with a managed-metadata value in the test tenant arrives with that value stored on the document").
@@ -124,7 +126,7 @@ Each milestone ends with a PR from `feature/ekp-ws-e` into `dev`, opened one wor
 
 ### E-M4 Images, previews, templates (due Thu 26 Nov)
 
-- **Build:** `E-13` schema-only PR for part 2. `E-14` E11.2 images (PNG, JPG): Tesseract OCR plus a vision-model description, both indexed, `metadata.kind = image`. `E-15` E13 thumbnails into S3 `thumbnails/{docId}.jpg`: PDF first page (`pdfjs-dist`), PPTX embedded `docProps/thumbnail.jpeg` (fallback: a generic slide icon), image downscale (`sharp`), video frame at 1 s (`ffmpeg`); shown on repository and search cards; in-app preview for images, slides and video. `E-16` E14 templates: admin defines How-To, FAQ, SOP and Key Takeaways templates (sections, guidance, required fields) in settings; "New from template" opens an editor; the asset enters B's publishing workflow (F6) and is ingested like any document; template versions keep existing assets unchanged.
+- **Build:** `E-13` schema: already done in `P2-1` (§3.1). `E-14` E11.2 images (PNG, JPG): Tesseract OCR plus a vision-model description, both indexed, `metadata.kind = image`. `E-15` E13 thumbnails into S3 `thumbnails/{docId}.jpg`: PDF first page (`pdfjs-dist`), PPTX embedded `docProps/thumbnail.jpeg` (fallback: a generic slide icon), image downscale (`sharp`), video frame at 1 s (`ffmpeg`); shown on repository and search cards; in-app preview for images, slides and video. `E-16` E14 templates: admin defines How-To, FAQ, SOP and Key Takeaways templates (sections, guidance, required fields) in settings; "New from template" opens an editor; the asset enters B's publishing workflow (F6) and is ingested like any document; template versions keep existing assets unchanged.
 - **Demo script:** (1) Upload a photo of a nameplate; search for the serial number on it; it's found. (2) Repository shows thumbnails for a PDF, a PPTX, an image and a video, and each previews in-app. (3) As admin, create a "How-To" template; as a member, create a How-To from it and submit; a reviewer publishes it; it appears in search.
 - **Acceptance:** PRS E11 (image), E13 and E14 acceptance.
 
@@ -153,7 +155,7 @@ Each milestone ends with a PR from `feature/ekp-ws-e` into `dev`, opened one wor
 | Task ID | Milestone · Title | Status | Assignee | Depends On | PR | Started | Completed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `E-1` | Finalize this document (shared design + E-M1), reviewed by Sandeep or Simran | `TODO` | Johurul | — | | | |
-| `E-2` | E-M1 · Schema-only PR: `DocumentSourceTag` + part 1 `Document` media fields | `TODO` | Johurul | `E-1` | | | |
+| `E-2` | E-M1 · Schema: `DocumentSourceTag`, `MediaJob`, part 1 `Document` media fields, `SyncRun.filesSkipped` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
 | `E-3` | E-M1 · **`A-23`**: store SharePoint managed-metadata values on synced documents (PRS E16.5) | `TODO` | Johurul | `E-2` | | | |
 | `E-4` | E-M1 · E11.4: shared format allow-list (upload, API, SharePoint filter); clear rejection messages | `TODO` | Johurul | `E-1` | | | |
 | `E-5` | E-M1 · E11.1: PPTX slides + notes, one chunk per slide, "slide N" citations, viewer opens at slide | `TODO` | Johurul | `E-4` | | | |
@@ -167,7 +169,7 @@ Each milestone ends with a PR from `feature/ekp-ws-e` into `dev`, opened one wor
 | `E-11` | E-M3 · E11.7: topic segments + chapter list | `TODO` | Johurul | `E-8` | | | |
 | `E-12` | E-M3 · **`A-16`**: SAML 2.0 via embedded SAML Jackson + `BoxyHQSAMLProvider` (RFP §6 S2) | `TODO` | Johurul | `E-1` | | | |
 | `E-M3` | **Milestone PR + demo: Transcription, chapters, SAML** (due Fri 20 Nov) | `TODO` | Johurul | `E-10`–`E-12` | | | |
-| `E-13` | E-M4 · Schema-only PR: `thumbnailPath`, `AssetTemplate`, `Document.templateId/templateVersion` | `TODO` | Johurul | `E-M3` | | | |
+| `E-13` | E-M4 · Schema: `thumbnailPath`, `AssetTemplate`, `AssetTemplateVersion`, `Document.templateVersionId`, `assetData` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
 | `E-14` | E-M4 · E11.2: images, OCR + vision caption | `TODO` | Johurul | `E-M3` | | | |
 | `E-15` | E-M4 · E13: thumbnails (PDF, PPTX, image, video) + in-app previews | `TODO` | Johurul | `E-13` | | | |
 | `E-16` | E-M4 · E14: templates, editor, F6 publishing, versioning (first to move to Phase 3 if late) | `TODO` | Johurul | `E-13` | | | |

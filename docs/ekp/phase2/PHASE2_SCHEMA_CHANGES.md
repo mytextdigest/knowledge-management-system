@@ -4,7 +4,7 @@
 | --------------- | --------------------------------------------------------------------------------------- |
 | **Covers**      | Workstreams C (Sandeep), D (Simran), E (Johurul)                                         |
 | **Created**     | 2026-10-29, checked against `prisma/schema.prisma` on `dev` at `fb1397b` and a read-only `prisma migrate diff` against the shared database |
-| **Status**      | Proposal for review. Each workstream confirms its part in its first task (`C-1`, `D-1`, `E-1`). |
+| **Status**      | **Implemented (`P2-1`, 2026-10-29).** Everything in §4–§6 is in `prisma/schema.prisma` and one migration, `20261029070816_ekp_p2_schema`. Changes after this go through §8. |
 | **Precedence**  | Where this document and a workstream document differ on fields, **this document wins**. §7 lists the differences. |
 
 **Related:** [PHASE2_OVERVIEW.md](PHASE2_OVERVIEW.md) (branches, schema PR order) · [WS_C_TAXONOMY_SEMANTIC_LAYER.md](WS_C_TAXONOMY_SEMANTIC_LAYER.md) · [WS_D_ANALYTICS_DASHBOARDS.md](WS_D_ANALYTICS_DASHBOARDS.md) · [WS_E_CONTENT_COVERAGE.md](WS_E_CONTENT_COVERAGE.md) · database rules in [EKP_IMPLEMENTATION_PLAN.md](../EKP_IMPLEMENTATION_PLAN.md) §4.3.
@@ -15,13 +15,15 @@
 | --- | --- | --- | --- | --- |
 | New models | 8 | 5 | 4 | **17** |
 | Existing models changed | `Organization`, `User` (back-relations), `Document` (back-relations) | `Document` (+1 field), `KnowledgeGap` (+1), `OrgMessage` (back-relation) | `Document` (+7 fields), `SyncRun` (+1) | 6 |
-| Schema-only PRs | 1 (`C-2`) | 1 (`D-2`) | 2 (`E-2`, `E-13`) | **4** + 1 baseline fix |
+| Schema PRs | in `P2-1` | in `P2-1` | in `P2-1` | **1** (`P2-1`) + the `P2-0` baseline fix |
 | Data back-fills (scripts, not SQL) | Default Category term set + `DocumentTerm` from `Document.category` | `Document.contentUpdatedAt` | — | 2 |
 | Settings only (no migration) | 3 keys | 4 keys | 3 keys | 10 |
 
 Every change is **additive** (new tables, new nullable or defaulted columns). Nothing existing is renamed or dropped in Phase 2, so the deployed app keeps working between a schema PR and the code that uses it.
 
-**Checked (2026-10-29):** all the Prisma blocks below were merged into a copy of `schema.prisma` from `dev`. `prisma validate` passes, and an offline `prisma migrate diff` (schema to schema, no database) creates the 17 tables and adds the columns, foreign keys and indexes, with no `DROP` or type change to existing columns.
+**Implemented (2026-10-29, `P2-1`):** the Prisma blocks below are in `schema.prisma` as written. `prisma validate` passes. `20261029070816_ekp_p2_schema` was generated with `npm run ekp:migration:diff` against the shared database: 17 `CREATE TABLE`, `ADD COLUMN` on `Document` (8), `KnowledgeGap` (1) and `SyncRun` (1), foreign keys and indexes, no `DROP` and no change to an existing column.
+
+**Why one migration instead of four:** with the four staggered schema PRs (E → C → D → E part 2), each owner had to merge the previous one, regenerate, and deploy in order, and any slip or parallel branch meant migration conflicts on the shared database. All of it is additive and unused until code reads it, so landing it once lets C, D and E build in parallel from day one with no schema PR in their milestones.
 
 ## 2. Read this first: two problems that affect every Phase 2 migration
 
@@ -67,9 +69,9 @@ After these fixes, all 57 applied migrations match their files, `migrate status`
 - **Nullable columns in unique keys:** Postgres treats NULLs as distinct, so `@@unique([a, b])` with a nullable `b` doesn't stop duplicates. The designs below avoid nullable columns in unique keys, or say where the app must enforce uniqueness.
 - **Case-insensitive lookups:** Prisma can't declare an index on `lower(label)`. Store a `normalized*` column (lower-case, trimmed, single spaces) and index that.
 - **Data back-fills run as idempotent scripts** (`scripts/ekp/p2/*.mjs`) after `migrate deploy`, not as SQL in the migration. SQL can't generate `cuid()` ids, and a script can be re-run safely.
-- Migration folder names: `202611DDHHMMSS_ekp_p2_<ws>_<name>`, e.g. `20261103000000_ekp_p2_e_source_tags_media`.
+- Migration folder names: `<timestamp>_ekp_p2_<ws>_<name>`, e.g. `20261110120000_ekp_p2_c_term_notes` (the helper adds the timestamp).
 
-## 4. Workstream C: taxonomy (schema PR `C-2`, Wed 4 Nov)
+## 4. Workstream C: taxonomy (in `P2-1`; was `C-2`)
 
 ### 4.1 Models
 
@@ -284,7 +286,7 @@ model TaxonomyImport {
 
 `search.weights` (`{ keyword, vector, term, graph }`, E3.4), `classification.termThreshold` (auto-accept confidence for term tags), `classification.maxCandidateTerms` (shortlist size, default 40).
 
-## 5. Workstream D: analytics (schema PR `D-2`, Thu 5 Nov)
+## 5. Workstream D: analytics (in `P2-1`; was `D-2`)
 
 ### 5.1 Models
 
@@ -437,9 +439,9 @@ Add `@@index([orgId, contentUpdatedAt])` to `Document`.
 
 `analytics.bounceWindowSeconds` (60), `analytics.reformulationWindowSeconds` (60), `analytics.rawRetentionMonths` (13, DQ-2), `links.checkTimeoutSeconds` (10).
 
-## 6. Workstream E: content coverage (schema PRs `E-2`, Tue 3 Nov, and `E-13`, ~Mon 23 Nov)
+## 6. Workstream E: content coverage (in `P2-1`; was `E-2` and `E-13`)
 
-### 6.1 `E-2`: SharePoint tags (`A-23`) and media (part 1)
+### 6.1 Part 1: SharePoint tags (`A-23`) and media
 
 ```prisma
 // A-23 / PRS E16.5: managed-metadata values already on the source item (Semaphore tags at NYPA).
@@ -513,7 +515,7 @@ model SyncRun {
 
 **Back-relations to add:** `Organization`: `mediaJobs MediaJob[]`.
 
-### 6.2 `E-13`: thumbnails and templates (part 2)
+### 6.2 Part 2: thumbnails and templates
 
 ```prisma
 model AssetTemplate {
@@ -597,7 +599,7 @@ model Document {
 
 ## 7. Differences from the workstream documents
 
-The workstream documents were written before this check. Their owners should update them in `C-1`, `D-1` and `E-1`.
+The workstream documents were written before this check. **Their data-model sections were updated to the final fields on 2026-10-29**; the table is kept as a record of what changed from the first draft.
 
 | Doc | Workstream doc says | This document | Why |
 | --- | --- | --- | --- |
@@ -618,23 +620,28 @@ The workstream documents were written before this check. Their owners should upd
 
 ## 8. Order, owners and checks
 
-| # | PR | Owner | Merge by | Contents | Back-fill after deploy |
+| # | PR | Owner | Date | Contents | Back-fill after deploy |
 | --- | --- | --- | --- | --- | --- |
-| 0 | `P2-0` baseline | Johurul | Mon 2 Nov | `@@index([orgId, kind, active])` on `WorkflowDefinition` (schema only, no migration folder) + `scripts/ekp/migration-diff.mjs` / `npm run ekp:migration:diff`. **Done locally 2026-10-29, not yet merged.** | — |
-| 1 | `E-2` | Johurul | Tue 3 Nov | §6.1 | — |
-| 2 | `C-2` | Sandeep | Wed 4 Nov | §4.1 | `c3-default-category-termset.mjs` |
-| 3 | `D-2` | Simran | Thu 5 Nov | §5.1 | `d2-content-updated-at.mjs` |
-| 4 | `E-13` | Johurul | ~Mon 23 Nov | §6.2 | — |
+| 0 | `P2-0` baseline | Johurul | 2026-10-29 | `@@index([orgId, kind, active])` on `WorkflowDefinition` (no migration folder), three migration newline fixes, `npm run ekp:migration:diff` | — |
+| 1 | `P2-1` Phase 2 schema | Johurul | 2026-10-29 | §4, §5 and §6 in one migration, `20261029070816_ekp_p2_schema`. Replaces `C-2`, `D-2`, `E-2` and `E-13` | — (see below) |
 
-**Steps for each schema PR** (same as the plan §4.3 and the overview §3):
+**Rollout of `P2-1`** (Johurul, before Mon 2 Nov):
+1. Push `P2-0` and `P2-1` to `dev`.
+2. Announce in the channel, then `unset DATABASE_URL && npx prisma migrate deploy` once against the shared database, then `npx prisma migrate status` shows "up to date" and `npm run ekp:migration:diff -- --check` shows no changes.
+3. Everyone: `git pull` on `dev`, merge `dev` into your workstream branch, `npx prisma generate`. No `migrate dev` needed.
 
-1. `git pull` on `dev`, then merge `dev` into your workstream branch, so the previous schema PR is in your schema.
+**Back-fills stay with the workstream tasks** (idempotent scripts, run once by the owner after their code is ready, not at deploy):
+- `C-3` Sandeep: `scripts/ekp/p2/c3-default-category-termset.mjs` (§4.3)
+- `D-9` Simran: `scripts/ekp/p2/d2-content-updated-at.mjs` (§5.3), together with setting `contentUpdatedAt` in the upload, replace, restore and sync paths
+
+**If you need a schema change after `P2-1`** (a missed field, an index): keep it small and additive, and follow these steps:
+
+1. `git pull` on `dev`, then merge `dev` into your workstream branch.
 2. `unset DATABASE_URL`. Edit `schema.prisma`.
 3. Generate the migration with `npm run ekp:migration:diff -- --name <name>` (§2). Don't use a plain `prisma migrate diff`: it adds a `DROP INDEX` for the vector index.
-4. Read the generated `migration.sql`: it must contain only this document's changes for your PR.
-5. Open a **schema-only PR** into `dev` (the `schema.prisma` change + the migration folder, nothing else). The reviewer checks the SQL line by line.
-6. After it merges: `npx prisma migrate deploy` once against the shared database (the owner does this, after announcing it), then run the back-fill script, then `npx prisma migrate status` shows "up to date".
-7. Post in the channel; the next owner starts at step 1.
+4. Read the generated `migration.sql`: it must contain only your change.
+5. Open a **schema-only PR** into `dev` (the `schema.prisma` change + the migration folder, nothing else). The reviewer checks the SQL line by line. Post in the channel so nobody else generates a migration at the same time.
+6. After it merges: `npx prisma migrate deploy` once against the shared database (the owner does this, after announcing it), then `npx prisma migrate status` shows "up to date".
 
 **Never** `migrate reset`, never accept a reset prompt from `migrate dev`, never pass the live database as `--shadow-database-url`.
 
@@ -644,6 +651,6 @@ The workstream documents were written before this check. Their owners should upd
 | --- | --- | --- |
 | SQ-1 | Is the `MediaJob` model (instead of two `Document` columns) agreed? | Yes (§6.3) |
 | SQ-2 | Is `Document.contentUpdatedAt`, set only on content changes, agreed? | Yes (§5.2). B's stale scan can switch to it later. |
-| SQ-3 | Required metadata lives in two places: B's setting `metadata.requiredFields` (used by the publish gate, `src/lib/governance/publishGate.js`) and C's `MetadataField.required`. Which one is the source of truth? | Keep B's setting as the source of truth in Phase 2; let a rule reference a metadata field key. Drop `MetadataField.required` if the team agrees. |
+| SQ-3 | Required metadata lives in two places: B's setting `metadata.requiredFields` (used by the publish gate, `src/lib/governance/publishGate.js`) and C's `MetadataField.required`. Which one is the source of truth? | Keep B's setting as the source of truth in Phase 2; let a rule reference a metadata field key. `MetadataField.required` is in `P2-1` (default `false`); if the team agrees, leave it unused rather than drop it, so no destructive migration is needed. |
 | SQ-4 | Do SharePoint tags whose `termGuid` matches no imported term stay raw only, or create a placeholder term? | Raw only, reported in the import summary (CQ-1) |
 | SQ-5 | Raw `SearchEvent` retention | 13 months (DQ-2) |

@@ -62,17 +62,19 @@
 - It returns `{ results, searchEventId, facets? }`. The UI sends `searchEventId` back with every click.
 - C adds term expansion, boost and facets inside it from C-M3. D owns the file; changes from C go through D's review.
 
-### 4.2 Data model (schema-only PR `D-2`)
+### 4.2 Data model (in `P2-1`)
 
-> **Final field list:** [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §5. Where it differs from this section, it wins (its §7 lists the differences).
+> **Already in the schema (`P2-1`, 2026-10-29).** All Phase 2 models and fields for C, D and E are in `prisma/schema.prisma` and one migration, `20261029070816_ekp_p2_schema`. You don't write a migration for them. Field-level detail and the reasons for each shape: [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §5. If you need a change, see that doc's §8.
 
-| Model / field | Fields | Notes |
+| Model / field | Key fields | Notes |
 | --- | --- | --- |
-| `SearchEvent` | `id`, `orgId`, `userId`, `kind`, `query`, `normalizedQuery`, `filters Json`, `resultCount`, `answerShown`, `confidence`, `latencyMs`, `firstTokenMs`, `departmentId?`, `sourceSystems[]`, `previousEventId?`, `createdAt` | `previousEventId` links a reformulation (same user, within 60 s) |
-| `SearchClick` | `id`, `searchEventId`, `documentId`, `rank`, `chunkRef Json?` (slide or timestamp from E), `clickedAt`, `dwellSeconds` | Dwell reuses the `DocumentInteraction` timer (capped at 1,200 s) |
-| `AnalyticsDaily` | `orgId`, `departmentId?`, `sourceSystem?`, `date`, `metric`, `value`, `dims Json?` | Unique on (`orgId`, `departmentId`, `sourceSystem`, `date`, `metric`) |
-| `DocumentLink` | `id`, `documentId`, `url`, `status` (`ok` \| `broken` \| `unknown`), `httpStatus`, `checkedAt`, `firstBrokenAt` | E28.4 |
-| `KnowledgeGap.queryIds` | `String[]` (new field) | E30.4: links gaps to the triggering `SearchEvent`s |
+| `SearchEvent` | `orgId`, `userId?`, `kind` (`search` \| `repository` \| `chat`), `query`, `normalizedQuery`, `filters Json`, `resultCount`, `answerShown`, `confidence`, `latencyMs`, `firstTokenMs`, `departmentId`, `role`, `previousEventId`, `orgMessageId` (unique) | `previousEventId` links a reformulation (same user, within 60 s). `departmentId` and `role` are copied at search time (E29.3). `orgMessageId` links a chat answer so its existing `OrgMessage.feedback` gives E30.2 per query. `userId` is `SetNull` |
+| `SearchClick` | `searchEventId`, `documentId?`, `rank`, `chunkRef Json?` (slide or timestamp from E), `dwellSeconds`, `clickedAt` | Dwell reuses the `DocumentInteraction` timer (capped at 1,200 s). `documentId` is `SetNull`, so CTR history survives a purge |
+| `AnalyticsDaily` | `orgId`, `date` (`@db.Date`), `metric`, `departmentKey` (default `"all"`), `sourceSystem` (default `"all"`), `value`, `dims Json?`, `computedAt` | Unique (`orgId`, `date`, `metric`, `departmentKey`, `sourceSystem`). Use `"all"`, never NULL, so the nightly roll-up can `upsert` |
+| `DocumentLink` | `documentId`, `url`, `urlHash` (sha256 of `url`), `status` (`ok` \| `broken` \| `unknown`), `httpStatus`, `checkedAt`, `firstBrokenAt` | E28.4. Unique (`documentId`, `urlHash`) |
+| `ReportingApiKey` | `orgId`, `name`, `keyHash` (unique), `keyPrefix`, `createdById`, `lastUsedAt`, `revokedAt` | §4.4 Power BI key. Looked up by hash per request |
+| `Document.contentUpdatedAt` | `DateTime?` (new field, indexed with `orgId`) | E28.1 recency. Set only when content changes (upload, replace, restore, sync), not on every row update. Back-fill script `scripts/ekp/p2/d2-content-updated-at.mjs` (schema doc §5.3) |
+| `KnowledgeGap.queryIds` | `String[]` (new field) | E30.4: links gaps to the triggering `SearchEvent`s, keep the latest 50 |
 
 **Privacy:** queries are stored with the user id because E29.3 needs adoption by role and department. Dashboards only show aggregates and query text, never which user searched for what. The raw event table is org-admin only.
 
@@ -96,7 +98,7 @@ Each milestone ends with a PR from `feature/ekp-ws-d` into `dev`, opened one wor
 
 ### D-M1 Searches are measured (due Fri 6 Nov)
 
-- **Build:** `D-2` schema-only PR (after E's and C's schema PRs; see overview §4). `D-3` F7 search service + parity test. `D-4` event logging: `SearchEvent` per search and chat question (with latency), `SearchClick` with rank and dwell, reformulation link. `D-5` analytics section shell with the Search activity tab (recent searches, no-results list with frequency, top queries) and the Governance tab (B's page moved, old URL redirects).
+- **Build:** `D-2` schema: already done in `P2-1` (§4.2). `D-3` F7 search service + parity test. `D-4` event logging: `SearchEvent` per search and chat question (with latency), `SearchClick` with rank and dwell, reformulation link. `D-5` analytics section shell with the Search activity tab (recent searches, no-results list with frequency, top queries) and the Governance tab (B's page moved, old URL redirects).
 - **Edge cases:** logging must never fail a search (catch and log); empty or whitespace queries aren't logged; a chat follow-up is a new event linked to the previous one; a guest's searches are logged but guests can't open analytics.
 - **Demo script:** (1) As a member, run three searches (one with no results) and ask one chat question, then open a result. (2) As org admin, open Analytics → Search activity: all four events, the click with its rank, the no-results query in its list, latencies shown. (3) As a member, `/analytics` is refused.
 - **Acceptance:** E29.1 holds for search, repository and chat; E30.1 list correct; parity test passes.
@@ -143,7 +145,7 @@ Each milestone ends with a PR from `feature/ekp-ws-d` into `dev`, opened one wor
 | Task ID | Milestone · Title | Status | Assignee | Depends On | PR | Started | Completed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `D-1` | Finalize this document (shared design + D-M1), reviewed by Johurul | `TODO` | Simran | — | | | |
-| `D-2` | D-M1 · Schema-only PR: `SearchEvent`, `SearchClick`, `AnalyticsDaily`, `DocumentLink`, `KnowledgeGap.queryIds` | `TODO` | Simran | `D-1`, `C-2` merged | | | |
+| `D-2` | D-M1 · Schema: `SearchEvent`, `SearchClick`, `AnalyticsDaily`, `DocumentLink`, `ReportingApiKey`, `Document.contentUpdatedAt`, `KnowledgeGap.queryIds` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
 | `D-3` | D-M1 · F7 `searchService` used by search, repository, chat and recommendations; parity test | `TODO` | Simran | `D-1` | | | |
 | `D-4` | D-M1 · Search/question/click/dwell logging with latency and reformulation link | `TODO` | Simran | `D-2`, `D-3` | | | |
 | `D-5` | D-M1 · Analytics section shell; Search activity tab (no-results, top queries); Governance tab moved in | `TODO` | Simran | `D-4` | | | |
@@ -152,7 +154,7 @@ Each milestone ends with a PR from `feature/ekp-ws-d` into `dev`, opened one wor
 | `D-7` | D-M2 · Usage tab: five E29 metrics, by department/role, Performance card, CSV | `TODO` | Simran | `D-6` | | | |
 | `D-M2` | **Milestone PR + demo: Usage & adoption dashboard** (due Fri 13 Nov) | `TODO` | Simran | `D-6`, `D-7` | | | |
 | `D-8` | D-M3 · F3 job `links.check` + `DocumentLink`; deleted SharePoint sources count as broken | `TODO` | Simran | `D-M2` | | | |
-| `D-9` | D-M3 · Content health tab: recency, ownership, review status, broken links, duplicates, completeness, drill-through | `TODO` | Simran | `D-8` | | | |
+| `D-9` | D-M3 · Content health tab (incl. setting `Document.contentUpdatedAt` in upload/replace/restore/sync + back-fill script): recency, ownership, review status, broken links, duplicates, completeness, drill-through | `TODO` | Simran | `D-8` | | | |
 | `D-13` | D-M3 · Offline search evaluation set + runner (with Sandeep, needed by `C-11`) | `TODO` | Simran + Sandeep | `D-3` | | | |
 | `D-M3` | **Milestone PR + demo: Content health dashboard** (due Fri 20 Nov) | `TODO` | Simran | `D-8`, `D-9`, `D-13` | | | |
 | `D-10` | D-M4 · Search quality tab: CTR@k, reformulation, dwell, low-confidence share, feedback; gaps linked to queries | `TODO` | Simran | `D-M3` | | | |
