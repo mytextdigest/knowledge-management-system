@@ -54,3 +54,4 @@ ALTER TABLE "UserIdentity" ADD CONSTRAINT "UserIdentity_userId_fkey" FOREIGN KEY
 
 -- AddForeignKey
 ALTER TABLE "OrgSsoConfig" ADD CONSTRAINT "OrgSsoConfig_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+

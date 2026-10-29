@@ -34,6 +34,7 @@
     "ekp:a17:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a17-*.test.mjs",
     "ekp:a24:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a24-*.test.mjs",
     "ekp:a12:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a12-*.test.mjs",
+    "ekp:migration:diff": "node scripts/ekp/migration-diff.mjs",
     "ekp:chat:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/chat-*.test.mjs",
     "alpha:combined-test": "node --test scripts/alpha-bugfix/combined-permissions.test.mjs",
     "task10:test": "node --test scripts/task-10/tier2-expert.static.test.mjs scripts/task-10/expertise-scoring.logic.test.mjs scripts/task-10/expert-test1-individual-signals.logic.test.mjs scripts/task-10/expert-test2-signal-caps.logic.test.mjs scripts/task-10/expert-test8-recency-decay.logic.test.mjs",

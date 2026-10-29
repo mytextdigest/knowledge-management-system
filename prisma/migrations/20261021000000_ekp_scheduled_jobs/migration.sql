@@ -38,3 +38,4 @@ CREATE INDEX "ScheduledJob_orgId_idx" ON "ScheduledJob"("orgId");
 
 -- AddForeignKey
 ALTER TABLE "ScheduledJob" ADD CONSTRAINT "ScheduledJob_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+

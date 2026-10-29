@@ -1144,6 +1144,8 @@ model WorkflowDefinition {
   instances WorkflowInstance[]
   @@unique([orgId, name])
   @@index([orgId, active])
+  // Created by 20261020190000_ekp_b17_decommission_workflows; declared here so migrate diff doesn't drop it.
+  @@index([orgId, kind, active])
 }
 model WorkflowStage {
   id String @id @default(cuid())

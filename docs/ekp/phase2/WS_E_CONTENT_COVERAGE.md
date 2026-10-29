@@ -55,6 +55,8 @@ Workstream E has two parts. Both are in this document. Part 1 is NYPA's main con
 
 ### 3.1 Data model
 
+> **Final field list:** [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §6. Where it differs from this section, it wins (its §7 lists the differences).
+
 Two schema-only PRs, so C can reference `DocumentSourceTag` in week 1:
 
 | PR | Model / field | Notes |

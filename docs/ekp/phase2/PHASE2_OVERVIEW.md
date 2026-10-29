@@ -51,9 +51,11 @@ Every milestone is **demoable**: it ends with a merged PR into `dev` and a short
 - **One PR per milestone** into `dev`, titled `WS-C M1: Taxonomy exists` and so on. The description lists the E-numbers/FRs covered, the tracker tasks closed, how it was tested, the demo steps and any schema changes. Open it at least **one working day before** the due date so review fits in.
 - **After a milestone PR merges, merge `dev` back into your branch** and continue on the same branch. Don't rebase a branch while its PR is open.
 - **Schema changes land on `dev` first.** A milestone that adds models or fields starts with a **schema-only PR** (the `schema.prisma` change plus its migration folder) into `dev`. Only after it merges is `prisma migrate deploy` run against the shared database. Otherwise a teammate's `migrate dev` sees an unknown migration and asks for a reset. One migration per schema PR.
-- Database rules from the plan §4.3 still apply: never `migrate reset`, never accept a reset prompt, never pass the live database as `--shadow-database-url`, unset any stray `DATABASE_URL` before prisma commands. Create migrations with `prisma migrate diff --from-url <db> --to-schema-datamodel prisma/schema.prisma --script`.
+- Database rules from the plan §4.3 still apply: never `migrate reset`, never accept a reset prompt, never pass the live database as `--shadow-database-url`, unset any stray `DATABASE_URL` before prisma commands. Create migrations with `npm run ekp:migration:diff -- --name <name>`, not a plain `prisma migrate diff` (see [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §2).
 
 ## 4. Shared files and who changes them in Phase 2
+
+All schema changes, their order and the migration checklist are in [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md). **Read its §2 before generating any migration.**
 
 | Shared file | Phase 2 changes | Coordination |
 | --- | --- | --- |

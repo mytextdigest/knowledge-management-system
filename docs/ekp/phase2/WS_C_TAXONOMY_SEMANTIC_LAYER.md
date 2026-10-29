@@ -80,6 +80,8 @@
 
 ### 4.1 Data model (schema-only PR `C-2`)
 
+> **Final field list:** [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §4. Where it differs from this section, it wins (its §7 lists the differences).
+
 | Model | Fields | Notes |
 | --- | --- | --- |
 | `TermSet` | `id`, `orgId`, `name`, `description`, `source` (`local` \| `external`), `externalId`, `readOnly`, `lastImportedAt`, `createdBy`, timestamps | `readOnly` is true for externally mastered sets (E16.4) |

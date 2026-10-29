@@ -64,6 +64,8 @@
 
 ### 4.2 Data model (schema-only PR `D-2`)
 
+> **Final field list:** [PHASE2_SCHEMA_CHANGES.md](PHASE2_SCHEMA_CHANGES.md) §5. Where it differs from this section, it wins (its §7 lists the differences).
+
 | Model / field | Fields | Notes |
 | --- | --- | --- |
 | `SearchEvent` | `id`, `orgId`, `userId`, `kind`, `query`, `normalizedQuery`, `filters Json`, `resultCount`, `answerShown`, `confidence`, `latencyMs`, `firstTokenMs`, `departmentId?`, `sourceSystems[]`, `previousEventId?`, `createdAt` | `previousEventId` links a reformulation (same user, within 60 s) |
