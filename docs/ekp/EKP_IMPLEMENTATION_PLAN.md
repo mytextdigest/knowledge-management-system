@@ -48,18 +48,21 @@ NYPA's RFP lists **32 requirements** for an Enterprise Knowledge Platform (EKP).
 |---|---|---|---|
 | **1** | **A**: M365 & connectors (+ Microsoft single sign-on) | E2, E12, E32, S2 | **Johurul** |
 | **1** | **B**: Governance & lifecycle | E19, E21, E22, E23, E24, E25, E26, E31 | **Sandeep & Simran** (B has the most requirements) |
-| Later | C: Taxonomy & semantic layer | E3, E4, E15, E16 | TBD |
-| Later | D: Analytics & dashboards | E28, E29, E30, A5 | TBD |
-| **2** | **E (part 1): PowerPoint and video** | E11.1, E11.3, E11.5–E11.7 (PPTX, MP4/MP3, VTT transcripts, large files, video segments) | TBD |
-| Later | E (rest): images, previews, templates | E11.2, E13, E14 | TBD |
-| Later | F: Personalization & experience | E1, E5, E7, E10, A7 | TBD |
-| Later | G: Platform & security (RFP §6) | A1–A8, S1, S3–S9 | TBD |
+| **2** | **C**: Taxonomy & semantic layer | E3, E4, E15, E16 | **Sandeep** |
+| **2** | **D**: Analytics & dashboards | E28, E29, E30, A5 | **Simran** |
+| **2** | **E (part 1): PowerPoint and video** | E11.1, E11.3, E11.4–E11.7 (PPTX, MP4/MP3, VTT transcripts, large files, video segments) | **Johurul** |
+| **2** | **E (part 2): images, previews, templates** | E11.2, E13, E14 | **Johurul** |
+| **2** | Phase 1 carry-over in E | `A-23` SharePoint managed metadata (E16.5), `A-16` SAML 2.0 (S2) | **Johurul** |
+| Later | F: Personalization & experience | E1, E5, E7, E10, A7 | TBD (decided at end of Phase 2) |
+| Later | G: Platform & security (RFP §6) | A1–A8, S1, S3–S9 (S2 SAML is in E as `A-16`) | TBD (decided at end of Phase 2) |
 
 - **Workstream G is new.** It covers the RFP §6 architecture and security guidelines, which weren't in the RFI or the deck.
 - **Single sign-on (S2) moved into Workstream A,** because SharePoint permissions need users mapped to Microsoft identities.
 - **Sandeep and Simran agree how to split B between them** when they write the B requirements doc (see §6).
 - **PowerPoint and video are Phase 2** (decided 2026-10-23). NYPA's in-scope content is mostly PPT, PDF and MP4 with VTT transcripts (NYPA Q&A #44, #132, #185), and KMS can't extract text from PPT or video today. Phase 1 stays A + B. Phase 2 starts with E part 1 as soon as Phase 1 is merged.
-- **Order and owners for C, D, F, G and the rest of E are decided at the end of Phase 1.**
+- **Phase 2 = C + D + E (both parts)**, 2 Nov – 30 Nov 2026 (decided 2026-10-29 at the end of Phase 1). Owners: C Sandeep, D Simran, E Johurul. Workstream documents, milestones (each one a demoable PR into `dev` with a due date) and the branch approach are in `docs/ekp/phase2/` ([PHASE2_OVERVIEW.md](phase2/PHASE2_OVERVIEW.md)).
+- **Phase 1 is treated as complete.** WS-A and WS-B are merged. `A-16` and `A-23` moved to Workstream E (`E-12`, `E-3`). WS-B's document review (`B-1`), end-to-end tests (`B-21`) and RTM update (`B-22`) stay open, with the Phase 1 cross-testing (`A-19`).
+- **Order and owners for F and G are decided at the end of Phase 2.**
 
 ---
 
@@ -141,7 +144,7 @@ The owner details these entries in their workstream document under `docs/ekp/pha
 - **Done when:** a dashboard shows the % of documents reviewed on time, overdue reviews, average approval time, and documents missing owners, filterable by department.
 - **Depends on:** E22, E24, E25. Can start as a simple admin view and move into the Workstream D dashboards later.
 
-### Workstream C: Taxonomy & Semantic Layer (owner TBD)
+### Workstream C: Taxonomy & Semantic Layer (Sandeep, Phase 2)
 
 **E15: Supports managed metadata fields, including hierarchical terms and synonyms** ❌
 - **Done when:**
@@ -164,7 +167,7 @@ The owner details these entries in their workstream document under `docs/ekp/pha
 - **Done when:** search results and the repository show facets from the term hierarchy (expand/collapse, with counts), combinable with existing filters.
 - **Today:** flat filters (`RepositoryFilters.jsx`). No facets on search results.
 
-### Workstream D: Analytics & Dashboards (owner TBD)
+### Workstream D: Analytics & Dashboards (Simran, Phase 2)
 
 **E28: Content health dashboard (recency, ownership coverage, review status, broken links, duplicates)** 🟡
 - **Done when:** admins see one dashboard with all five measures, filterable by department, and each measure links through to the affected documents.
@@ -181,7 +184,7 @@ The owner details these entries in their workstream document under `docs/ekp/pha
 **A5: Integration with Tableau or Power BI** ❌
 - **Done when:** analytics data is exportable to Power BI (a read-only reporting API or scheduled dataset export), with a documented setup.
 
-### Workstream E: Content Coverage (owner TBD)
+### Workstream E: Content Coverage (Johurul, Phase 2)
 
 **E11: Supports documents, PPTs, PDFs, videos, images, etc.** 🟡
 - **Done when:** PPTX, images (OCR + caption) and video (transcribed) are ingested, searchable and citable, with the timestamp for video.
@@ -191,7 +194,7 @@ The owner details these entries in their workstream document under `docs/ekp/pha
   2. **VTT and Word transcripts:** timestamped text, linked to their recording when both exist (E11.5). NYPA says transcripts usually reach SharePoint as VTT or Word files, and we may work from them instead of transcribing (Q&A #18).
   3. **Video and audio:** use the transcript when there is one, otherwise transcribe. Citations link to the timestamp (E11.3). Topic segments with start and end times are NYPA's accepted form of segmentation (E11.7, Q&A #18).
   4. **Large files:** stream up to 8 GB; never load a whole video into memory (E11.6, Q&A #188). This replaces Phase 1's size guard (`A-24`).
-- **Later:** images (OCR + caption, E11.2).
+- **Part 2 (also Phase 2):** images (OCR + caption, E11.2), previews and thumbnails (E13), templates (E14). See `phase2/WS_E_CONTENT_COVERAGE.md`.
 - **NYPA volumes:** ~1,500 SharePoint files (mostly PPT, PDF, MP4); ~300 hours of recordings today, +120 hours a year (Q&A #62, #132).
 
 **E13: Indexing and previews of common file types, thumbnails for visual content** 🟡
@@ -221,7 +224,7 @@ The owner details these entries in their workstream document under `docs/ekp/pha
 
 | # | Done when | Phase |
 |---|---|---|
-| **S2** single sign-on | Users sign in with Entra ID via SAML 2.0/OIDC. APIs accept OAuth/token auth. | 1 (part of Workstream A) |
+| **S2** single sign-on | Users sign in with Entra ID via SAML 2.0/OIDC. APIs accept OAuth/token auth. | 1 (OIDC, Workstream A) · 2 (SAML, `A-16` in Workstream E) |
 | **S5** encryption | The org API key is encrypted with `src/lib/crypto.js`. Encryption at rest and in transit is documented. | TBD |
 | **S7** no caching | All authenticated pages and APIs return `Cache-Control: no-store`. | TBD |
 | **A2** test before prod | Separate Dev/Test and Production environments with a documented promotion process. | TBD |
@@ -309,20 +312,20 @@ The single status board. **Update it in the same PR that completes a requirement
 |---|---|---|---|---|---|
 | E1 | Customizable landing page | F | TBD | TBD | 🟡 |
 | E2 | Unified search across SharePoint/Content Server/ServiceNow, permission-aware | A | Johurul | 1 | 🟡 |
-| E3 | Hybrid + ontology search | C | TBD | TBD | 🟡 |
-| E4 | Taxonomy facets | C | TBD | TBD | 🟡 |
+| E3 | Hybrid + ontology search | C | Sandeep | 2 | 🟡 |
+| E4 | Taxonomy facets | C | Sandeep | 2 | 🟡 |
 | E5 | Personal home, saved searches, watchlists | F | TBD | TBD | 🟡 |
 | E6 | Recommendations & trending | — | — | — | ✅ |
 | E7 | NL answers alongside results | F | TBD | TBD | ✅ (UX polish) |
 | E8 | Cited, permission-aware answers | — | — | — | ✅ |
 | E9 | Follow-up questions | — | — | — | ✅ |
 | E10 | Confidence & explainability | F | TBD | TBD | 🟡 |
-| E11 | PPT, images, video | E | TBD | 2 (PPTX, video, VTT) · later (images) | 🟡 |
+| E11 | PPT, images, video | E | Johurul | 2 (part 1: PPTX, video, VTT · part 2: images) | 🟡 |
 | E12 | Site pages, wikis, KB articles | A | Johurul | 1 | ❌ |
-| E13 | Previews & thumbnails | E | TBD | TBD | 🟡 |
-| E14 | Asset templates | E | TBD | TBD | ❌ |
-| E15 | Managed metadata (hierarchy, synonyms) | C | TBD | TBD | ❌ |
-| E16 | NYPA taxonomy-tool integration | C | TBD | TBD | ❌ |
+| E13 | Previews & thumbnails | E | Johurul | 2 | 🟡 |
+| E14 | Asset templates | E | Johurul | 2 | ❌ |
+| E15 | Managed metadata (hierarchy, synonyms) | C | Sandeep | 2 | ❌ |
+| E16 | NYPA taxonomy-tool integration | C | Sandeep (E16.5 capture: Johurul, `A-23`) | 2 | ❌ |
 | E17 | Graph-enriched search/navigation/chat | — | — | — | ✅ |
 | E18 | Drag-and-drop upload | — | — | — | ✅ |
 | E19 | Summary with human review | B | Sandeep & Simran | 1 | 🟡 |
@@ -334,9 +337,9 @@ The single status board. **Update it in the same PR that completes a requirement
 | E25 | Configurable review workflows | B | Sandeep & Simran | 1 | ❌ |
 | E26 | Stale detection + review triggers | B | Sandeep & Simran | 1 | 🟡 |
 | E27 | Duplicate detection | — | — | — | ✅ |
-| E28 | Content health dashboard | D | TBD | TBD | 🟡 |
-| E29 | Usage & adoption dashboard | D | TBD | TBD | 🟡 |
-| E30 | Search quality metrics | D | TBD | TBD | 🟡 |
+| E28 | Content health dashboard | D | Simran | 2 | 🟡 |
+| E29 | Usage & adoption dashboard | D | Simran | 2 | 🟡 |
+| E30 | Search quality metrics | D | Simran | 2 | 🟡 |
 | E31 | Governance metrics | B | Sandeep & Simran | 1 | ❌ |
 | E32 | M365 single source of truth | A | Johurul | 1 | 🟡 |
 

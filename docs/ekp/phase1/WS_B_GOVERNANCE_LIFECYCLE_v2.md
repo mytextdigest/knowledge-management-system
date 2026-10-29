@@ -7,7 +7,7 @@
 | **Requirements** | E19, E21, E22, E23, E24, E25, E26, E31 |
 | **Foundations owned** | F2 audit service, F4 notifications, F5 org settings, F6 workflow engine |
 | **Phase 1 window** | 13 Oct – 22 Nov 2026 (6 weeks, Mon–Sat) |
-| **Status** | Shared design + B0 ready for review. B1–B4 outlined; detail each section before it starts. |
+| **Status** | **Phase 1 code merged to `dev` (PR #33, 2026-10-29) and treated as complete.** All build tasks are `DONE`. Still open: document review (`B-1`), end-to-end tests (`B-21`) and the RTM update that follows them (`B-22`), with the Phase 1 cross-testing `A-19`. |
 | **Version** | **v2, 2026-10-22.** Adds NYPA's RFP Q&A answers (see "What changed in v2" below). Based on the copy of `WS_B_GOVERNANCE_LIFECYCLE.md` on `dev` at `2371067`. Once Sandeep and Simran have reviewed it, it replaces that file. |
 
 **Source documents (don't copy from them, link to them):**
@@ -473,32 +473,33 @@ Phase 1 integration and cross-testing with Workstream A is task `A-19` (all 3).
 | Task ID | Title | Status | Assignee | Depends On | Started | Completed |
 |---------|-------|--------|----------|------------|---------|-----------|
 | `B-1` | Review this document (shared design + B0); confirm the split (§1.1) | `TODO` | Sandeep & Simran (reviewer: Johurul) | — |Yes |Yes |
-| `B-2` | B0 · F2: `AuditLog` entity fields migration, extended `logAudit`, event constants | `TODO` | Sandeep | `B-1` |Yes |Yes |
-| `B-3` | B0 · F2: document "History" tab + audit-log filters | `TODO` | Sandeep | `B-2` |Yes |Yes |
-| `B-4` | B0 · F5: `OrgSetting` migration, registry, `getSetting`/`setSetting`, Settings → Governance page | `TODO` | Simran | `B-1` |Yes |Yes |
-| `B-5` | B0 · F5: move classification/duplicate thresholds from env to settings | `TODO` | Simran | `B-4` |Yes |Yes |
-| `B-6` | B1 · E23: audit on lifecycle, delete and replace routes | `TODO` | Sandeep | `B-2` |Yes |Yes|
-| `B-7` | B1 · E23: supersede (fields, API, banner) | `TODO` | Sandeep | `B-6`, `A-2` | Yes|Yes|
-| `B-8` | B1 · E23: `DocumentVersion` + versions tab + restore | `TODO` | Sandeep | `B-6` | Yes|Yes |
-| `B-9` | B1 · E23: soft delete + restore + purge job | `TODO` | Sandeep | `B-6`, `A-2`, `A-7` |Yes |Yes |
-| `B-10` | B1 · E24: `ownerId` + backfill, `DocumentSteward`, `defaultOwnerId`, ownership APIs and UI, bulk reassign | `TODO` | Simran | `B-2`, `B-4` |Yes |Yes |
-| `B-11` | B0 · F4: `Notification` models, `notify()`, bell, preferences | `TODO` | Simran | `B-1` |Yes |Yes|
-| `B-12` | B2 · E19: `summaryStatus`, summary approve/edit API, badge, "Summaries to review" | `TODO` | Simran | `B-10`, `B-11` |Yes |Yes |
-| `B-13` | B2 · E21: `completeness.js`, publish gate (legacy route + Needs-Review confirm), badge | `TODO` | Simran | `B-4`, `B-12` | Yes| Yes|
-| `B-14` | B2 · F6: workflow models migration + `engine.js` + logic tests (incl. never self-approve) | `TODO` | Sandeep | `B-2`, `B-11` |Yes | Yes|
-| `B-15` | B2 · E22: `in_review` state, submit flow, Settings → Workflows admin UI | `TODO` | Sandeep | `B-13`, `B-14` |Yes |Yes |
-| `B-16` | B2 · E22: "My tasks" inbox + document workflow timeline | `TODO` | Simran | `B-14` |Yes |Yes |
-| `B-17` | B2 · E23.6: decommission approval via the engine | `TODO` | Sandeep | `B-9`, `B-14` |Yes |Pending |
-| `B-18` | B3 · E25: `ReviewPolicy`, `ReviewRecord`, `reviews.due-scan` job, outcomes, escalation | `TODO` | Sandeep | `B-14`, `A-7` |Yes | Pending|
-| `B-19` | B3 · E26: `stale.js` + `content.stale-scan` job + "May be outdated" badge | `TODO` | Simran | `B-18`, `A-7` |Yes |Pending |
-| `B-20` | B4 · E31: governance metrics API + admin page + CSV export | `TODO` | Simran | `B-15`, `B-18` |Yes |Pending |
+| `B-2` | B0 · F2: `AuditLog` entity fields migration, extended `logAudit`, event constants | `DONE` | Sandeep | `B-1` |Yes | 2026-10-29 (PR #33) |
+| `B-3` | B0 · F2: document "History" tab + audit-log filters | `DONE` | Sandeep | `B-2` |Yes | 2026-10-29 (PR #33) |
+| `B-4` | B0 · F5: `OrgSetting` migration, registry, `getSetting`/`setSetting`, Settings → Governance page | `DONE` | Simran | `B-1` |Yes | 2026-10-29 (PR #33) |
+| `B-5` | B0 · F5: move classification/duplicate thresholds from env to settings | `DONE` | Simran | `B-4` |Yes | 2026-10-29 (PR #33) |
+| `B-6` | B1 · E23: audit on lifecycle, delete and replace routes | `DONE` | Sandeep | `B-2` |Yes | 2026-10-29 (PR #33) |
+| `B-7` | B1 · E23: supersede (fields, API, banner) | `DONE` | Sandeep | `B-6`, `A-2` | Yes| 2026-10-29 (PR #33) |
+| `B-8` | B1 · E23: `DocumentVersion` + versions tab + restore | `DONE` | Sandeep | `B-6` | Yes| 2026-10-29 (PR #33) |
+| `B-9` | B1 · E23: soft delete + restore + purge job | `DONE` | Sandeep | `B-6`, `A-2`, `A-7` |Yes | 2026-10-29 (PR #33) |
+| `B-10` | B1 · E24: `ownerId` + backfill, `DocumentSteward`, `defaultOwnerId`, ownership APIs and UI, bulk reassign | `DONE` | Simran | `B-2`, `B-4` |Yes | 2026-10-29 (PR #33) |
+| `B-11` | B0 · F4: `Notification` models, `notify()`, bell, preferences | `DONE` | Simran | `B-1` |Yes | 2026-10-29 (PR #33) |
+| `B-12` | B2 · E19: `summaryStatus`, summary approve/edit API, badge, "Summaries to review" | `DONE` | Simran | `B-10`, `B-11` |Yes | 2026-10-29 (PR #33) |
+| `B-13` | B2 · E21: `completeness.js`, publish gate (legacy route + Needs-Review confirm), badge | `DONE` | Simran | `B-4`, `B-12` | Yes| 2026-10-29 (PR #33) |
+| `B-14` | B2 · F6: workflow models migration + `engine.js` + logic tests (incl. never self-approve) | `DONE` | Sandeep | `B-2`, `B-11` |Yes | 2026-10-29 (PR #33) |
+| `B-15` | B2 · E22: `in_review` state, submit flow, Settings → Workflows admin UI | `DONE` | Sandeep | `B-13`, `B-14` |Yes | 2026-10-29 (PR #33) |
+| `B-16` | B2 · E22: "My tasks" inbox + document workflow timeline | `DONE` | Simran | `B-14` |Yes | 2026-10-29 (PR #33) |
+| `B-17` | B2 · E23.6: decommission approval via the engine | `DONE` | Sandeep | `B-9`, `B-14` |Yes | 2026-10-29 (PR #33) |
+| `B-18` | B3 · E25: `ReviewPolicy`, `ReviewRecord`, `reviews.due-scan` job, outcomes, escalation | `DONE` | Sandeep | `B-14`, `A-7` |Yes | 2026-10-29 (PR #33) |
+| `B-19` | B3 · E26: `stale.js` + `content.stale-scan` job + "May be outdated" badge | `DONE` | Simran | `B-18`, `A-7` |Yes | 2026-10-29 (PR #33) |
+| `B-20` | B4 · E31: governance metrics API + admin page + CSV export | `DONE` | Simran | `B-15`, `B-18` |Yes | 2026-10-29 (PR #33) |
 | `B-21` | End-to-end tests for B + regression run of the Met suites | `TODO` | Sandeep & Simran | `B-15`, `B-16`, `B-17`, `B-19`, `B-20` | | |
 | `B-22` | Update RTM status for E19, E21–E26, E31 in the plan | `TODO` | Sandeep & Simran | `B-21`, `A-19` | | |
-| `B-23` | (v2) B2 · E19.4: `summary.requireApproval` per department/category rules, one-click approve, bulk approve | `TODO` | Simran | `B-12`, `B-13` | | |
-| `B-24` | (v2) B1 · E23.4: `retention.deletedDays = null` means never purge (setting validation, purge job, admin UI) | `TODO` | Sandeep | `B-9` | | |
+| `B-23` | (v2) B2 · E19.4: `summary.requireApproval` per department/category rules, one-click approve, bulk approve | `DONE` | Simran | `B-12`, `B-13` | | 2026-10-29 (PR #33) |
+| `B-24` | (v2) B1 · E23.4: `retention.deletedDays = null` means never purge (setting validation, purge job, admin UI) | `DONE` | Sandeep | `B-9` | | 2026-10-29 (PR #33) |
 
 ## 7. Implementation Notes
 
 Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: dynamic providers work, fallback not needed`).
 
 - `2026-10-22 · v2 (Johurul):` NYPA's RFP Q&A answers added (see "What changed in v2" at the top). New tasks `B-23` (configurable, lightweight summary review) and `B-24` (never-purge option). Statuses, assignees and completion marks are unchanged from `dev` at `2371067`.
+- `2026-10-29 · Phase 1 close (Johurul):` WS-B is merged to `dev` (PR #33). Build tasks `B-2` to `B-20`, `B-23` and `B-24` marked `DONE`. `B-1` (review), `B-21` (end-to-end tests) and `B-22` (RTM update, depends on `B-21`) stay open. Sandeep and Simran move to Phase 2: Workstream C (Sandeep) and D (Simran), see `docs/ekp/phase2/`.
