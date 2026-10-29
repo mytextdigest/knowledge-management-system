@@ -224,7 +224,7 @@ export async function POST(req, { params }) {
   let sessionContextNote = "";
   if (activeDocumentId) {
     const activeDoc = await prisma.document.findUnique({
-      where: { id: activeDocumentId },
+      where: { id: activeDocumentId, orgId, deletedAt: null },
       select: { filename: true },
     });
     if (activeDoc) {

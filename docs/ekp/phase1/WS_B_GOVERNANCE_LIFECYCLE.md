@@ -8,11 +8,26 @@
 | **Foundations owned** | F2 audit service, F4 notifications, F5 org settings, F6 workflow engine |
 | **Phase 1 window** | 13 Oct – 22 Nov 2026 (6 weeks, Mon–Sat) |
 | **Status** | Shared design + B0 ready for review. B1–B4 outlined; detail each section before it starts. |
+| **Version** | **v2, 2026-10-22.** Adds NYPA's RFP Q&A answers (see "What changed in v2" below). Based on the copy of `WS_B_GOVERNANCE_LIFECYCLE.md` on `dev` at `2371067`. This is the canonical v2 workstream document; implementation remains subject to review and integration testing. |
 
 **Source documents (don't copy from them, link to them):**
-- Requirements and acceptance criteria: [KMS_EKP_PRODUCT_REQUIREMENTS_SPECIFICATION.md](../KMS_EKP_PRODUCT_REQUIREMENTS_SPECIFICATION.md) (§4.7, §4.8, E31)
+- Requirements and acceptance criteria: [KMS_EKP_PRODUCT_REQUIREMENTS_SPECIFICATION.md](../KMS_EKP_PRODUCT_REQUIREMENTS_SPECIFICATION.md) (§4.7, §4.8, E31; NYPA's answers in §6.2–6.3)
+- NYPA's answers to vendor questions: `docs/ekp/Attachment 5 - Q+A format NYPA Response.xlsx` (cited as "Q&A #n")
 - Architecture and foundations: [KMS_EKP_IMPLEMENTATION_SPECIFICATION.md](../KMS_EKP_IMPLEMENTATION_SPECIFICATION.md) (§4 F2, F4, F5, F6; §5.2)
 - Plan, workflow and status board: [EKP_IMPLEMENTATION_PLAN.md](../EKP_IMPLEMENTATION_PLAN.md)
+
+### What changed in v2
+
+NYPA answered other vendors' RFP questions, and some answers affect Workstream B. **No completed task is invalidated.** Two follow-up tasks are added (`B-23`, `B-24`).
+
+| NYPA said | Change in this document | Task |
+|---|---|---|
+| Human review of all AI-generated content is required, "but it shouldn't need to be overly burdensome. Greater scrutiny should be required of more highly technical and critical knowledge content" (Q&A #195). | New rule in §2. `summary.requireApproval` becomes per-department/category rules (§3.2). One-click and bulk approve (B2). | `B-23` |
+| There's no retention schedule for knowledge ("life of org"), and no legal hold or records-request handling is needed (Q&A #181, #187). | `retention.deletedDays` can be `null` = never purge (§3.2, B1). No retention or legal-hold features. | `B-24` |
+| The KM team (about 5 people) is the product owner and decides what is retained, archived, restricted or retired (Q&A #164, #166). Users: about 2,600 in total, about 200 KM power users, 100 concurrent at peak (Q&A #48, #69, #191). | Note in §2: approvers and decommission decisions sit with KM admins. Size metrics queries and inboxes for these numbers. | — |
+| The solution "should be able to facilitate content reviews for staleness". Duplicate content "is not believed to be an issue" (Q&A #194). | B3 is confirmed as scoped. No new duplicate (E27) work. | — |
+| Sync should be near real-time, under 5 minutes (Q&A #99), although scheduled indexing is also acceptable (Q&A #46). | Workstream A lowers the scheduler's minimum interval from 15 to 5 minutes. B's daily jobs are unaffected. | (A) |
+| Content remediation and cleanup are done by NYPA, not the vendor (Q&A #104, #105). | The governance tools must make reviews easy for NYPA's KM team; we don't do the cleanup. | — |
 
 **How this document is used:** the shared design (§3) and B0 are reviewed before coding starts. Each later package section is completed and reviewed just before that package starts. Progress is tracked in the task tracker (§6) at the bottom of this file.
 
@@ -53,6 +68,11 @@ Two lanes, so the two of you rarely edit the same files in the same week:
 - **Nothing configurable lives in code.** Thresholds, required fields, intervals and rules go through F5 (NFR-3).
 - **Guests are read-only.** Members can submit but not approve. Check with `resolveOrgRole` / `canManageDepartment`, as existing routes do.
 - **Existing behaviour is the fallback.** If an org configures nothing, KMS behaves exactly as today (department admin publishes directly).
+- **Human review that isn't burdensome** (v2, Q&A #195).
+  - AI-generated content always shows that it's AI-generated and pending review.
+  - Whether approval *blocks* publishing is configurable per department or category: strict for technical or critical content, light elsewhere.
+  - Approving should take one click, and reviewers can approve in bulk.
+- **The KM team decides** (v2, Q&A #164, #166). At NYPA, KM admins (super_admin / dept_admin) approve publishing and decide on retain, archive, restrict and retire. Design defaults so this small team (about 5 people) isn't the bottleneck for about 200 contributors.
 
 ## 3. Shared Design (decided once for the whole workstream)
 
@@ -117,13 +137,13 @@ model OrgSetting {
 
 | Key | Default | Used by |
 |---|---|---|
-| `summary.requireApproval` | `false` | E19, E21 |
+| `summary.requireApproval` | `false`. **v2:** also accepts rules `[{ departmentIds?, categories?, required: true }]`, using the same matching as `metadata.requiredFields`. `true`/`false` still mean the whole org. | E19, E21 |
 | `metadata.requiredFields` | `[]` (rules `{ field, departmentIds?, categories? }`) | E21 |
 | `ownership.default` | `"uploader"` (or `"department_owner"`) | E24 |
-| `retention.deletedDays` | `30` | E23 |
+| `retention.deletedDays` | `30`. **v2:** `null` = never purge (soft-deleted items stay restorable). NYPA has no retention schedule (Q&A #181). | E23 |
 | `stale.rules` | `{ noUpdateDays: 365, noViewDays: 180 }` (replaces the script's constant) | E26 |
 | `classification.categoryThreshold`, `classification.departmentThreshold`, `duplicates.threshold` | current env values | E20 (moves existing env vars into settings) |
-| `sharepoint.storeOriginals`, sync interval | `false`, `60` | Workstream A |
+| `sharepoint.storeOriginals`, sync interval | `false`, `60` (v2: minimum 5 minutes, NFR-6) | Workstream A |
 
 **Admin UI:** Settings → Governance (super_admin; dept_admin read-only), grouped by area.
 
@@ -312,6 +332,7 @@ model WorkflowTask {
   - `DELETE /api/documents/[id]` sets `deletedAt` / `deletedById` instead of hard-deleting.
   - The `documents.purge-deleted` job (on A's F3) purges after `retention.deletedDays`, including chunks and S3 objects.
   - Admins can restore within the retention period.
+  - **v2:** when `retention.deletedDays` is `null`, the purge job does nothing and items stay restorable indefinitely. No retention schedule, legal hold or records-request feature is needed (Q&A #181, #187).
 - **Ownership:**
   - `Document.ownerId`, backfilled from `userId`. For SharePoint-synced documents, backfill from the department's `defaultOwnerId` when set, otherwise from the connecting user.
   - `DocumentSteward` (many per document).
@@ -329,6 +350,7 @@ model WorkflowTask {
 - [ ] A superseded document isn't returned by search or chat, and its page links to the replacement.
 - [ ] Replace keeps the previous version, and restoring it works.
 - [ ] A soft-deleted document is invisible everywhere at once and purged only after the retention period.
+- [ ] (v2) With `retention.deletedDays = null`, the purge job never removes a soft-deleted document, and it can still be restored.
 - [ ] After the backfill, every document has an owner. Bulk reassignment moves documents (and open tasks). Only admins can reassign.
 
 ### B2: Publishing: summary review, completeness, workflow engine (E19, E21, E22, E23.6)
@@ -341,6 +363,10 @@ model WorkflowTask {
   - `PATCH /api/documents/[id]/summary { action: "approve" | "edit", text? }` for the owner, a steward or the department admin.
   - Regenerate uses the existing route and resets the status to pending.
   - The UI shows an "AI-generated · pending review" badge and a "Summaries to review" list.
+  - **v2:**
+    - "Approve" in the list is one click (no edit form).
+    - The list supports selecting several summaries and approving them together. Each one writes its own `document.summary_approved` audit row.
+    - The publish gate reads `summary.requireApproval` rules per department and category (§3.2). Where approval isn't required, the badge still shows until someone approves.
 - **E21:**
   - `src/lib/governance/completeness.js` `checkCompleteness(document, rules)` returns `{ complete, missing[] }`.
   - It's called before every move to `published` (legacy route and engine). If anything is missing, it returns 422 `{ missing }`.
@@ -366,10 +392,12 @@ model WorkflowTask {
 - [ ] A 3-stage workflow runs end to end with notifications, and the document publishes only after the final approval, with the full history visible.
 - [ ] Rejecting with a comment returns the document to draft. The author can never approve, even if they hold the approver role.
 - [ ] With no workflow configured, publishing behaves exactly as today.
+- [ ] (v2) With approval required only for one department, that department's document can't publish with a pending summary, but another department's can. Both still show the "AI-generated" badge.
+- [ ] (v2) Bulk-approving 3 summaries writes 3 audit rows. A member who isn't the owner, a steward or an admin can't bulk-approve.
 
 ### B3: Review cycles and stale content (E25, E26)
 
-**Status:** outlined. Detail before week 5. Needs Workstream A's F3 scheduler.
+**Status:** outlined. Detail before week 5. Needs Workstream A's F3 scheduler. **v2:** NYPA confirms this scope ("should be able to facilitate content reviews for staleness", Q&A #194). No change.
 
 **Design summary:**
 - **`ReviewPolicy`:**
@@ -466,7 +494,11 @@ Phase 1 integration and cross-testing with Workstream A is task `A-19` (all 3).
 | `B-20` | B4 · E31: governance metrics API + admin page + CSV export | `TODO` | Simran | `B-15`, `B-18` |Yes |Pending |
 | `B-21` | End-to-end tests for B + regression run of the Met suites | `TODO` | Sandeep & Simran | `B-15`, `B-16`, `B-17`, `B-19`, `B-20` | | |
 | `B-22` | Update RTM status for E19, E21–E26, E31 in the plan | `TODO` | Sandeep & Simran | `B-21`, `A-19` | | |
+| `B-23` | (v2) B2 · E19.4: `summary.requireApproval` per department/category rules, one-click approve, bulk approve | `TODO` | Simran | `B-12`, `B-13` | | |
+| `B-24` | (v2) B1 · E23.4: `retention.deletedDays = null` means never purge (setting validation, purge job, admin UI) | `TODO` | Sandeep | `B-9` | | |
 
 ## 7. Implementation Notes
 
 Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: dynamic providers work, fallback not needed`).
+
+- `2026-10-22 · v2 (Johurul):` NYPA's RFP Q&A answers added (see "What changed in v2" at the top). New tasks `B-23` (configurable, lightweight summary review) and `B-24` (never-purge option). Statuses, assignees and completion marks are unchanged from `dev` at `2371067`.

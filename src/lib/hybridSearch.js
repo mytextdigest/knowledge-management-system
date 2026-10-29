@@ -1,6 +1,7 @@
 import { orgSearch, orgKeywordSearch, orgFallbackTextSearch, orgExactTermSearch } from "@/lib/vectorSearch";
 import { prisma } from "@/lib/prisma";
 import { expandWithRelatedDocuments } from "@/lib/knowledgeContext";
+import { filterCurrentKnowledge } from "@/lib/governance/retrievalEligibility.mjs";
 
 function normalizeDistance(distance) {
   const value = Number(distance);
@@ -266,5 +267,12 @@ export async function hybridOrgSearch({
     const { rows: exact } = await orgExactTermSearch(exactTermQuestion, { userId, orgId, isSuperAdmin, scope, departmentId });
     base = pinExactMatches(base, exact, limit);
   }
-  return expandWithRelatedDocuments({ rows: base, orgId, userId, isSuperAdmin, limit });
+  const expanded = await expandWithRelatedDocuments({ rows: base, orgId, userId, isSuperAdmin, limit });
+  const ids = [...new Set(expanded.map((row) => row.document_id).filter(Boolean))];
+  if (!ids.length) return [];
+  const documents = await prisma.document.findMany({
+    where: { id: { in: ids }, orgId },
+    select: { id: true, deletedAt: true, supersededById: true, lifecycle: true, lifecycleSuggestion: true },
+  });
+  return filterCurrentKnowledge(expanded, documents);
 }

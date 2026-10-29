@@ -31,6 +31,7 @@ import Image from "next/image";
 import CreateOrgModal from "@/components/org/CreateOrgModal";
 import LogoutButton from "@/components/ui/LogoutButton";
 import { cn } from "@/lib/utils";
+import NotificationCenter from "@/components/governance/NotificationCenter";
 
 export default function AppSidebar({ orgId, isOpen, onClose }) {
   const router = useRouter();
@@ -156,6 +157,9 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
         { label: "Recommendations", href: `/org/${orgId}/recommendations`, icon: Sparkles },
         { label: "Decisions", href: `/org/${orgId}/decisions`, icon: Scale, badge: pendingDecisionCount },
         { label: "Knowledge Graph", href: `/org/${orgId}/knowledge-graph`, icon: Network },
+        { label: "Submit for Approval", href: `/org/${orgId}/workflow-submit`, icon: ClipboardList },
+        { label: "My Workflow Tasks", href: `/org/${orgId}/workflow-tasks`, icon: ClipboardList },
+        ...(isSuperAdmin ? [{ label: "Approval Workflows", href: `/org/${orgId}/workflows`, icon: Settings }] : []),
         ...(isSuperAdmin
           ? [{ label: "Needs Review", href: `/org/${orgId}/needs-review`, icon: ClipboardList }]
           : []),
@@ -255,6 +259,8 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
             )}
           </AnimatePresence>
         </div>
+
+        <NotificationCenter orgId={orgId} />
 
         {/* Nav: top items fixed, departments scroll in their own bounded region,
             Org Settings stays pinned above the bottom user menu so neither

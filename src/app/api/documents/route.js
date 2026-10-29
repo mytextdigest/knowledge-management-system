@@ -30,7 +30,7 @@ export async function GET(req) {
     }
 
     const documents = await prisma.document.findMany({
-      where: { projectId },
+      where: { projectId, deletedAt: null },
       select: {
         id: true,
         filename: true,

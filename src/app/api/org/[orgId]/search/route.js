@@ -78,6 +78,7 @@ export async function POST(req, { params }) {
       distance: r.distance,
       keywordScore: r.keyword_score,
       hybridScore: r.hybridScore,
+      mayBeOutdated: Boolean(r.mayBeOutdated),
     })),
   });
 }

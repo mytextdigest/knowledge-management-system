@@ -8,6 +8,11 @@ datasource db {
 }
 
 model User {
+  workflowTasks WorkflowTask[] @relation("WorkflowAssignee")
+  reviewRecords ReviewRecord[] @relation("PeriodicReviewReviewer")
+  workflowDecisions WorkflowDecision[] @relation("WorkflowDecisionActor")
+  workflowInstancesStarted WorkflowInstance[] @relation("WorkflowStarter")
+
   id            String   @id @default(cuid())
   name          String?
   email         String   @unique
@@ -21,7 +26,13 @@ model User {
   hasCompletedOnboarding Boolean @default(false) @map("has_completed_onboarding")
 
   conversations        Conversation[]
+  summaryReviews       DocumentSummaryReview[] @relation("SummaryReviewer")
+  notifications        Notification[]
+  notificationPreferences NotificationPreference[]
   documents            Document[]
+  ownedDocuments       Document[] @relation("DocumentOwner")
+  documentStewardships DocumentSteward[]
+  defaultOwnerDepartments Department[] @relation("DepartmentDefaultOwner")
   projects             Project[]
   projectChats         ProjectConversation[]
   settings             Setting[]
@@ -89,6 +100,11 @@ model Setting {
 }
 
 model Organization {
+  reviewPolicies ReviewPolicy[]
+  reviewRecords ReviewRecord[]
+  workflowDefinitions WorkflowDefinition[]
+  workflowInstances WorkflowInstance[]
+
   id           String   @id @default(cuid())
   name         String
   openaiApiKey String?
@@ -97,6 +113,8 @@ model Organization {
 
   storageUsedBytes BigInt @default(0) @map("storage_used_bytes")
 
+  summaryReviews    DocumentSummaryReview[]
+  notifications     Notification[]
   members           OrganizationMember[]
   invites           OrganizationInvite[]
   departments       Department[]
@@ -104,6 +122,7 @@ model Organization {
   documents         Document[]
   conversations     OrgConversation[]
   chatAuditLogs     ChatAuditLog[]
+  orgSettings       OrgSetting[]
   auditLogs         AuditLog[]
   subscription      Subscription?
   orgMemberMemories OrgMemberMemory[]
@@ -173,6 +192,8 @@ model Department {
   timelineEvents       TimelineEvent[]
   suggestedDocuments   Document[] @relation("SuggestedDocumentDepartment")
   lessons              Lesson[]
+  defaultOwnerId       String?
+  defaultOwner         User? @relation("DepartmentDefaultOwner", fields: [defaultOwnerId], references: [id], onDelete: SetNull)
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -254,6 +275,10 @@ model AuditLog {
   targetUserId String?
   action       String
   metadata     Json?
+  entityType   String?  @map("entity_type")
+  entityId     String?  @map("entity_id")
+  before       Json?
+  after        Json?
   createdAt    DateTime @default(now()) @map("created_at")
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -263,6 +288,7 @@ model AuditLog {
   @@index([orgId])
   @@index([actorUserId])
   @@index([createdAt])
+  @@index([entityType, entityId])
 }
 
 model Project {
@@ -293,6 +319,11 @@ model Project {
 }
 
 model Document {
+  reviewRecords ReviewRecord[]
+  nextReviewAt DateTime?
+  lastReviewedAt DateTime?
+  workflowInstances WorkflowInstance[]
+
   id        String   @id @default(cuid())
   filename  String?
   filePath  String?  @map("file_path")
@@ -311,6 +342,19 @@ model Document {
   orgId        String?
   departmentId String?
   lifecycle    String  @default("published")
+  // EKP B-7: successor reference; source document remains readable for history.
+  supersededById String?
+  supersededBy Document? @relation("DocumentSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes Document[] @relation("DocumentSupersession")
+  summaryReview DocumentSummaryReview?
+  versions DocumentVersion[]
+  ownerId String?
+  owner User? @relation("DocumentOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  stewards DocumentSteward[]
+  deletedAt DateTime?
+  deletedById String?
+  purgeAfter DateTime?
+
   category     String?
 
   // Rank 4: automatic knowledge classification signals. Topic/TopicDocument
@@ -366,12 +410,35 @@ model Document {
   @@index([orgId])
   @@index([departmentId])
   @@index([lifecycle])
+  @@index([supersededById])
+  @@index([ownerId])
+  @@index([deletedAt])
+  @@index([purgeAfter])
   @@index([category])
   @@index([classificationStatus])
   @@index([suggestedDepartmentId])
   @@index([contentHash])
   @@index([lifecycleSuggestion])
   @@index([sourceProvider, externalId])
+}
+
+
+// B-8: immutable snapshots of a document's previous binary and metadata.
+model DocumentVersion {
+  id String @id @default(cuid())
+  documentId String
+  versionNumber Int
+  filePath String?
+  filename String?
+  content String?
+  summary String?
+  status String?
+  createdAt DateTime @default(now())
+  createdById String?
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, versionNumber])
+  @@index([documentId, createdAt])
 }
 
 model DocumentDuplicate {
@@ -989,4 +1056,188 @@ model Lesson {
   @@index([departmentId])
   @@index([documentId])
   @@index([status])
+}
+
+// EKP B-4: organization-scoped governance configuration.
+model OrgSetting {
+  id        String   @id @default(cuid())
+  orgId     String
+  key       String
+  value     Json
+  updatedBy String?
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, key])
+}
+
+// B-10: document stewardship is separate from the uploader and accountable owner.
+model DocumentSteward {
+  documentId String
+  userId String
+  createdAt DateTime @default(now())
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([documentId, userId])
+  @@index([userId])
+}
+
+// EKP B-11 / F4: per-recipient notifications scoped to an organization.
+model Notification {
+  id        String    @id @default(cuid())
+  orgId     String
+  userId    String
+  type      String
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, readAt])
+  @@index([orgId, userId, createdAt])
+}
+
+model NotificationPreference {
+  id     String @id @default(cuid())
+  userId String
+  type   String
+  inApp  Boolean @default(true)
+  email  Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, type])
+}
+
+// B-12: review is attached to the current summary fingerprint; regenerated
+// summaries automatically become pending again without relying on worker hooks.
+model DocumentSummaryReview {
+  id String @id @default(cuid())
+  documentId String @unique
+  orgId String
+  status String @default("pending") // pending | approved
+  summaryHash String
+  reviewedById String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("SummaryReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  @@index([orgId, status])
+}
+
+// EKP B-14: organization-scoped sequential approval workflows.
+model WorkflowDefinition {
+  kind String @default("publish") // publish | decommission
+  id String @id @default(cuid())
+  orgId String
+  name String
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  stages WorkflowStage[]
+  instances WorkflowInstance[]
+  @@unique([orgId, name])
+  @@index([orgId, active])
+}
+model WorkflowStage {
+  id String @id @default(cuid())
+  definitionId String
+  position Int
+  name String
+  approverUserId String
+  definition WorkflowDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  tasks WorkflowTask[]
+  @@unique([definitionId, position])
+}
+model WorkflowInstance {
+  targetLifecycle String? // archive/retire requested for decommission workflows
+  id String @id @default(cuid())
+  orgId String
+  documentId String
+  definitionId String
+  submittedById String
+  status String @default("in_review")
+  currentPosition Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  definition WorkflowDefinition @relation(fields: [definitionId], references: [id], onDelete: Restrict)
+  submittedBy User @relation("WorkflowStarter", fields: [submittedById], references: [id], onDelete: Restrict)
+  tasks WorkflowTask[]
+  decisions WorkflowDecision[]
+  @@index([orgId, status])
+  @@index([documentId, status])
+}
+model WorkflowTask {
+  id String @id @default(cuid())
+  instanceId String
+  stageId String
+  assigneeId String
+  status String @default("pending")
+  createdAt DateTime @default(now())
+  decidedAt DateTime?
+  instance WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  stage WorkflowStage @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  assignee User @relation("WorkflowAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
+  @@unique([instanceId, stageId])
+  decisions WorkflowDecision[]
+  @@index([assigneeId, status])
+}
+model WorkflowDecision {
+  id String @id @default(cuid())
+  instanceId String
+  taskId String
+  actorId String
+  action String
+  comment String?
+  createdAt DateTime @default(now())
+  instance WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  actor User @relation("WorkflowDecisionActor", fields: [actorId], references: [id], onDelete: Restrict)
+  @@unique([taskId])
+  task WorkflowTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+// B-18: periodic document reviews, isolated by organization.
+model ReviewPolicy {
+  id String @id @default(cuid())
+  orgId String
+  name String
+  intervalDays Int
+  reviewerType String @default("owner") // owner | steward
+  escalateAfterDays Int @default(7)
+  departmentIds String[] @default([])
+  categories String[] @default([])
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  records ReviewRecord[]
+  @@unique([orgId,name])
+  @@index([orgId,active])
+}
+model ReviewRecord {
+  id String @id @default(cuid())
+  orgId String
+  documentId String
+  policyId String
+  reviewerId String
+  status String @default("pending") // pending | valid | update | retire
+  dueAt DateTime
+  escalatedAt DateTime?
+  completedAt DateTime?
+  note String?
+  createdAt DateTime @default(now())
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  policy ReviewPolicy @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  @@index([orgId,status,dueAt])
+  @@index([reviewerId,status])
+  reviewer User @relation("PeriodicReviewReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  @@index([documentId,status])
 }

@@ -1,7 +1,10 @@
 'use client';
+
+import GovernanceSettings from '@/components/governance/GovernanceSettings';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
+import AuditEventList from '@/components/governance/AuditEventList';
 import {
   Building2, Users, Key, Eye, EyeOff, Loader2,
   CheckCircle2, ArrowLeft, Mail, Shield, Layers,
@@ -130,15 +133,15 @@ export default function OrgSettingsPage() {
       }
 
       const validTabs = settingsData.role === 'super_admin'
-        ? ['general', 'members', 'departments', 'apikey', 'integrations', 'jobs', 'audit']
-        : ['members', 'departments'];
+        ? ['general', 'members', 'departments', 'apikey', 'integrations', 'jobs', 'audit', 'governance']
+        : ['members', 'departments', 'governance'];
       setActiveTab(
         validTabs.includes(requestedTab)
           ? requestedTab
           : (settingsData.role === 'super_admin' ? 'general' : 'members')
       );
     }).finally(() => setLoading(false));
-  }, [orgId]);
+  }, [orgId, requestedTab, router]);
 
   const canManageDepartments = org?.role === 'super_admin' || org?.role === 'dept_admin';
   const canDeleteDepartments = org?.role === 'super_admin';
@@ -524,6 +527,7 @@ export default function OrgSettingsPage() {
     ...(org?.role === 'super_admin' ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
     ...(org?.role === 'super_admin' ? [{ id: 'jobs', label: 'Scheduled Jobs', icon: Clock }] : []),
     ...(org?.role === 'super_admin' ? [{ id: 'audit', label: 'Audit Log', icon: ScrollText }] : []),
+    ...(org?.role === 'super_admin' || org?.role === 'dept_admin' ? [{ id: 'governance', label: 'Governance', icon: Shield }] : []),
   ];
 
   return (
@@ -567,6 +571,8 @@ export default function OrgSettingsPage() {
             </button>
           ))}
         </div>
+
+        {activeTab === 'governance' && <GovernanceSettings orgId={orgId} canEdit={org?.role === 'super_admin'} />}
 
         {/* General tab */}
         {activeTab === 'general' && (
@@ -1116,7 +1122,7 @@ export default function OrgSettingsPage() {
         {activeTab === 'integrations' && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Set up Microsoft sign-in, and connect external platforms to bring their knowledge into this org's repository.
+              Set up Microsoft sign-in and connect external platforms to bring their knowledge into this org&apos;s repository.
             </p>
 
             {integrationsError ? (
@@ -1282,6 +1288,10 @@ export default function OrgSettingsPage() {
                 </div>
               </div>
             ) : null}
+
+            <div className="pt-6 mt-6 border-t border-gray-200 dark:border-gray-700">
+              <AuditEventList url={`/api/org/${orgId}/audit-log/events`} title="Governance audit events" />
+            </div>
 
             <div className="pt-6 mt-6 border-t border-gray-200 dark:border-gray-700 space-y-3">
               <div>

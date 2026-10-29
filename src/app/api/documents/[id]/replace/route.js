@@ -6,6 +6,8 @@ import { getServerSession } from "next-auth";
 import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { prisma } from "@/lib/prisma";
+import { AUDIT_EVENTS } from "@/lib/audit/events";
+import { snapshotVersion } from "@/lib/lifecycle/versioning.mjs";
 
 // Replace the binary behind the same logical document. The normal worker pipeline
 // deletes/rebuilds chunks, embeddings, classifications, and pending duplicate flags.
@@ -22,7 +24,7 @@ export async function POST(req, { params }) {
 
   const doc = await prisma.document.findFirst({
     where: { id, user: { email: session.user.email } },
-    select: { id: true, projectId: true, orgId: true, visibility: true, filename: true },
+    select: { id: true, projectId: true, orgId: true, visibility: true, filename: true, filePath: true, status: true, userId: true, content: true, summary: true },
   });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -30,28 +32,44 @@ export async function POST(req, { params }) {
   await s3.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: s3Key }));
   const filename = s3Key.split("/").pop() || doc.filename;
 
-  await prisma.$transaction([
-    prisma.documentDuplicate.deleteMany({
+  // Lock the document row so concurrent replacements cannot allocate the same version.
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Document" WHERE id = ${id} FOR UPDATE`;
+    const current = await tx.document.findUnique({
+      where: { id },
+      select: { id: true, filename: true, filePath: true, content: true, summary: true, status: true },
+    });
+    if (!current) throw new Error('Document disappeared during replacement');
+    const aggregate = await tx.documentVersion.aggregate({
+      where: { documentId: id }, _max: { versionNumber: true },
+    });
+    const versionNumber = (aggregate._max.versionNumber ?? 0) + 1;
+    await tx.documentVersion.create({
+      data: snapshotVersion(current, versionNumber, doc.userId),
+    });
+    await tx.documentDuplicate.deleteMany({
       where: { OR: [{ documentId: id }, { duplicateOfId: id }] },
-    }),
-    prisma.document.update({
+    });
+    await tx.document.update({
       where: { id },
       data: {
-        filename,
-        filePath: s3Key,
-        content: null,
-        summary: null,
-        status: "queued",
-        category: null,
-        categoryConfidence: null,
+        filename, filePath: s3Key, content: null, summary: null, status: "queued",
+        category: null, categoryConfidence: null,
         classificationStatus: "pending_classification",
-        suggestedDepartmentId: null,
-        departmentSuggestionConfidence: null,
-        contentHash: null,
-        classifiedAt: null,
+        suggestedDepartmentId: null, departmentSuggestionConfidence: null,
+        contentHash: null, classifiedAt: null,
       },
-    }),
-  ]);
+    });
+    if (doc.orgId) {
+      await tx.auditLog.create({ data: {
+        orgId: doc.orgId, actorUserId: doc.userId,
+        action: AUDIT_EVENTS.DOCUMENT_VERSION_CREATED,
+        entityType: 'document', entityId: id,
+        before: { filename: current.filename, status: current.status },
+        after: { filename, status: 'queued', previousVersion: versionNumber },
+      } });
+    }
+  });
 
   const sqs = new SQSClient({ region: process.env.AWS_REGION });
   await sqs.send(new SendMessageCommand({

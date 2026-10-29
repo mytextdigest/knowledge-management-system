@@ -51,7 +51,7 @@ export async function GET(req, { params }) {
   // departments (all for super_admin). Drafts only for super_admin and for a
   // dept_admin in the departments they administer (F1 browse policy).
   const principals = await getUserPrincipals(prisma, user.id, { orgId });
-  const andConditions = [repositoryAccessWhere({ orgId, role, userDeptIds, adminDeptIds, principals })];
+  const andConditions = [repositoryAccessWhere({ orgId, role, userId: user.id, userDeptIds, adminDeptIds, principals }), { deletedAt: null }];
 
   if (lifecycle === "suggested_review") {
     andConditions.push({ lifecycleSuggestion: { not: null } });

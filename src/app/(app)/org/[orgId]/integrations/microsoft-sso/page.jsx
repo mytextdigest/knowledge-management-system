@@ -441,4 +441,3 @@ function GroupRoleMapping({ orgId, departments, map, onChange, connectHref }) {
     </section>
   );
 }
-

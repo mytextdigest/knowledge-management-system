@@ -29,4 +29,3 @@ CREATE UNIQUE INDEX "DocumentAcl_document_id_principal_type_principal_id_key" ON
 
 -- AddForeignKey
 ALTER TABLE "DocumentAcl" ADD CONSTRAINT "DocumentAcl_document_id_fkey" FOREIGN KEY ("document_id") REFERENCES "Document"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
