@@ -111,7 +111,8 @@ test("sharepoint.sync: job row only for connected orgs, starts off; queues a sch
     await prisma.$transaction(async (db) => {
       const org = await db.organization.create({ data: { name: `f3-sp-${tag}` } });
       await ensureOrgJobs(db, org.id);
-      assert.equal(await db.scheduledJob.count({ where: { orgId: org.id } }), 0, "no SharePoint, no job");
+      assert.equal(await db.scheduledJob.count({ where: { orgId: org.id, name: { startsWith: "sharepoint." } } }), 0, "no SharePoint, no job");
+      assert.equal(await db.scheduledJob.count({ where: { orgId: org.id, name: { in: ["reviews.due-scan", "content.stale-scan"] }, enabled: false } }), 2, "governance jobs exist for every org and start off");
 
       const integration = await db.orgIntegration.create({
         data: { orgId: org.id, provider: "sharepoint", scopeConfig: { sites: [] }, accessToken: "x", tokenExpiry: new Date() },

@@ -1,5 +1,5 @@
-import { prisma } from '@/lib/prisma';
-import { transporter } from '@/lib/mailer';
+import { prisma } from '../prisma.mjs';
+import { transporter } from '../mailer.js';
 import { validateNotificationInput } from './types.mjs';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));

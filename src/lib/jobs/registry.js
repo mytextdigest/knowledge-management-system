@@ -21,6 +21,8 @@
 import { createAclResolver } from "../connectors/sharepointAcl.js";
 import { refreshIntegrationAcls } from "../connectors/sharepointAclRefresh.js";
 import { getCachedAppOnlyToken } from "../msGraph.js";
+import { scanDueReviews } from "../governance/reviewScan.js";
+import { scanStaleContent } from "../governance/staleScan.js";
 
 // A-22: down to 5 minutes (NFR-6, NYPA Q&A #99: changes within 5 minutes).
 export const INTERVAL_CHOICES = [5, 15, 30, 60, 240, 720, 1440];
@@ -112,6 +114,28 @@ export const JOB_DEFINITIONS = {
       const result = await refreshIntegrationAcls(prisma, { integration, accessToken, resolver });
       return resolver ? result : { ...result, warning: "SharePoint certificate not configured: file permissions not refreshed" };
     },
+  },
+
+  // B-18 (E25): start periodic reviews for documents that are due under a
+  // review policy, and escalate overdue ones to the department admin.
+  "reviews.due-scan": {
+    label: "Periodic review scan",
+    description: "Starts a review for each published document that is due under a review policy, notifies its reviewer, and escalates overdue reviews to the department admin.",
+    defaultIntervalMinutes: 1440,
+    minIntervalMinutes: 60,
+    appliesTo: () => true,
+    run: ({ prisma, orgId }) => scanDueReviews({ db: prisma, orgId }),
+  },
+
+  // B-19 (E26): flag published documents that may be outdated and open one
+  // review for each (never a second while one is open).
+  "content.stale-scan": {
+    label: "Stale content scan",
+    description: "Flags published documents that may be outdated, opens one review for each, and notifies the owner.",
+    defaultIntervalMinutes: 1440,
+    minIntervalMinutes: 60,
+    appliesTo: () => true,
+    run: ({ prisma, orgId }) => scanStaleContent({ db: prisma, orgId }),
   },
 };
 
