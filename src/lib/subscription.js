@@ -1,8 +1,18 @@
 import { prisma } from "@/lib/prisma";
 
+// Legacy per-user lookup. Subscription.managedByUserId is no longer unique
+// (orgId is, now) — kept working via findFirst until the org-mandatory
+// pivot's cutover phase removes this entirely.
 export async function getUserSubscription(userId) {
+  return prisma.subscription.findFirst({
+    where: { managedByUserId: userId },
+    include: { plan: true }
+  });
+}
+
+export async function getOrgSubscription(orgId) {
   return prisma.subscription.findUnique({
-    where: { userId },
+    where: { orgId },
     include: { plan: true }
   });
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -37,8 +38,19 @@ export default function SignupPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      if (res.status === 201) {
-        router.push(`/auth/verify-otp?email=${encodeURIComponent(email)}`);
+      if (res.status === 409) {
+        // EKP A-5: this email's organization uses Microsoft sign-in.
+        const data = await res.json().catch(() => ({}));
+        if (data.useMicrosoft) {
+          await signIn("azure-ad", { callbackUrl: "/welcome-back" }, { login_hint: email });
+          return;
+        }
+      }
+
+      if (res.ok) {
+        const data = await res.json();
+        const mode = data.existingAccount ? "existing" : "new";
+        router.push(`/auth/verify-otp?email=${encodeURIComponent(email)}&mode=${mode}`);
       } else {
         const msg = await res.text();
         setError(msg || "Signup failed");

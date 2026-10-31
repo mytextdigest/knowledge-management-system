@@ -9,7 +9,11 @@ export default function LogoutButton() {
     <Button
       variant="destructive"
       size="sm"
-      onClick={() => signOut({ callbackUrl: "/auth/signin" })}
+      onClick={() => {
+        fetch("/api/org/active", { method: "DELETE" }).finally(() =>
+          signOut({ callbackUrl: "/auth/signin" })
+        );
+      }}
       className="w-full flex items-center gap-2 mt-4 py-3 text-base"
     >
       <LogOut size={18} />

@@ -2,13 +2,20 @@ import OpenAI from "openai";
 import pLimit from "p-limit";
 import { prisma } from "@/lib/prisma";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey || /REPLACE_|YOUR_API_KEY|PLACEHOLDER/i.test(apiKey)) {
+    throw new Error("OPENAI_KEY_MISSING_OR_PLACEHOLDER: configure a valid OPENAI_API_KEY for this worker");
+  }
+  return new OpenAI({ apiKey });
+}
 const limit = pLimit(5);
 
 export async function generateEmbeddingsInBackground(docId, chunks) {
   console.log(`🧠 [${docId}] Starting embedding generation (${chunks.length} chunks)`);
 
   try {
+    const openai = getOpenAIClient();
     const tasks = chunks.map((chunk, idx) =>
       limit(async () => {
         if (!chunk?.trim()) return;
@@ -20,7 +27,7 @@ export async function generateEmbeddingsInBackground(docId, chunks) {
 
         const embedding = embeddingRes.data[0].embedding;
         await prisma.chunk.updateMany({
-          where: { document_id: docId, chunk_index: idx },
+          where: { documentId: docId, chunkIndex: idx },
           data: { embedding },
         });
       })
@@ -30,6 +37,7 @@ export async function generateEmbeddingsInBackground(docId, chunks) {
     console.log(`✅ [${docId}] All embeddings generated`);
   } catch (err) {
     console.error("❌ Embedding generation failed:", err.message);
+    throw err;
   }
 }
 
@@ -37,6 +45,7 @@ export async function runSummarizationInBackground(docId, filename, chunks) {
   console.log(`🟡 [${filename}] Starting summarization (${chunks.length} chunks)`);
 
   try {
+    const openai = getOpenAIClient();
     await prisma.document.update({
       where: { id: docId },
       data: { status: "summarizing" },
@@ -62,7 +71,7 @@ export async function runSummarizationInBackground(docId, filename, chunks) {
     // Store summaries
     for (let i = 0; i < summaries.length; i++) {
       await prisma.chunk.updateMany({
-        where: { document_id: docId, chunk_index: i },
+        where: { documentId: docId, chunkIndex: i },
         data: { summary: summaries[i] },
       });
     }
@@ -98,7 +107,7 @@ Chunk summaries:\n\n${joined}`,
     await prisma.document.update({
       where: { id: docId },
       data: {
-        summary: structured,
+        summary: JSON.stringify(structured),
         status: "ready",
       },
     });
@@ -106,9 +115,14 @@ Chunk summaries:\n\n${joined}`,
     console.log(`✅ [${filename}] Summarization complete`);
   } catch (err) {
     console.error("❌ Summarization failed:", err);
-    await prisma.document.update({
-      where: { id: docId },
-      data: { status: "error" },
-    });
+    try {
+      await prisma.document.update({
+        where: { id: docId },
+        data: { status: "error" },
+      });
+    } catch (statusError) {
+      console.error("Failed to persist summarization error status:", statusError);
+    }
+    throw err;
   }
 }

@@ -8,6 +8,11 @@ datasource db {
 }
 
 model User {
+  workflowTasks WorkflowTask[] @relation("WorkflowAssignee")
+  reviewRecords ReviewRecord[] @relation("PeriodicReviewReviewer")
+  workflowDecisions WorkflowDecision[] @relation("WorkflowDecisionActor")
+  workflowInstancesStarted WorkflowInstance[] @relation("WorkflowStarter")
+
   id            String   @id @default(cuid())
   name          String?
   email         String   @unique
@@ -18,15 +23,69 @@ model User {
 
   storageUsedBytes BigInt @default(0)
 
-  conversations Conversation[]
-  documents     Document[]
-  projects      Project[]
-  projectChats  ProjectConversation[]
-  settings      Setting[]
-  subscription  Subscription?
+  hasCompletedOnboarding Boolean @default(false) @map("has_completed_onboarding")
+
+  conversations        Conversation[]
+  summaryReviews       DocumentSummaryReview[] @relation("SummaryReviewer")
+  notifications        Notification[]
+  notificationPreferences NotificationPreference[]
+  documents            Document[]
+  ownedDocuments       Document[] @relation("DocumentOwner")
+  documentStewardships DocumentSteward[]
+  defaultOwnerDepartments Department[] @relation("DepartmentDefaultOwner")
+  projects             Project[]
+  projectChats         ProjectConversation[]
+  settings             Setting[]
+  managedSubscriptions Subscription[]
 
   orgMembers        OrganizationMember[]
   departmentMembers DepartmentMember[]
+  orgConversations  OrgConversation[]
+  chatAuditLogs     ChatAuditLog[]
+  auditLogsAsActor  AuditLog[]           @relation("AuditLogActor")
+  auditLogsAsTarget AuditLog[]           @relation("AuditLogTarget")
+  orgMemberMemories OrgMemberMemory[]
+  topicExpertise    TopicExpertise[]
+  documentInteractions DocumentInteraction[]
+  lessonsAuthored   Lesson[]
+  decisionsReviewed Decision[] @relation("DecisionReviewedBy")
+  identities        UserIdentity[]
+
+  // EKP Phase 2 (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md)
+  termSetsCreated         TermSet[]         @relation("TermSetCreatedBy")
+  documentTermsCreated    DocumentTerm[]    @relation("DocumentTermCreatedBy")
+  documentTermsAccepted   DocumentTerm[]    @relation("DocumentTermAcceptedBy")
+  searchEvents            SearchEvent[]
+  reportingApiKeysCreated ReportingApiKey[] @relation("ReportingApiKeyCreatedBy")
+  assetTemplatesCreated   AssetTemplate[]   @relation("AssetTemplateCreatedBy")
+}
+
+// EKP Workstream A (A1/A2): a KMS user's Microsoft (Entra ID) identity. The
+// object id is what SharePoint permissions are checked against.
+// source "sso" comes from a signed sign-in token; "email_match" from looking
+// up the user's verified email in the org's tenant (A-21). See
+// docs/ekp/phase1/WS_A_M365_CONNECTORS.md §3.1.
+model UserIdentity {
+  id          String    @id @default(cuid())
+  userId      String
+  provider    String // "entra"
+  source      String // "sso" | "email_match"
+  tenantId    String    @map("tenant_id")
+  externalId  String    @map("external_id") // Entra object id (oid)
+  email       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastLoginAt DateTime? @map("last_login_at")
+  verifiedAt  DateTime? @map("verified_at") // last email_match re-check
+  // A-6: what Entra group mapping last granted this user in the tenant's
+  // org: { role, departmentIds } (departmentIds = memberships it created).
+  // Lets a sign-in take back exactly those grants when the user leaves a
+  // mapped group, without touching roles or memberships set by hand.
+  groupGrants Json?     @map("group_grants")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, tenantId, externalId])
+  @@index([userId])
 }
 
 model OtpToken {
@@ -49,47 +108,86 @@ model Setting {
 }
 
 model Organization {
+  reviewPolicies ReviewPolicy[]
+  reviewRecords ReviewRecord[]
+  workflowDefinitions WorkflowDefinition[]
+  workflowInstances WorkflowInstance[]
+
   id           String   @id @default(cuid())
   name         String
   openaiApiKey String?
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  members     OrganizationMember[]
-  invites     OrganizationInvite[]
-  departments Department[]
-  projects    Project[]
-  documents   Document[]
+  storageUsedBytes BigInt @default(0) @map("storage_used_bytes")
+
+  summaryReviews    DocumentSummaryReview[]
+  notifications     Notification[]
+  members           OrganizationMember[]
+  invites           OrganizationInvite[]
+  departments       Department[]
+  projects          Project[]
+  documents         Document[]
+  conversations     OrgConversation[]
+  chatAuditLogs     ChatAuditLog[]
+  orgSettings       OrgSetting[]
+  auditLogs         AuditLog[]
+  subscription      Subscription?
+  orgMemberMemories OrgMemberMemory[]
+  knowledgeGaps     KnowledgeGap[]
+  repositoryTopics  Topic[]
+  integrations      OrgIntegration[]
+  ssoConfig         OrgSsoConfig?
+  scheduledJobs     ScheduledJob[]
+  documentInteractions DocumentInteraction[]
+  lessons           Lesson[]
+  topicSnapshots    TopicSnapshot[]
+
+  // EKP Phase 2 (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md)
+  termSets          TermSet[]
+  metadataFields    MetadataField[]
+  termCandidates    TermCandidate[]
+  taxonomyImports   TaxonomyImport[]
+  searchEvents      SearchEvent[]
+  analyticsDaily    AnalyticsDaily[]
+  reportingApiKeys  ReportingApiKey[]
+  mediaJobs         MediaJob[]
+  assetTemplates    AssetTemplate[]
 
   @@index([name])
 }
 
 model OrganizationMember {
-  id        String   @id @default(cuid())
-  orgId     String
-  userId    String
-  role      String   @default("employee")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(cuid())
+  orgId            String
+  userId           String
+  role             String   @default("employee")
+  lastDepartmentId String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastDepartment Department?  @relation(fields: [lastDepartmentId], references: [id], onDelete: SetNull)
 
   @@unique([orgId, userId])
   @@index([orgId])
   @@index([userId])
+  @@index([lastDepartmentId])
 }
 
 model OrganizationInvite {
-  id         String    @id @default(cuid())
-  orgId      String
-  email      String
-  role       String    @default("employee")
-  token      String    @unique
-  expiresAt  DateTime
-  acceptedAt DateTime?
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  id            String    @id @default(cuid())
+  orgId         String
+  email         String
+  role          String    @default("employee")
+  departmentIds String[]  @default([])
+  token         String    @unique
+  expiresAt     DateTime
+  acceptedAt    DateTime?
+  declinedAt    DateTime?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
@@ -105,9 +203,16 @@ model Department {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  organization Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  members      DepartmentMember[]
-  documents    Document[]
+  organization         Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members              DepartmentMember[]
+  documents            Document[]
+  projects             Project[]
+  lastVisitedByMembers OrganizationMember[]
+  timelineEvents       TimelineEvent[]
+  suggestedDocuments   Document[] @relation("SuggestedDocumentDepartment")
+  lessons              Lesson[]
+  defaultOwnerId       String?
+  defaultOwner         User? @relation("DepartmentDefaultOwner", fields: [defaultOwnerId], references: [id], onDelete: SetNull)
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -129,6 +234,83 @@ model DepartmentMember {
   @@index([userId])
 }
 
+model OrgConversation {
+  id                       String   @id @default(cuid())
+  orgId                    String
+  userId                   String
+  title                    String?
+  activeTopic              String?
+  activeDocumentId         String?
+  activeWorkflowDocumentId String?
+  activeWorkflowStep       Int?
+  createdAt                DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages     OrgMessage[]
+  entities     Entity[]
+
+  @@index([orgId])
+  @@index([userId])
+}
+
+model OrgMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String
+  content        String
+  sources        Json?
+  confidence     String?
+  feedback       String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation OrgConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  searchEvent  SearchEvent?
+
+  @@index([conversationId])
+}
+
+model ChatAuditLog {
+  id          String   @id @default(cuid())
+  orgId       String
+  userId      String
+  question    String
+  citedDocIds String[] @default([])
+  outcome     String   @default("answered") // "answered" | "denied"
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([outcome])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  orgId        String
+  actorUserId  String?
+  targetUserId String?
+  action       String
+  metadata     Json?
+  entityType   String?  @map("entity_type")
+  entityId     String?  @map("entity_id")
+  before       Json?
+  after        Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  actor        User?        @relation("AuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  target       User?        @relation("AuditLogTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([actorUserId])
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
 model Project {
   id          String   @id @default(cuid())
   name        String
@@ -136,21 +318,32 @@ model Project {
   createdAt   DateTime @default(now()) @map("created_at")
   userId      String
 
-  scope String  @default("private")
-  orgId String?
+  scope        String @default("org")
+  orgId        String
+  departmentId String
 
-  documents    Document[]
-  topics       Topic[]
-  user         User                  @relation(fields: [userId], references: [id])
-  organization Organization?         @relation(fields: [orgId], references: [id], onDelete: SetNull)
-  projectChats ProjectConversation[]
+  documents      Document[]
+  topics         Topic[]
+  user           User                  @relation(fields: [userId], references: [id])
+  organization   Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  department     Department            @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  projectChats   ProjectConversation[]
+  documentProjectLinks DocumentProjectLink[]
+  timelineEvents TimelineEvent[]
+  lessons        Lesson[]
 
-  @@unique([userId, name])
+  @@unique([departmentId, name])
   @@index([scope])
   @@index([orgId])
+  @@index([departmentId])
 }
 
 model Document {
+  reviewRecords ReviewRecord[]
+  nextReviewAt DateTime?
+  lastReviewedAt DateTime?
+  workflowInstances WorkflowInstance[]
+
   id        String   @id @default(cuid())
   filename  String?
   filePath  String?  @map("file_path")
@@ -165,25 +358,151 @@ model Document {
 
   visibility String @default("private")
 
-  scope        String  @default("private")
+  scope        String  @default("project")
   orgId        String?
   departmentId String?
   lifecycle    String  @default("published")
+  // EKP B-7: successor reference; source document remains readable for history.
+  supersededById String?
+  supersededBy Document? @relation("DocumentSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes Document[] @relation("DocumentSupersession")
+  summaryReview DocumentSummaryReview?
+  versions DocumentVersion[]
+  ownerId String?
+  owner User? @relation("DocumentOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  stewards DocumentSteward[]
+  deletedAt DateTime?
+  deletedById String?
+  purgeAfter DateTime?
+
   category     String?
 
-  chunks        Chunk[]
-  conversations Conversation[]
-  topicDocument TopicDocument?
-  project       Project?       @relation(fields: [projectId], references: [id])
-  user          User           @relation(fields: [userId], references: [id])
-  organization  Organization?  @relation(fields: [orgId], references: [id], onDelete: SetNull)
-  department    Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  // Rank 4: automatic knowledge classification signals. Topic/TopicDocument
+  // remain project-specific clustering models; the fixed enterprise category
+  // taxonomy is document metadata and intentionally stays separate.
+  categoryConfidence            Float?
+  classificationStatus          String  @default("pending_classification")
+  suggestedDepartmentId         String?
+  departmentSuggestionConfidence Float?
+  contentHash                   String?
+  lifecycleSuggestion           String?
+  lifecycleSuggestionReason     String?
+  lifecycleSuggestedAt          DateTime?
+  lifecycleSuggestionDismissedAt DateTime?
+  classifiedAt                  DateTime?
+
+  // Rank 3 — Ingestion Pipeline (Task 7-A): set for connector-synced documents,
+  // "manual" (default) for everything uploaded through the existing upload flow.
+  sourceProvider     String?   @default("manual") @map("source_provider")
+  externalId         String?   @map("external_id")
+  // EKP Workstream A: link back to the original in the source system (A-13),
+  // what kind of item it is (A-15/A-17), and when its source permissions
+  // were last read (A-11). Per-file permissions live in DocumentAcl.
+  externalUrl        String?   @map("external_url")
+  contentType        String    @default("file") @map("content_type") // "file" | "page" | "article"
+  aclSyncedAt        DateTime? @map("acl_synced_at")
+  acl                DocumentAcl[]
+  externalModifiedAt DateTime? @map("external_modified_at")
+
+  // EKP Phase 2 / WS-D: when the content last changed (upload, replace, version
+  // restore, source modified). Not @updatedAt: classification, ACL sync and
+  // starring also update the row.
+  contentUpdatedAt DateTime? @map("content_updated_at")
+  // EKP Phase 2 / WS-E: a transcript points to its recording (E11.5); media
+  // length and chapters (E11.7); thumbnail (E13); authored assets (E14).
+  transcriptOfId       String?    @map("transcript_of_id")
+  transcriptOf         Document?  @relation("DocumentTranscript", fields: [transcriptOfId], references: [id], onDelete: SetNull)
+  transcripts          Document[] @relation("DocumentTranscript")
+  transcriptLinkSource String?    @map("transcript_link_source") // "auto" | "manual": a sync never overwrites "manual"
+  durationSeconds      Float?     @map("duration_seconds")
+  mediaSegments        Json?      @map("media_segments") // [{ title, start, end }]
+  thumbnailPath        String?    @map("thumbnail_path") // S3 thumbnails/{docId}.jpg
+  templateVersionId    String?    @map("template_version_id")
+  templateVersion      AssetTemplateVersion? @relation(fields: [templateVersionId], references: [id], onDelete: Restrict)
+  assetData            Json?      @map("asset_data") // { sections: { key: richTextJson } }; content holds the rendered text
+
+  terms           DocumentTerm[]
+  searchClicks    SearchClick[]
+  links           DocumentLink[]
+  sourceTags      DocumentSourceTag[]
+  mediaJobs       MediaJob[]
+
+  chunks          Chunk[]
+  conversations   Conversation[]
+  topicDocument   TopicDocument?
+  project         Project?           @relation(fields: [projectId], references: [id])
+  user            User               @relation(fields: [userId], references: [id])
+  organization    Organization?      @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  department      Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  suggestedDepartment Department?    @relation("SuggestedDocumentDepartment", fields: [suggestedDepartmentId], references: [id], onDelete: SetNull)
+  duplicatesAsDocument  DocumentDuplicate[] @relation("DuplicateDocument")
+  duplicatesAsOriginal  DocumentDuplicate[] @relation("DuplicateOriginal")
+  entities        Entity[]
+  decisions       Decision[]
+  timelineEvents  TimelineEvent[]
+  conflictsAsDocA DocumentConflict[] @relation("DocumentConflictA")
+  conflictsAsDocB DocumentConflict[] @relation("DocumentConflictB")
+  relationshipsFrom DocumentRelationship[] @relation("DocumentRelationshipFrom")
+  relationshipsTo   DocumentRelationship[] @relation("DocumentRelationshipTo")
+  projectLinks      DocumentProjectLink[]
+  interactions      DocumentInteraction[]
+  lessons           Lesson[]
+  decisionEvidence  DecisionEvidence[]
 
   @@index([scope])
   @@index([orgId])
   @@index([departmentId])
   @@index([lifecycle])
+  @@index([supersededById])
+  @@index([ownerId])
+  @@index([deletedAt])
+  @@index([purgeAfter])
   @@index([category])
+  @@index([classificationStatus])
+  @@index([suggestedDepartmentId])
+  @@index([contentHash])
+  @@index([lifecycleSuggestion])
+  @@index([sourceProvider, externalId])
+  @@index([orgId, contentUpdatedAt])
+  @@index([transcriptOfId])
+  @@index([templateVersionId])
+}
+
+
+// B-8: immutable snapshots of a document's previous binary and metadata.
+model DocumentVersion {
+  id String @id @default(cuid())
+  documentId String
+  versionNumber Int
+  filePath String?
+  filename String?
+  content String?
+  summary String?
+  status String?
+  createdAt DateTime @default(now())
+  createdById String?
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, versionNumber])
+  @@index([documentId, createdAt])
+}
+
+model DocumentDuplicate {
+  id            String   @id @default(cuid())
+  documentId    String
+  duplicateOfId String
+  similarity    Float
+  status        String   @default("pending")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  document    Document @relation("DuplicateDocument", fields: [documentId], references: [id], onDelete: Cascade)
+  duplicateOf Document @relation("DuplicateOriginal", fields: [duplicateOfId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, duplicateOfId])
+  @@index([documentId])
+  @@index([duplicateOfId])
+  @@index([status])
 }
 
 model Chunk {
@@ -196,6 +515,7 @@ model Chunk {
   metadata     Json?
   documentId   String                       @map("document_id")
   document     Document                     @relation(fields: [documentId], references: [id])
+  decisionEvidence DecisionEvidence[]
 
   @@index([documentId])
 }
@@ -244,7 +564,9 @@ model ProjectMessage {
 
 model Topic {
   id                  String   @id @default(cuid())
-  projectId           String
+  projectId           String?
+  orgId               String?
+  scope               String   @default("project")
   name                String
   centroidEmbedding   Json?
   keywordDistribution Json?
@@ -252,10 +574,49 @@ model Topic {
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
-  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organization   Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   topicDocuments TopicDocument[]
+  expertise      TopicExpertise[]
+  snapshots      TopicSnapshot[]
+  termCandidates TermCandidate[]
 
   @@index([projectId])
+  @@index([orgId, scope])
+  @@unique([orgId, scope, name])
+}
+
+// Rank 16 — Topic Evolution Tracking (Milestone 17, Task 17-B)
+// Append-only history for a Topic's state over time. `topicRef` is the
+// stable grouping identity (set once, never changed) — unlike `topicId`,
+// it survives the Topic row's own deletion (adjustTopicOnDocumentRemoval()'s
+// delete-on-empty path), which is why trend queries group by `topicRef`,
+// not `topicId`. `departmentIds`/`hasUnrestrictedDoc` denormalize enough of
+// the topic's contributing-document access shape at capture time that RBAC
+// on the trend view (FR-3) doesn't depend on TopicDocument rows that no
+// longer exist once a topic is retired (TopicDocument cascade-deletes with
+// its Topic).
+model TopicSnapshot {
+  id             String   @id @default(cuid())
+  topicRef       String
+  topicId        String?
+  topicName      String
+  orgId          String
+  scope          String
+  periodStart    DateTime @map("period_start")
+  capturedAt     DateTime @default(now()) @map("captured_at")
+  documentCount  Int      @map("document_count")
+  expertCount    Int      @default(0) @map("expert_count")
+  keywordSummary Json?    @map("keyword_summary")
+  departmentIds  String[] @default([]) @map("department_ids")
+  hasUnrestrictedDoc Boolean @default(false) @map("has_unrestricted_doc")
+
+  topic        Topic?       @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([topicRef, periodStart])
+  @@index([topicRef, capturedAt])
+  @@index([orgId, scope, capturedAt])
 }
 
 model TopicDocument {
@@ -269,6 +630,83 @@ model TopicDocument {
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@index([topicId])
+}
+
+
+model DocumentRelationship {
+  id             String   @id @default(cuid())
+  orgId          String
+  fromDocumentId String
+  toDocumentId   String
+  type           String   @default("related")
+  weight         Float
+  evidence       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  fromDocument Document @relation("DocumentRelationshipFrom", fields: [fromDocumentId], references: [id], onDelete: Cascade)
+  toDocument   Document @relation("DocumentRelationshipTo", fields: [toDocumentId], references: [id], onDelete: Cascade)
+
+  @@unique([fromDocumentId, toDocumentId, type])
+  @@index([orgId, fromDocumentId, weight])
+  @@index([orgId, toDocumentId, weight])
+}
+
+model DocumentProjectLink {
+  id         String   @id @default(cuid())
+  documentId String
+  projectId  String
+  confidence Float
+  status     String   @default("suggested")
+  evidence   String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, projectId])
+  @@index([projectId, status])
+  @@index([documentId, status])
+}
+
+model TopicExpertise {
+  id           String    @id @default(cuid())
+  topicId      String
+  userId       String
+  score        Float
+  signals      Json?
+  source       String    @default("inferred")
+  confirmedBy  String?
+  lastSignalAt DateTime?
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([topicId, userId])
+  @@index([topicId, score])
+  @@index([userId])
+}
+
+
+model DocumentInteraction {
+  id             String   @id @default(cuid())
+  documentId     String
+  userId         String
+  orgId          String
+  type           String   @default("view")
+  durationSeconds Int?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  document     Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, type])
+  @@index([userId, createdAt])
+  @@index([orgId, createdAt])
 }
 
 // Subscription Extension
@@ -290,7 +728,12 @@ model Plan {
 
 model Subscription {
   id                   String    @id @default(cuid())
-  userId               String    @unique
+  // Legacy per-user billing key. Nullable + no longer unique going forward;
+  // retained only as "who originally purchased this" denormalization once
+  // billing moves to orgId. Will be fully retired after the org-mandatory
+  // pivot's data migration completes.
+  managedByUserId      String?
+  orgId                String    @unique
   planId               String
   status               String
   stripeCustomerId     String
@@ -300,6 +743,913 @@ model Subscription {
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id])
-  plan Plan @relation(fields: [planId], references: [id])
+  managedByUser User?        @relation(fields: [managedByUserId], references: [id])
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  plan          Plan         @relation(fields: [planId], references: [id])
+}
+
+// Rank 1 Phase 2 — Knowledge Understanding (Task 5-A shared schema)
+
+model Entity {
+  id             String   @id @default(cuid())
+  documentId     String?
+  conversationId String?
+  name           String
+  type           String // "person" | "project" | "department" | "system"
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  document     Document?        @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  conversation OrgConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([documentId])
+  @@index([conversationId])
+  @@index([type])
+}
+
+model Decision {
+  id         String    @id @default(cuid())
+  documentId String
+  statement  String
+  rationale  String?
+  decidedAt  DateTime?
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  // Rank 14 (Decision Intelligence Repository), FR-2: originally
+  // "active" | "reversed" | "superseded". Decision Extraction v2
+  // (REQUIREMENTS_DECISION_EXTRACTION_V2_HITL.md) adds "pending" (extracted,
+  // awaiting reviewer confirm/reject — never set by a human) and "rejected"
+  // (reviewer determined this is not a decision), ordered:
+  // pending, active, rejected, reversed, superseded.
+  // DX-J cutover: default flipped to "pending" once the full review
+  // pipeline (gating, reconcile, review API, review UI) shipped — the
+  // worker always sets this explicitly regardless, so this default only
+  // matters as a safety net for any other future write path. Pre-existing
+  // rows from before this feature are untouched and stay "active" with
+  // certainty = null (never backfilled).
+  status String @default("pending")
+
+  // Free-text explanation accompanying a status change (e.g. why a decision
+  // was reversed/superseded) — set together with `status`, never by
+  // extraction. Surfaced in the decision's detail view and folded into
+  // formatDecisionContext() so a decision cited in chat carries its outcome
+  // note, not just the raw statement/rationale.
+  statusNote String?
+
+  // --- Decision Extraction v2 (implicit detection + human review) ---
+  // All additive/nullable; null on every pre-existing row and never
+  // backfilled. See REQUIREMENTS_DECISION_EXTRACTION_V2_HITL.md.
+
+  // Model-side judgment, separate from the human-owned `status` lifecycle:
+  // "confirmed" | "likely" | "candidate". Computed deterministically in code
+  // from `signals`, not trusted verbatim from the LLM.
+  certainty String?
+
+  // "explicit" | "implicit" — whether the source text states the decision
+  // outright or the extractor inferred it from commitment/action language.
+  explicitness String?
+
+  // The deterministic score (see certainty above) that produced the
+  // certainty tier, kept for reproducibility when scoring weights are tuned.
+  score Int?
+
+  // Fixed-vocabulary evidence signals the scorer summed to produce `score`
+  // (e.g. "explicit_commitment", "implementation_action",
+  // "open_question_remains"). Unknown labels from the model are dropped
+  // before storage, so this array is always drawn from the fixed vocabulary.
+  signals String[] @default([])
+
+  // The issue/topic being decided, distinct from `statement` (the choice
+  // itself) — optional, model-supplied.
+  subject String?
+
+  actors       String[] @default([])
+  alternatives String[] @default([])
+
+  // "extracted" (worker, the default) | "manual" (added by a reviewer via
+  // FR-6/DX-L — lands "active" directly since the reviewer's own entry is
+  // the review).
+  source String @default("extracted")
+
+  // The extractor's original wording, captured on a reviewer's first edit to
+  // `statement`. Lets reconcile-on-regenerate (FR-3) match a new extraction
+  // against a since-edited row by its original text, not the edited one.
+  aiStatement String?
+
+  reviewedById String?
+  reviewedBy   User?     @relation("DecisionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt   DateTime?
+  reviewNote   String?
+
+  document       Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  timelineEvents TimelineEvent[]
+  lessons        Lesson[]
+  evidence       DecisionEvidence[]
+
+  @@index([documentId])
+  @@index([status])
+}
+
+// Decision Extraction v2 — verified quotes backing a Decision, shown in the
+// "why KMS thinks this" panel (FR-6) so a client/reviewer can see the exact
+// source text behind an extracted (especially implicit) decision. `quote`
+// must verify as a substring of its source chunk's text before being stored
+// (worker-side check) — the guard against fabricated evidence. `documentId`
+// duplicates `Decision.documentId` today (every quote comes from the
+// decision's own document) but is kept separate so cross-document evidence
+// aggregation (deferred, see requirements doc) needs no migration later.
+model DecisionEvidence {
+  id         String   @id @default(cuid())
+  decisionId String
+  documentId String
+  chunkId    String?
+  chunkIndex Int?
+  quote      String
+  type       String // explicit_statement | approval | commitment | directive |
+  // resolved_discussion | follow_up_action | assumed_direction
+  createdAt DateTime @default(now()) @map("created_at")
+
+  decision Decision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunk    Chunk?   @relation(fields: [chunkId], references: [id], onDelete: SetNull)
+
+  @@index([decisionId])
+  @@index([documentId])
+}
+
+model TimelineEvent {
+  id           String   @id @default(cuid())
+  projectId    String?
+  departmentId String?
+  documentId   String?
+  decisionId   String?
+  occurredAt   DateTime
+  description  String
+
+  project    Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  document   Document?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  decision   Decision?   @relation(fields: [decisionId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([departmentId])
+  @@index([documentId])
+  @@index([occurredAt])
+}
+
+model DocumentConflict {
+  id          String   @id @default(cuid())
+  documentAId String
+  documentBId String
+  summary     String
+  status      String   @default("flagged") // "flagged" | "reviewed" | "dismissed"
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  documentA Document @relation("DocumentConflictA", fields: [documentAId], references: [id], onDelete: Cascade)
+  documentB Document @relation("DocumentConflictB", fields: [documentBId], references: [id], onDelete: Cascade)
+
+  @@index([documentAId])
+  @@index([documentBId])
+  @@index([status])
+}
+
+model OrgMemberMemory {
+  id         String   @id @default(cuid())
+  orgId      String
+  userId     String
+  topic      String
+  lastSeenAt DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId, topic])
+  @@index([orgId, userId])
+  @@index([lastSeenAt])
+}
+
+model KnowledgeGap {
+  id                 String   @id @default(cuid())
+  orgId              String
+  topic              String
+  gapScore           Float
+  occurrenceCount    Int
+  zeroCitationCount  Int
+  lowConfidenceCount Int
+  // EKP Phase 2 / WS-D: SearchEvent ids that produced this gap (E30.4); keep the latest 50.
+  queryIds           String[] @default([]) @map("query_ids")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, gapScore])
+  @@index([createdAt])
+}
+
+// Rank 3 — Automated Knowledge Ingestion Pipeline (Task 7-A)
+
+// EKP Workstream A (A1): an org's Microsoft sign-in setup. One Microsoft
+// tenant maps to exactly one KMS org (tenantId is unique), and sign-in looks
+// orgs up by the token's tid. See WS_A_M365_CONNECTORS.md A1.
+model OrgSsoConfig {
+  id             String   @id @default(cuid())
+  orgId          String   @unique
+  provider       String   @default("entra")
+  tenantId       String   @unique @map("tenant_id")
+  protocol       String   @default("oidc") // "oidc" | "saml"
+  enabled        Boolean  @default(true)
+  tenantName      String?  @map("tenant_name")
+  // The tenant's verified domains, read from Graph /organization at connect
+  // time. allowedDomains must be a subset.
+  verifiedDomains String[] @default([]) @map("verified_domains")
+  // Chosen from the tenant's verified domains only.
+  allowedDomains String[] @default([]) @map("allowed_domains")
+  // [{ groupId, role, departmentIds[] }]
+  groupRoleMap   Json?    @map("group_role_map")
+  passwordLogin  String   @default("admins_only") @map("password_login") // "admins_only" | "all"
+  provisioning   String   @default("auto") // "auto" | "invite_only"
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model OrgIntegration {
+  id        String @id @default(cuid())
+  orgId     String
+  provider  String // "sharepoint" | "google_drive" | "confluence" ...
+  status    String @default("connected") // "connected" | "disconnected" | "error"
+
+  // { sites: [{ siteId, siteUrl, departmentId, lastSyncCursor }] } — one entry
+  // per connected site; cursor lives per-site since an org can connect more
+  // than one site, each synced independently. See REQUIREMENTS_INGESTION_PIPELINE.md FR-2.
+  scopeConfig Json @map("scope_config")
+
+  // App-only client-credentials token, scoped to only the sites granted in
+  // scopeConfig. Encrypted at rest — do not reuse the plaintext
+  // Organization.openaiApiKey pattern (NFR in requirements doc).
+  // refreshToken is nullable: SharePoint's app-only client-credentials flow
+  // has no refresh token (re-minted from client_id/secret + tenantId in
+  // scopeConfig instead) — kept nullable for future providers that do use one.
+  accessToken  String    @map("access_token")
+  refreshToken String?   @map("refresh_token")
+  tokenExpiry  DateTime  @map("token_expiry")
+  lastSyncAt   DateTime? @map("last_sync_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  syncRuns     SyncRun[]
+
+  @@unique([orgId, provider])
+  @@index([orgId])
+}
+
+// EKP Workstream A (A-9/A-10): a source-system permission entry for one
+// document, e.g. a SharePoint file shared with a user or group. A document
+// with no rows is governed by KMS rules only; with rows, the user must also
+// match one (src/lib/access/documentAccess.js). principalId is an Entra
+// object id ("user"/"group"), a SharePoint site-group id ("site_group"), or a
+// tenant id ("tenant", e.g. "anyone in the organization" links).
+model DocumentAcl {
+  id            String   @id @default(cuid())
+  documentId    String   @map("document_id")
+  principalType String   @map("principal_type") // "user" | "group" | "site_group" | "tenant"
+  principalId   String   @map("principal_id")
+  source        String   @default("sharepoint")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, principalType, principalId])
+  @@index([principalId])
+}
+
+// EKP Workstream A, F3: scheduled jobs, run by the worker's scheduler loop
+// (worker/scheduler.js). One row per job per org; handlers are registered in
+// src/lib/jobs/registry.js. See docs/ekp/phase1/WS_A_M365_CONNECTORS.md §3.3.
+model ScheduledJob {
+  id              String    @id @default(cuid())
+  key             String    @unique // "<name>:<orgId>" or "<name>:global"
+  name            String // handler key, e.g. "sharepoint.sync"
+  orgId           String?
+  intervalMinutes Int       @map("interval_minutes")
+  enabled         Boolean   @default(false)
+  nextRunAt       DateTime  @map("next_run_at")
+  lastRunAt       DateTime? @map("last_run_at")
+  lastStatus      String?   @map("last_status") // "ok" | "failed" | "running"
+  lastError       String?   @map("last_error")
+  lastDurationMs  Int?      @map("last_duration_ms")
+  lastResult      Json?     @map("last_result") // small summary returned by the handler
+  lockedUntil     DateTime? @map("locked_until")
+  // "Run now": runs at the next scheduler tick even if the job is disabled.
+  runRequestedAt  DateTime? @map("run_requested_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([enabled, nextRunAt])
+  @@index([orgId])
+}
+
+model SyncRun {
+  id            String    @id @default(cuid())
+  integrationId String    @map("integration_id")
+  startedAt     DateTime  @default(now()) @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+  status        String    @default("running") // "running" | "completed" | "failed"
+  trigger       String    @default("manual") // "manual" | "scheduled" (EKP F3)
+  filesFound    Int       @default(0) @map("files_found")
+  filesFailed   Int       @default(0) @map("files_failed")
+  filesSkipped  Int       @default(0) @map("files_skipped") // A-24: files above the size limit
+  error         String?
+
+  integration OrgIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([integrationId])
+  @@index([status])
+}
+
+// Rank 11 — Lessons Learned Intelligence (Task 12-B)
+// See docs/tier-2/REQUIREMENTS_LESSONS_LEARNED_INTELLIGENCE.md for FR text.
+// v1 ships on-demand manual capture only (Open Question 1 resolved: no
+// Project.status/completedAt lifecycle trigger — see Task 12-A note in
+// docs/tier-2/TIER2_LESSONS_LEARNED_INTELLIGENCE_IMPLEMENTATION_TRACKER.md).
+
+model Lesson {
+  id             String    @id @default(cuid())
+  orgId          String
+  projectId      String?
+  departmentId   String?
+  documentId     String?
+  decisionId     String?
+  topic          String?
+  whatHappened   String
+  whatWorked     String?
+  whatDidntWork  String?
+  recommendation String?
+  authorUserId   String
+  source         String    @default("manual") // "manual" | "extracted"
+  status         String    @default("draft")  // "draft" | "published"
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  department   Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  document     Document?    @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  decision     Decision?    @relation(fields: [decisionId], references: [id], onDelete: SetNull)
+  author       User         @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([projectId])
+  @@index([departmentId])
+  @@index([documentId])
+  @@index([status])
+}
+
+// EKP B-4: organization-scoped governance configuration.
+model OrgSetting {
+  id        String   @id @default(cuid())
+  orgId     String
+  key       String
+  value     Json
+  updatedBy String?
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, key])
+}
+
+// B-10: document stewardship is separate from the uploader and accountable owner.
+model DocumentSteward {
+  documentId String
+  userId String
+  createdAt DateTime @default(now())
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([documentId, userId])
+  @@index([userId])
+}
+
+// EKP B-11 / F4: per-recipient notifications scoped to an organization.
+model Notification {
+  id        String    @id @default(cuid())
+  orgId     String
+  userId    String
+  type      String
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, readAt])
+  @@index([orgId, userId, createdAt])
+}
+
+model NotificationPreference {
+  id     String @id @default(cuid())
+  userId String
+  type   String
+  inApp  Boolean @default(true)
+  email  Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, type])
+}
+
+// B-12: review is attached to the current summary fingerprint; regenerated
+// summaries automatically become pending again without relying on worker hooks.
+model DocumentSummaryReview {
+  id String @id @default(cuid())
+  documentId String @unique
+  orgId String
+  status String @default("pending") // pending | approved
+  summaryHash String
+  reviewedById String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("SummaryReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  @@index([orgId, status])
+}
+
+// EKP B-14: organization-scoped sequential approval workflows.
+model WorkflowDefinition {
+  kind String @default("publish") // publish | decommission
+  id String @id @default(cuid())
+  orgId String
+  name String
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  stages WorkflowStage[]
+  instances WorkflowInstance[]
+  @@unique([orgId, name])
+  @@index([orgId, active])
+  // Created by 20261020190000_ekp_b17_decommission_workflows; declared here so migrate diff doesn't drop it.
+  @@index([orgId, kind, active])
+}
+model WorkflowStage {
+  id String @id @default(cuid())
+  definitionId String
+  position Int
+  name String
+  approverUserId String
+  definition WorkflowDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  tasks WorkflowTask[]
+  @@unique([definitionId, position])
+}
+model WorkflowInstance {
+  targetLifecycle String? // archive/retire requested for decommission workflows
+  id String @id @default(cuid())
+  orgId String
+  documentId String
+  definitionId String
+  submittedById String
+  status String @default("in_review")
+  currentPosition Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  definition WorkflowDefinition @relation(fields: [definitionId], references: [id], onDelete: Restrict)
+  submittedBy User @relation("WorkflowStarter", fields: [submittedById], references: [id], onDelete: Restrict)
+  tasks WorkflowTask[]
+  decisions WorkflowDecision[]
+  @@index([orgId, status])
+  @@index([documentId, status])
+}
+model WorkflowTask {
+  id String @id @default(cuid())
+  instanceId String
+  stageId String
+  assigneeId String
+  status String @default("pending")
+  createdAt DateTime @default(now())
+  decidedAt DateTime?
+  instance WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  stage WorkflowStage @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  assignee User @relation("WorkflowAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
+  @@unique([instanceId, stageId])
+  decisions WorkflowDecision[]
+  @@index([assigneeId, status])
+}
+model WorkflowDecision {
+  id String @id @default(cuid())
+  instanceId String
+  taskId String
+  actorId String
+  action String
+  comment String?
+  createdAt DateTime @default(now())
+  instance WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  actor User @relation("WorkflowDecisionActor", fields: [actorId], references: [id], onDelete: Restrict)
+  @@unique([taskId])
+  task WorkflowTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+// B-18: periodic document reviews, isolated by organization.
+model ReviewPolicy {
+  id String @id @default(cuid())
+  orgId String
+  name String
+  intervalDays Int
+  reviewerType String @default("owner") // owner | steward
+  escalateAfterDays Int @default(7)
+  departmentIds String[] @default([])
+  categories String[] @default([])
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  records ReviewRecord[]
+  @@unique([orgId,name])
+  @@index([orgId,active])
+}
+model ReviewRecord {
+  id String @id @default(cuid())
+  orgId String
+  documentId String
+  policyId String
+  reviewerId String
+  status String @default("pending") // pending | valid | update | retire
+  dueAt DateTime
+  escalatedAt DateTime?
+  completedAt DateTime?
+  note String?
+  createdAt DateTime @default(now())
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  policy ReviewPolicy @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  @@index([orgId,status,dueAt])
+  @@index([reviewerId,status])
+  reviewer User @relation("PeriodicReviewReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  @@index([documentId,status])
+}
+
+// ===== EKP Phase 2 / Workstream C: taxonomy (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md) =====
+
+model TermSet {
+  id             String    @id @default(cuid())
+  orgId          String    @map("org_id")
+  name           String
+  description    String?
+  source         String    @default("local") // "local" | "external"
+  readOnly       Boolean   @default(false) @map("read_only") // true while an external tool is master (E16.4)
+  externalId     String?   @map("external_id") // SKOS ConceptScheme URI or term-store set GUID
+  importFormat   String?   @map("import_format") // "skos_ttl" | "skos_rdfxml" | "csv" | "termstore"
+  lastImportedAt DateTime? @map("last_imported_at")
+  createdById    String?   @map("created_by_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy    User?             @relation("TermSetCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  terms        Term[]
+  fields       MetadataField[]
+  imports      TaxonomyImport[]
+
+  @@unique([orgId, name])
+  @@index([orgId, source])
+}
+
+model Term {
+  id              String    @id @default(cuid())
+  termSetId       String    @map("term_set_id")
+  parentId        String?   @map("parent_id")
+  label           String
+  normalizedLabel String    @map("normalized_label")
+  description     String?
+  status          String    @default("active") // "active" | "deprecated"
+  mergedIntoId    String?   @map("merged_into_id")
+  // Materialized ancestry (root first). Subtree and facet roll-up: ancestor_ids @> ARRAY[termId].
+  ancestorIds     String[]  @default([]) @map("ancestor_ids")
+  depth           Int       @default(0)
+  sortOrder       Int       @default(0) @map("sort_order")
+  externalId      String?   @map("external_id") // SKOS concept URI
+  termStoreGuid   String?   @map("term_store_guid") // SharePoint term-store GUID (joins DocumentSourceTag)
+  // Candidate shortlist for classification (C-10). ~2,600 rows: no ANN index needed.
+  embeddingVec    Unsupported("vector(1536)")? @map("embedding_vec")
+  embeddedAt      DateTime? @map("embedded_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  termSet       TermSet        @relation(fields: [termSetId], references: [id], onDelete: Cascade)
+  parent        Term?          @relation("TermHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children      Term[]         @relation("TermHierarchy")
+  mergedInto    Term?          @relation("TermMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom    Term[]         @relation("TermMerge")
+  synonyms      TermSynonym[]
+  relationsFrom TermRelation[] @relation("TermRelationFrom")
+  relationsTo   TermRelation[] @relation("TermRelationTo")
+  documentTerms DocumentTerm[]
+
+  @@unique([termSetId, externalId]) // NULL externalId (local terms) is allowed many times
+  @@index([termSetId, parentId])
+  @@index([termSetId, normalizedLabel])
+  @@index([ancestorIds], type: Gin)
+  @@index([termStoreGuid])
+  @@index([status])
+}
+
+model TermSynonym {
+  id              String @id @default(cuid())
+  termId          String @map("term_id")
+  label           String
+  normalizedLabel String @map("normalized_label")
+  kind            String @default("alt") // "alt" | "hidden" (SKOS altLabel / hiddenLabel)
+
+  term Term @relation(fields: [termId], references: [id], onDelete: Cascade)
+
+  @@unique([termId, normalizedLabel])
+  @@index([normalizedLabel])
+}
+
+model TermRelation {
+  id         String @id @default(cuid())
+  fromTermId String @map("from_term_id")
+  toTermId   String @map("to_term_id")
+  kind       String @default("related") // SKOS related (E3.3)
+
+  from Term @relation("TermRelationFrom", fields: [fromTermId], references: [id], onDelete: Cascade)
+  to   Term @relation("TermRelationTo", fields: [toTermId], references: [id], onDelete: Cascade)
+
+  @@unique([fromTermId, toTermId, kind])
+  @@index([toTermId])
+}
+
+model MetadataField {
+  id         String   @id @default(cuid())
+  orgId      String   @map("org_id")
+  key        String   // stable key, e.g. "category", "asset_type"
+  name       String   // display name
+  termSetId  String   @map("term_set_id")
+  multi      Boolean  @default(false)
+  required   Boolean  @default(false) // see decision SQ-3
+  facet      Boolean  @default(false) // E4.4
+  facetOrder Int      @default(0) @map("facet_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  organization  Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  termSet       TermSet        @relation(fields: [termSetId], references: [id], onDelete: Restrict)
+  documentTerms DocumentTerm[]
+
+  @@unique([orgId, key])
+  @@index([orgId, facet])
+}
+
+model DocumentTerm {
+  id           String    @id @default(cuid())
+  documentId   String    @map("document_id")
+  termId       String    @map("term_id")
+  fieldId      String    @map("field_id") // required: keeps the unique key NULL-free
+  source       String    // "manual" | "auto" | "source_system" | "import"
+  status       String    @default("accepted") // "suggested" | "accepted"
+  confidence   Float?
+  createdById  String?   @map("created_by_id")
+  acceptedById String?   @map("accepted_by_id")
+  acceptedAt   DateTime? @map("accepted_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  document   Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  term       Term          @relation(fields: [termId], references: [id], onDelete: Restrict)
+  field      MetadataField @relation(fields: [fieldId], references: [id], onDelete: Restrict)
+  createdBy  User?         @relation("DocumentTermCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  acceptedBy User?         @relation("DocumentTermAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+
+  @@unique([documentId, fieldId, termId])
+  @@index([termId, status])
+  @@index([fieldId, termId])
+  @@index([documentId])
+}
+
+// E15.6: auto-discovered topics proposed as terms; a reviewer accepts or dismisses.
+model TermCandidate {
+  id                String    @id @default(cuid())
+  orgId             String    @map("org_id")
+  topicId           String?   @map("topic_id")
+  label             String
+  normalizedLabel   String    @map("normalized_label")
+  suggestedTermSetId String?  @map("suggested_term_set_id")
+  suggestedParentId String?   @map("suggested_parent_id")
+  status            String    @default("pending") // "pending" | "accepted" | "dismissed"
+  acceptedTermId    String?   @map("accepted_term_id")
+  decidedById       String?   @map("decided_by_id")
+  decidedAt         DateTime? @map("decided_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  topic        Topic?       @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, normalizedLabel])
+  @@index([orgId, status])
+}
+
+// E16.3: an import is parsed into a preview (dry run) and applied later.
+model TaxonomyImport {
+  id          String    @id @default(cuid())
+  orgId       String    @map("org_id")
+  termSetId   String?   @map("term_set_id") // null until applied for a new set
+  format      String    // "skos_ttl" | "skos_rdfxml" | "csv" | "termstore"
+  fileKey     String?   @map("file_key") // S3 key of the uploaded file
+  status      String    @default("parsing") // "parsing" | "preview" | "applying" | "applied" | "failed" | "discarded"
+  summary     Json?     // { added, updated, moved, deprecated, unchanged, errors[] }
+  error       String?
+  createdById String?   @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  appliedAt   DateTime? @map("applied_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  termSet      TermSet?     @relation(fields: [termSetId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+}
+
+// ===== EKP Phase 2 / Workstream D: analytics (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md) =====
+
+model SearchEvent {
+  id              String    @id @default(cuid())
+  orgId           String    @map("org_id")
+  userId          String?   @map("user_id") // SetNull: aggregates survive a user deletion
+  kind            String    // "search" | "repository" | "chat"
+  query           String
+  normalizedQuery String    @map("normalized_query")
+  filters         Json?
+  resultCount     Int       @map("result_count")
+  answerShown     Boolean   @default(false) @map("answer_shown")
+  confidence      String?   // chat: "high" | "medium" | "low" (as OrgMessage.confidence)
+  latencyMs       Int?      @map("latency_ms") // proposal performance figures (Q&A #230)
+  firstTokenMs    Int?      @map("first_token_ms")
+  departmentId    String?   @map("department_id") // searcher's primary department at the time
+  role            String?   // searcher's org role at the time (E29.3)
+  previousEventId String?   @map("previous_event_id") // reformulation link (same user, < 60 s)
+  orgMessageId    String?   @unique @map("org_message_id") // chat answer, for feedback (E30.2)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  organization  Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user          User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  previous      SearchEvent?  @relation("SearchReformulation", fields: [previousEventId], references: [id], onDelete: SetNull)
+  reformulations SearchEvent[] @relation("SearchReformulation")
+  orgMessage    OrgMessage?   @relation(fields: [orgMessageId], references: [id], onDelete: SetNull)
+  clicks        SearchClick[]
+
+  @@index([orgId, createdAt])
+  @@index([orgId, normalizedQuery])
+  @@index([orgId, resultCount, createdAt])
+  @@index([userId, createdAt])
+}
+
+model SearchClick {
+  id            String   @id @default(cuid())
+  searchEventId String   @map("search_event_id")
+  documentId    String?  @map("document_id") // SetNull: CTR history survives a purge
+  rank          Int
+  chunkRef      Json?    @map("chunk_ref") // { slide } or { start } from Chunk.metadata (E)
+  dwellSeconds  Int?     @map("dwell_seconds") // capped at 1,200 s like DocumentInteraction
+  clickedAt     DateTime @default(now()) @map("clicked_at")
+
+  searchEvent SearchEvent @relation(fields: [searchEventId], references: [id], onDelete: Cascade)
+  document    Document?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([searchEventId])
+  @@index([documentId])
+}
+
+model AnalyticsDaily {
+  id            String   @id @default(cuid())
+  orgId         String   @map("org_id")
+  date          DateTime @db.Date
+  metric        String   // "searches" | "ctr" | "bounce_rate" | "p95_latency_ms" | …
+  departmentKey String   @default("all") @map("department_key") // department id or "all"
+  sourceSystem  String   @default("all") @map("source_system") // "sharepoint" | "manual" | … | "all"
+  value         Float
+  dims          Json?    // extra breakdown, e.g. { role: "member" }
+  computedAt    DateTime @default(now()) @map("computed_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, date, metric, departmentKey, sourceSystem])
+  @@index([orgId, metric, date])
+}
+
+model DocumentLink {
+  id            String    @id @default(cuid())
+  documentId    String    @map("document_id")
+  url           String
+  urlHash       String    @map("url_hash") // sha256(url): long URLs don't fit a btree unique key
+  status        String    @default("unknown") // "ok" | "broken" | "unknown"
+  httpStatus    Int?      @map("http_status")
+  checkedAt     DateTime? @map("checked_at")
+  firstBrokenAt DateTime? @map("first_broken_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, urlHash])
+  @@index([status, checkedAt])
+}
+
+// A5: read-only key for the Power BI reporting API. Never stored in clear.
+model ReportingApiKey {
+  id          String    @id @default(cuid())
+  orgId       String    @map("org_id")
+  name        String
+  keyHash     String    @unique @map("key_hash") // sha256 of the key
+  keyPrefix   String    @map("key_prefix") // first 8 chars, shown in the UI
+  createdById String?   @map("created_by_id")
+  lastUsedAt  DateTime? @map("last_used_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("ReportingApiKeyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+}
+
+// ===== EKP Phase 2 / Workstream E part 1: SharePoint tags (A-23) and media (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md) =====
+
+// A-23 / PRS E16.5: managed-metadata values already on the source item (Semaphore tags at NYPA).
+// Raw values only; Workstream C maps them to Term rows (C-8) by termGuid = Term.termStoreGuid.
+model DocumentSourceTag {
+  id               String   @id @default(cuid())
+  documentId       String   @map("document_id")
+  sourceSystem     String   @default("sharepoint") @map("source_system")
+  fieldName        String   @map("field_name") // internal column name
+  fieldDisplayName String?  @map("field_display_name")
+  label            String
+  termGuid         String   @map("term_guid")
+  termSetGuid      String?  @map("term_set_guid")
+  syncedAt         DateTime @default(now()) @map("synced_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, fieldName, termGuid])
+  @@index([termGuid])
+}
+
+// Media work per document (audio extraction, transcription, segments). Keeps history,
+// retries and cost; the document page shows the latest job's status and progress.
+model MediaJob {
+  id           String    @id @default(cuid())
+  orgId        String    @map("org_id")
+  documentId   String    @map("document_id")
+  kind         String    // "extract_audio" | "transcribe" | "segment"
+  status       String    @default("queued") // "queued" | "running" | "done" | "failed"
+  progress     Int       @default(0) // 0–100
+  provider     String?   // "openai-whisper" | "azure-openai" (EQ-1)
+  audioSeconds Float?    @map("audio_seconds")
+  costUsd      Decimal?  @db.Decimal(10, 4) @map("cost_usd")
+  attempts     Int       @default(0)
+  error        String?
+  startedAt    DateTime? @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  document     Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt])
+  @@index([status, createdAt])
+}
+
+// ===== EKP Phase 2 / Workstream E part 2: asset templates (E14) (docs/ekp/phase2/PHASE2_SCHEMA_CHANGES.md) =====
+
+model AssetTemplate {
+  id          String   @id @default(cuid())
+  orgId       String   @map("org_id")
+  name        String   // "How-To Guide", "FAQ", "SOP", "Key Takeaways"
+  status      String   @default("active") // "active" | "retired"
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  organization Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy    User?                  @relation("AssetTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  versions     AssetTemplateVersion[]
+
+  @@unique([orgId, name])
+}
+
+// E14.4: each saved change is a new immutable version; assets keep the version they were made from.
+model AssetTemplateVersion {
+  id             String   @id @default(cuid())
+  templateId     String   @map("template_id")
+  version        Int
+  sections       Json     // [{ key, title, guidance, required }]
+  requiredFields Json     @default("[]") @map("required_fields") // metadata field keys (E21 / C)
+  createdById    String?  @map("created_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  template  AssetTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@unique([templateId, version])
 }
