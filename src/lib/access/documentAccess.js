@@ -66,17 +66,9 @@ export function documentAccessSql({
   const superAdminAll = superAdminSeesAll ? Prisma.sql`${isSuperAdmin} OR` : Prisma.empty;
   const own = includeOwn ? Prisma.sql`OR ${t}."userId" = ${userId}` : Prisma.empty;
 
-  return Prisma.sql`(
-    ${t}."deletedAt" IS NULL
-    AND (${isSuperAdmin} OR ${t}."visibility" = 'public' OR ${t}."userId" = ${userId})
-    AND (
+  return Prisma.sql`(${t}."deletedAt" IS NULL AND (
     ${superAdminAll}
-    (${t}."userId" = ${userId} AND (
-       (${t}.scope = 'repository' AND (${orgId}::text IS NULL OR ${t}."orgId" = ${orgId}))
-       OR EXISTS (SELECT 1 FROM "Project" acc_own_p WHERE acc_own_p.id = ${t}."projectId" AND acc_own_p.scope = 'org' AND (${orgId}::text IS NULL OR acc_own_p."orgId" = ${orgId}))
-    )) OR
     (${t}.scope = 'repository'
-     AND (${orgId}::text IS NULL OR ${t}."orgId" = ${orgId})
      AND ${t}.lifecycle = 'published'
      AND (${isSuperAdmin} OR ${t}."departmentId" IS NULL OR ${departmentMemberSql(Prisma.sql`${t}."departmentId"`, userId)}))
     OR EXISTS (
@@ -87,8 +79,7 @@ export function documentAccessSql({
         AND (${isSuperAdmin} OR ${departmentMemberSql(Prisma.sql`acc_p."departmentId"`, userId)})
     )
     ${own}
-    ) AND (${t}."userId" = ${userId} OR ${documentAclSql({ userId, isSuperAdmin, alias })} ${own})
-  )`;
+  ) AND (${documentAclSql({ userId, isSuperAdmin, alias })} ${own}))`;
 }
 
 // Search, chat retrieval and decision evidence/browse.
@@ -110,21 +101,24 @@ export function searchAccessWhere({ userId, orgId, isSuperAdmin = false, princip
   return {
     deletedAt: null,
     AND: [
-      ...(isSuperAdmin ? [] : [{ OR: [{ visibility: "public" }, { userId }] }]),
-      { OR: [
-        { userId, OR: [{ scope: "repository", orgId }, { project: { scope: "org", orgId } }] },
-        { scope: "repository", orgId, lifecycle: "published", ...(isSuperAdmin ? {} : { OR: [{ departmentId: null }, member] }) },
-        { project: { scope: "org", orgId, ...member } },
-      ] },
-      { OR: [{ userId }, documentAclWhere({ principals, isSuperAdmin })] },
+      {
+        OR: [
+          {
+            scope: "repository",
+            lifecycle: "published",
+            ...(isSuperAdmin ? {} : { OR: [{ departmentId: null }, member] }),
+          },
+          { project: { scope: "org", orgId, ...member } },
+        ],
+      },
+      documentAclWhere({ principals, isSuperAdmin }),
     ],
   };
 }
 
 // Prisma `where` for the org repository listing (browse policy). userDeptIds
 // are the user's departments; adminDeptIds the ones they administer.
-export function repositoryAccessWhere({ orgId, role, userId, userDeptIds, adminDeptIds = [], principals }) {
-  if (!userId) throw new Error("repositoryAccessWhere requires userId");
+export function repositoryAccessWhere({ orgId, role, userDeptIds, adminDeptIds = [], principals }) {
   if (isSuperAdmin(role)) {
     return { deletedAt: null, OR: [{ scope: "repository", orgId }, { project: { scope: "org", orgId } }] };
   }
@@ -137,10 +131,6 @@ export function repositoryAccessWhere({ orgId, role, userId, userDeptIds, adminD
   return {
     AND: [
       { deletedAt: null },
-      { OR: [{ visibility: "public" }, { userId }] },
-      { OR: [
-        { userId, OR: [{ scope: "repository", orgId }, { project: { scope: "org", orgId } }] },
-        { AND: [
       {
         OR: [
           { scope: "repository", orgId, OR: [{ departmentId: null }, { departmentId: { in: userDeptIds } }] },
@@ -148,9 +138,7 @@ export function repositoryAccessWhere({ orgId, role, userId, userDeptIds, adminD
         ],
       },
       { OR: [{ lifecycle: { not: "draft" } }, ...draftAllowed] },
-        ] },
-      ] },
-      { OR: [{ userId }, documentAclWhere({ principals })] },
+      documentAclWhere({ principals }),
     ],
   };
 }
@@ -206,7 +194,6 @@ export async function getAdminDepartmentIds(userId, { db = prisma } = {}) {
 export async function canManageDocument(document, { userId, role, db = prisma }) {
   if (document.deletedAt) return false;
   if (document.userId === userId || isSuperAdmin(role)) return true;
-  if (document.visibility !== "public") return false;
   if (role !== "dept_admin") return false;
   const departmentId = effectiveDepartmentId(document);
   if (!departmentId) return false;
@@ -220,8 +207,7 @@ export async function canManageDocument(document, { userId, role, db = prisma })
  */
 export async function canAccessDocument(document, { userId, isSuperAdmin = false, db = prisma }) {
   if (document.deletedAt) return false;
-  if (isSuperAdmin || document.userId === userId) return true;
-  if (document.visibility !== "public") return false;
+  if (isSuperAdmin) return true;
   return (await passesRoleRules()) && passesAcl(db, document, userId);
 
   async function passesRoleRules() {
@@ -253,7 +239,6 @@ export async function canAccessDocument(document, { userId, isSuperAdmin = false
 export async function canInteractWithDocument(document, { userId, isSuperAdmin = false, db = prisma }) {
   if (document.deletedAt) return false;
   if (document.userId === userId || isSuperAdmin) return true;
-  if (document.visibility !== "public") return false;
   return (await passesRoleRules()) && passesAcl(db, document, userId);
 
   async function passesRoleRules() {
@@ -278,8 +263,7 @@ export async function canInteractWithDocument(document, { userId, isSuperAdmin =
  */
 export async function canViewDocument(document, { userId, role, db = prisma }) {
   if (document.deletedAt) return false;
-  if (document.userId === userId || isSuperAdmin(role)) return true;
-  if (document.visibility !== "public") return false;
+  if (isSuperAdmin(role)) return true;
   return (await passesRoleRules()) && passesAcl(db, document, userId);
 
   async function passesRoleRules() {
@@ -322,7 +306,6 @@ export async function filterAccessibleDocuments(documents, { userId, role, db = 
 
   const allowed = documents.filter((d) => {
     if (d.userId === userId) return true;
-    if (d.visibility !== "public") return false;
     if (d.lifecycle === "draft") return adminDeptIds.has(d.departmentId);
     if (!d.departmentId) return true;
     return memberDeptIds.has(d.departmentId);

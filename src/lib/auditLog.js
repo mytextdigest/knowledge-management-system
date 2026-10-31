@@ -1,5 +1,5 @@
-import { prisma } from "@/lib/prisma";
-import { redactAuditValue } from "@/lib/audit/redact.mjs";
+import { prisma } from "./prisma.mjs";
+import { redactAuditValue } from "./audit/redact.mjs";
 
 // Backward compatible. Audit write failures must not block the original action.
 export async function logAudit({

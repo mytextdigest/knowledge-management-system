@@ -29,7 +29,7 @@ export async function POST(request,{params}){
  if(typeof body?.definitionId!=='string'||!body.definitionId)return fail('definitionId required',400);
  try{
  const result=await prisma.$transaction(async tx=>{
-   const doc=await tx.document.findFirst({where:{id,orgId:auth.doc.orgId,scope:'repository',deletedAt:null},select:{id:true}});
+   const doc=await tx.document.findFirst({where:{id,orgId:auth.doc.orgId,scope:'repository',deletedAt:null},select:{id:true,lifecycle:true}});
    if(!doc)throw new Error('DOCUMENT_GONE');
    const active=await tx.workflowInstance.findFirst({where:{documentId:id,orgId:auth.doc.orgId,status:'in_review'},select:{id:true}});
    if(active)throw new Error('ALREADY_ACTIVE');
