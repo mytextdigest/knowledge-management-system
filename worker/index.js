@@ -35,6 +35,7 @@ import { syncServiceNow } from "../src/lib/connectors/servicenowSync.js";
 import { tooLargeFileWrites, isTooLargeToIndex, TOO_LARGE } from "../src/lib/connectors/sharepointLargeFiles.js";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
+import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
 const S3_BUCKET = process.env.S3_BUCKET;
@@ -842,7 +843,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
         : prisma.document.create({
             data: {
               ...data,
-              ...newDocumentFields(change, integration, site, connectedByUserId),
+              ...newDocumentFields(change, integration, site, connectedByUserId, await siteOwnerId(integration, site, connectedByUserId)),
               ...(aclRows ? aclWriteData(aclRows, { create: true }) : {}),
             },
           }),
@@ -905,7 +906,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
             externalModifiedAt: new Date(change.modifiedAt),
             ...sourceFields,
             ...(aclRows ? aclWriteData(aclRows, { create: true }) : {}),
-            ...newDocumentFields(change, integration, site, connectedByUserId),
+            ...newDocumentFields(change, integration, site, connectedByUserId, await siteOwnerId(integration, site, connectedByUserId)),
           },
         }),
     prisma.user.update({
@@ -945,7 +946,7 @@ async function recordTooLargeFile({ change, existing, integration, site, connect
       modifiedAt: change.modifiedAt,
       sourceFields,
       aclRows,
-      createFields: existing ? null : newDocumentFields(change, integration, site, connectedByUserId),
+      createFields: existing ? null : newDocumentFields(change, integration, site, connectedByUserId, await siteOwnerId(integration, site, connectedByUserId)),
       connectedByUserId,
       freedBytes,
     })
@@ -1012,7 +1013,7 @@ async function syncOnePage({ item, modernPage, library, site, integration, conne
     ? await prisma.document.update({ where: { id: existing.id }, data: { ...data, ...(aclRows ? aclWriteData(aclRows) : {}) } })
     : await prisma.document.create({
         data: {
-          ...newDocumentFields({ name: title, externalId: item.id }, integration, site, connectedByUserId),
+          ...newDocumentFields({ name: title, externalId: item.id }, integration, site, connectedByUserId, await siteOwnerId(integration, site, connectedByUserId)),
           ...data,
           ...(aclRows ? aclWriteData(aclRows, { create: true }) : {}),
         },
@@ -1054,8 +1055,16 @@ async function syncSitePages({ site, integration, connectedByUserId, accessToken
   return result;
 }
 
+// B-10: owner of new documents from a site: the site department's default
+// owner, else the connecting admin (src/lib/governance/defaultOwner.js).
+function siteOwnerId(integration, site, connectedByUserId) {
+  return defaultOwnerId(prisma, {
+    orgId: integration.orgId, departmentId: site.departmentId, uploaderId: connectedByUserId, sourceProvider: "sharepoint",
+  });
+}
+
 // Fields of a newly synced SharePoint document.
-function newDocumentFields(change, integration, site, connectedByUserId) {
+function newDocumentFields(change, integration, site, connectedByUserId, ownerId = connectedByUserId) {
   return {
     filename: change.name,
     visibility: "private",
@@ -1075,6 +1084,7 @@ function newDocumentFields(change, integration, site, connectedByUserId) {
     organization: { connect: { id: integration.orgId } },
     department: { connect: { id: site.departmentId } },
     user: { connect: { id: connectedByUserId } },
+    owner: { connect: { id: ownerId } },
   };
 }
 

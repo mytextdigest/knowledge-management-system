@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 const source = readFileSync(new URL('../../../src/app/api/org/[orgId]/ownership/bulk-reassign/route.js', import.meta.url), 'utf8');
-test('bulk ownership change requires source and target org membership', () => {
-  assert.match(source, /sourceMember = await tx\.organizationMember\.findUnique/);
-  assert.match(source, /if \(!sourceMember\) throw new Error\('INVALID_SOURCE'\)/);
+// The source may have left the org (that's why documents get reassigned); the
+// target must be a member. Behaviour: b10-ownership.e2e.test.mjs.
+test('bulk ownership change requires an existing source and a member target', () => {
+  assert.match(source, /source = await tx\.user\.findUnique/);
+  assert.match(source, /if \(!source\) throw new Error\('INVALID_SOURCE'\)/);
   assert.match(source, /if \(!member\) throw new Error\('INVALID_TARGET'\)/);
 });
 test('bulk ownership notification occurs only after transaction commit', () => {

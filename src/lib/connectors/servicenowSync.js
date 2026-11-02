@@ -8,6 +8,7 @@
 // Imported by the worker, so relative imports only.
 
 import { ServiceNowConnector, serviceNowConnection } from "./servicenow.js";
+import { defaultOwnerId } from "../governance/defaultOwner.js";
 
 const MIN_ARTICLE_TEXT = 50; // same floor as processChunkJob
 
@@ -64,6 +65,8 @@ async function syncOneArticle(db, { change, integration, kb, enqueueChunk }) {
           externalId: change.externalId,
           orgId,
           userId: connectedByUserId,
+          // B-10: the knowledge base department's default owner, else the connecting admin.
+          ownerId: await defaultOwnerId(db, { orgId, departmentId: kb.departmentId, uploaderId: connectedByUserId, sourceProvider: "servicenow" }),
         },
       });
   await enqueueChunk({ doc, s3Key: null, filename: change.name, connectedByUserId, orgId });

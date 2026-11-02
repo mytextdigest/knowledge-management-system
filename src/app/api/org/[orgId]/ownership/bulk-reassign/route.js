@@ -10,6 +10,9 @@ const fail = (error, status) => NextResponse.json({ error }, { status });
 const LIMIT = 100;
 
 // B-10: bounded reassignment; no implicit cross-department privileges.
+// The source may have left the org (the usual reason to reassign). Open work
+// on the moved documents follows them: pending workflow tasks (unless the new
+// owner submitted that workflow: never self-approval) and pending reviews.
 export async function POST(req, { params }) {
   const session = await getServerSession();
   if (!session?.user?.email) return fail('Unauthorized', 401);
@@ -40,10 +43,8 @@ export async function POST(req, { params }) {
         });
         if (deptAdmin?.role !== 'admin') throw new Error('FORBIDDEN');
       }
-      const sourceMember = await tx.organizationMember.findUnique({
-        where: { orgId_userId: { orgId, userId: fromUserId } }, select: { userId: true },
-      });
-      if (!sourceMember) throw new Error('INVALID_SOURCE');
+      const source = await tx.user.findUnique({ where: { id: fromUserId }, select: { id: true } });
+      if (!source) throw new Error('INVALID_SOURCE');
       const member = await tx.organizationMember.findUnique({
         where: { orgId_userId: { orgId, userId: toUserId } }, select: { userId: true },
       });
@@ -69,21 +70,43 @@ export async function POST(req, { params }) {
           after: redactAuditValue({ ownerId: toUserId, bulk: true }),
         } });
       }
-      return { reassigned: docs.length, documentIds: docs.map((d) => d.id) };
+      const documentIds = docs.map((d) => d.id);
+      const openTasks = documentIds.length ? await tx.workflowTask.findMany({
+        where: { assigneeId: fromUserId, status: 'pending', instance: { orgId, status: 'in_review', documentId: { in: documentIds } } },
+        select: { id: true, instanceId: true, instance: { select: { submittedById: true, documentId: true } } },
+      }) : [];
+      const movable = openTasks.filter((t) => t.instance.submittedById !== toUserId);
+      for (const task of movable) {
+        await tx.workflowTask.update({ where: { id: task.id }, data: { assigneeId: toUserId } });
+        await tx.auditLog.create({ data: {
+          orgId, actorUserId: user.id, action: AUDIT_EVENTS.WORKFLOW_REASSIGNED,
+          entityType: 'workflow', entityId: task.instanceId,
+          before: { taskId: task.id, assigneeId: fromUserId }, after: { taskId: task.id, assigneeId: toUserId, bulk: true },
+        } });
+      }
+      const reviews = documentIds.length ? await tx.reviewRecord.updateMany({
+        where: { orgId, reviewerId: fromUserId, status: 'pending', documentId: { in: documentIds } },
+        data: { reviewerId: toUserId },
+      }) : { count: 0 };
+      return {
+        reassigned: docs.length, documentIds,
+        tasksMoved: movable.length, tasksLeft: openTasks.length - movable.length, reviewsMoved: reviews.count,
+      };
     }, { isolationLevel: 'Serializable', maxWait: 5000, timeout: 15000 });
     // Never notify inside the transaction; failed delivery must not undo ownership.
     if (result.reassigned > 0) {
       await notify({
         orgId, userIds: [toUserId], type: 'ownership.assigned',
         title: 'Documents assigned to you',
-        body: `You have been assigned ownership of ${result.reassigned} document(s).`,
+        body: `You have been assigned ownership of ${result.reassigned} document(s)` +
+          (result.tasksMoved + result.reviewsMoved ? ` and ${result.tasksMoved + result.reviewsMoved} open review task(s).` : '.'),
         link: `/org/${encodeURIComponent(orgId)}/repository`,
       });
     }
     return NextResponse.json(result);
   } catch (error) {
     if (error?.message === 'FORBIDDEN') return fail('Forbidden', 403);
-    if (error?.message === 'INVALID_SOURCE') return fail('Source must be an organization member', 400);
+    if (error?.message === 'INVALID_SOURCE') return fail('Source user not found', 400);
     if (error?.message === 'INVALID_TARGET') return fail('Target must be an organization member', 400);
     if (error?.message === 'INVALID_DEPARTMENT') return fail('Department not found in organization', 400);
     if (error?.message === 'TOO_MANY') return fail('More than 100 matching documents; narrow by department', 409);

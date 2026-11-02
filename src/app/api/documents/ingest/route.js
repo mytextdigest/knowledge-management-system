@@ -10,6 +10,7 @@ import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { resolveOrgRole } from "@/lib/orgGuard";
 import { getOrgSubscription, isSubscriptionActive } from "@/lib/subscription";
+import { defaultOwnerId } from "@/lib/governance/defaultOwner";
 
 export async function POST(req) {
   try {
@@ -147,6 +148,10 @@ export async function POST(req) {
       );
     }
 
+    // B-10: accountable owner (uploader, or the department's default owner
+    // when ownership.default is "department_owner").
+    const ownerId = await defaultOwnerId(prisma, { orgId, departmentId, uploaderId: dbUser.id });
+
     // Document created with "queued" status
     const [doc] = await prisma.$transaction([
       prisma.document.create({
@@ -162,6 +167,7 @@ export async function POST(req) {
           ...(departmentId ? { department:   { connect: { id: departmentId } } } : {}),
           ...(category     ? { category }                                         : {}),
           user: { connect: { id: dbUser.id } },
+          owner: { connect: { id: ownerId } },
         },
       }),
     

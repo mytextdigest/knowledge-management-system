@@ -19,6 +19,7 @@ export const AUDIT_EVENTS = Object.freeze({
   WORKFLOW_CHANGES_REQUESTED: "workflow.changes_requested",
   WORKFLOW_ESCALATED: "workflow.escalated",
   WORKFLOW_CANCELLED: "workflow.cancelled",
+  WORKFLOW_REASSIGNED: "workflow.reassigned",
   REVIEW_STARTED: "review.started",
   REVIEW_COMPLETED: "review.completed",
   REVIEW_ESCALATED: "review.escalated",
