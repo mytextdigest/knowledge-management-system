@@ -26,6 +26,13 @@ import {
   Sparkles,
   Network,
   Scale,
+  ChevronRight,
+  Inbox,
+  ShieldCheck,
+  FileCheck2,
+  Workflow,
+  CalendarClock,
+  BarChart3,
 } from "lucide-react";
 import Image from "next/image";
 import CreateOrgModal from "@/components/org/CreateOrgModal";
@@ -52,6 +59,9 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
   const [deptName, setDeptName] = useState("");
   const [creatingDept, setCreatingDept] = useState(false);
   const [pendingDecisionCount, setPendingDecisionCount] = useState(0);
+  const [taskCounts, setTaskCounts] = useState({ approvals: 0, reviews: 0, needsReview: 0 });
+  // Governance group: collapsed by default, remembered per browser.
+  const [governanceOpen, setGovernanceOpen] = useState(false);
 
   const switcherRef = useRef(null);
   const userMenuRef = useRef(null);
@@ -91,6 +101,26 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
       .catch(() => { if (!cancelled) setPendingDecisionCount(0); });
     return () => { cancelled = true; };
   }, [orgId]);
+
+  // Sidebar badges for My Tasks and Governance; refreshed on every navigation
+  // so they follow approvals and reviews done elsewhere in the app.
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    fetch(`/api/org/${orgId}/task-counts`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (!cancelled && data) setTaskCounts(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [orgId, pathname]);
+
+  useEffect(() => {
+    try { setGovernanceOpen(localStorage.getItem("kms:sidebar:governance") === "open"); } catch {}
+  }, []);
+  const toggleGovernance = () => setGovernanceOpen((open) => {
+    try { localStorage.setItem("kms:sidebar:governance", open ? "closed" : "open"); } catch {}
+    return !open;
+  });
 
   useEffect(() => {
     function handleOrgUpdated(e) {
@@ -157,14 +187,53 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
         { label: "Recommendations", href: `/org/${orgId}/recommendations`, icon: Sparkles },
         { label: "Decisions", href: `/org/${orgId}/decisions`, icon: Scale, badge: pendingDecisionCount },
         { label: "Knowledge Graph", href: `/org/${orgId}/knowledge-graph`, icon: Network },
-        { label: "Submit for Approval", href: `/org/${orgId}/workflow-submit`, icon: ClipboardList },
-        { label: "My Tasks", href: `/org/${orgId}/workflow-tasks`, icon: ClipboardList },
-        ...(isSuperAdmin ? [{ label: "Approval Workflows", href: `/org/${orgId}/workflows`, icon: Settings }] : []),
-        ...(isSuperAdmin
-          ? [{ label: "Needs Review", href: `/org/${orgId}/needs-review`, icon: ClipboardList }]
-          : []),
+        // Approvals + periodic reviews. Submitting for approval is on the
+        // document page (Workflow tab), so it has no entry here.
+        { label: "My Tasks", href: `/org/${orgId}/workflow-tasks`, icon: Inbox, badge: taskCounts.approvals + taskCounts.reviews },
       ]
     : [];
+
+  // Admin pages, grouped so the department list keeps its room. Each entry
+  // is shown only to roles its page allows.
+  const governanceNav = orgId
+    ? [
+        ...(isSuperAdmin ? [{ label: "Needs Review", href: `/org/${orgId}/needs-review`, icon: ClipboardList, badge: taskCounts.needsReview }] : []),
+        ...(isOrgAdmin ? [{ label: "Summary Reviews", href: `/org/${orgId}/summary-reviews`, icon: FileCheck2 }] : []),
+        ...(isSuperAdmin ? [
+          { label: "Approval Workflows", href: `/org/${orgId}/workflows`, icon: Workflow },
+          { label: "Review Policies", href: `/org/${orgId}/review-policies`, icon: CalendarClock },
+          { label: "Governance Metrics", href: `/org/${orgId}/governance-metrics`, icon: BarChart3 },
+        ] : []),
+      ]
+    : [];
+  const onGovernancePage = governanceNav.some((item) => isActive(item.href));
+  const showGovernance = governanceOpen || onGovernancePage;
+  const governanceBadge = governanceNav.reduce((sum, item) => sum + (item.badge || 0), 0);
+
+  const renderNavItem = (item, nested = false) => {
+    const Icon = item.icon;
+    const active = isActive(item.href);
+    return (
+      <button
+        key={item.href}
+        onClick={() => navTo(item.href)}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+          nested && "pl-9",
+          active ? "bg-gray-800 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
+        )}
+      >
+        <Icon className="h-4 w-4 flex-shrink-0" />
+        <span className="truncate">{item.label}</span>
+        {Boolean(item.badge) && (
+          <span className="ml-auto rounded-full bg-primary-600 px-1.5 py-0.5 text-xs font-medium text-white">
+            {item.badge}
+          </span>
+        )}
+      </button>
+    );
+  };
 
   return (
     <>
@@ -262,11 +331,12 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
 
         <NotificationCenter orgId={orgId} />
 
-        {/* Nav: top items fixed, departments scroll in their own bounded region,
-            Org Settings stays pinned above the bottom user menu so neither
-            jumps around while departments are loading or change in count. */}
+        {/* Nav: links, the Governance group and departments scroll together
+            as one region, so no section can be squeezed to nothing on a short
+            screen; Org Settings stays pinned above the bottom user menu. */}
         <nav className="flex min-h-0 flex-1 flex-col px-3 py-4">
-          <div className="flex-shrink-0 space-y-1">
+          <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
+          <div className="space-y-1">
             {/* Org Chat - prominent */}
             {orgId && (
               <button
@@ -283,35 +353,37 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
               </button>
             )}
 
-            {primaryNav.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              return (
+            {primaryNav.map((item) => renderNavItem(item))}
+
+            {governanceNav.length > 0 && (
+              <div>
                 <button
-                  key={item.href}
-                  onClick={() => navTo(item.href)}
+                  onClick={toggleGovernance}
+                  aria-expanded={showGovernance}
                   className={cn(
                     "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
-                    active ? "bg-gray-800 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                    onGovernancePage && !showGovernance ? "text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
                   )}
                 >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
-                  {Boolean(item.badge) && (
-                    <span className="ml-auto rounded-full bg-primary-600 px-1.5 py-0.5 text-xs font-medium text-white">
-                      {item.badge}
-                    </span>
+                  <ShieldCheck className="h-4 w-4 flex-shrink-0" />
+                  <span>Governance</span>
+                  {!showGovernance && governanceBadge > 0 && (
+                    <span className="ml-auto rounded-full bg-primary-600 px-1.5 py-0.5 text-xs font-medium text-white">{governanceBadge}</span>
                   )}
+                  <ChevronRight className={cn("h-4 w-4 flex-shrink-0 text-gray-500 transition-transform", !(!showGovernance && governanceBadge > 0) && "ml-auto", showGovernance && "rotate-90")} />
                 </button>
-              );
-            })}
+                {showGovernance && (
+                  <div className="mt-1 space-y-1">{governanceNav.map((item) => renderNavItem(item, true))}</div>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Departments - own scrollable region, so its height never pushes
-              Org Settings / the user menu around */}
+          {/* Departments: part of the same scroll region; the heading stays
+              visible while the list scrolls under it. */}
           {orgId && (
-            <div className="mt-5 flex min-h-0 flex-1 flex-col">
-              <div className="flex flex-shrink-0 items-center justify-between px-3 pb-1">
+            <div className="mt-5">
+              <div className="sticky top-0 z-10 flex items-center justify-between bg-gray-900 px-3 pb-1 pt-1">
                 <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Departments
                 </span>
@@ -327,7 +399,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
               </div>
 
               {showCreateDept && (
-                <div className="mb-2 flex flex-shrink-0 gap-1.5 px-3">
+                <div className="mb-2 flex gap-1.5 px-3">
                   <input
                     autoFocus
                     type="text"
@@ -347,7 +419,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
                 </div>
               )}
 
-              <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+              <div className="space-y-1">
                 {deptsLoading ? (
                   [0, 1, 2].map((i) => (
                     <div key={i} className="flex items-center gap-2 rounded-lg px-3 py-1.5">
@@ -382,6 +454,8 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
               </div>
             </div>
           )}
+
+          </div>
 
           {/* Org Settings - pinned above the bottom user menu */}
           {orgId && (

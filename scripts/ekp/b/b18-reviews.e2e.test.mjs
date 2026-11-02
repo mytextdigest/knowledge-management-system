@@ -17,6 +17,7 @@ test("review policies, scan, inbox and outcomes", { skip: !RUN }, async () => {
   const reviewsRoute = await import("../../../src/app/api/org/[orgId]/reviews/route.js");
   const outcomeRoute = await import("../../../src/app/api/org/[orgId]/reviews/[reviewId]/outcome/route.js");
   const { scanDueReviews } = await import("../../../src/lib/governance/reviewScan.js");
+  const countsRoute = await import("../../../src/app/api/org/[orgId]/task-counts/route.js");
 
   await inRolledBackTransaction(async (db) => {
     const tag = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
@@ -58,6 +59,11 @@ test("review policies, scan, inbox and outcomes", { skip: !RUN }, async () => {
     assert.equal(scan.created, 3, JSON.stringify(scan));
     assert.equal(await db.reviewRecord.count({ where: { documentId: finDoc.id } }), 0);
     assert.equal((await scanDueReviews({ db: client, orgId: org.id, now })).created, 0, "never a second open review");
+
+    // Sidebar badges: the owner has 3 reviews waiting; Needs Review counts are for super admins only.
+    as(users.owner.email);
+    const counts = (await call(countsRoute.GET, { params: { orgId: org.id } })).body;
+    assert.deepEqual(counts, { approvals: 0, reviews: 3, needsReview: 0 });
 
     // Inbox: mine=1 shows only the caller's reviews, even for an admin; documentId narrows to one.
     as(users.owner.email);
