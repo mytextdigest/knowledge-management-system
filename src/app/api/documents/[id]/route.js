@@ -264,6 +264,9 @@ export async function DELETE(req, { params }) {
           before: { status: "in_review" }, after: { status: "cancelled", reason: "document_deleted" },
         } });
       }
+      // A pending periodic review of a deleted document can't be done and
+      // would block its purge (B-9).
+      await tx.reviewRecord.updateMany({ where: { documentId: id, status: "pending" }, data: { status: "cancelled" } });
       if (orgId) await tx.auditLog.create({ data: {
         orgId, actorUserId: actor?.id ?? null,
         action: AUDIT_EVENTS.DOCUMENT_DELETED,

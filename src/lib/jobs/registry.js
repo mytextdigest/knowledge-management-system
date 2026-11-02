@@ -23,6 +23,7 @@ import { refreshIntegrationAcls } from "../connectors/sharepointAclRefresh.js";
 import { getCachedAppOnlyToken } from "../msGraph.js";
 import { scanDueReviews } from "../governance/reviewScan.js";
 import { scanStaleContent } from "../governance/staleScan.js";
+import { purgeDeletedDocuments } from "../lifecycle/purgeDeleted.js";
 
 // A-22: down to 5 minutes (NFR-6, NYPA Q&A #99: changes within 5 minutes).
 export const INTERVAL_CHOICES = [5, 15, 30, 60, 240, 720, 1440];
@@ -136,6 +137,19 @@ export const JOB_DEFINITIONS = {
     minIntervalMinutes: 60,
     appliesTo: () => true,
     run: ({ prisma, orgId }) => scanStaleContent({ db: prisma, orgId }),
+  },
+
+  // B-9/B-24 (E23.4): permanently remove deleted documents once their
+  // retention period (Settings → Governance, retention.deletedDays) has
+  // passed. "Never purge" (null) makes this a no-op.
+  "documents.purge-deleted": {
+    label: "Purge deleted documents",
+    description: "Permanently removes deleted documents (files, versions, chunks) once the retention period has passed. Does nothing while retention is set to never purge.",
+    defaultIntervalMinutes: 1440,
+    minIntervalMinutes: 60,
+    lockMinutes: 60,
+    appliesTo: () => true,
+    run: ({ prisma, orgId }) => purgeDeletedDocuments({ db: prisma, orgId }),
   },
 };
 
