@@ -113,6 +113,7 @@ export default function RepositoryFilters({
         <option value="">All Lifecycle States</option>
         <option value="published">Published</option>
         <option value="draft">Draft</option>
+        <option value="in_review">In review</option>
         <option value="archived">Archived</option>
         <option value="retired">Retired</option>
         <option value="suggested_review">Needs lifecycle review</option>

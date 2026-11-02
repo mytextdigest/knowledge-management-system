@@ -7,7 +7,9 @@ import { publishingCompleteness, PUBLISH_SELECT } from "@/lib/governance/publish
 import { AUDIT_EVENTS } from "@/lib/audit/events";
 import { resolveOrgRole, canManageDepartment } from "@/lib/orgGuard";
 
-// allowed[currentState][targetState] = roles permitted to make that transition
+// allowed[currentState][targetState] = roles permitted to make that transition.
+// in_review has none: only the workflow moves it (approve -> published;
+// reject, request changes or withdraw -> draft).
 const ALLOWED_TRANSITIONS = {
   draft: {
     published: ["super_admin", "dept_admin"],
@@ -79,6 +81,19 @@ export async function PATCH(req, { params }) {
       error: "Decommission workflow approval required",
       workflowDefinitionId: decommissionGate.id,
       targetLifecycle: newState,
+    }, { status: 409 });
+  }
+  // E22: while a publish workflow is active, a draft is published only by
+  // its final approval (submit it via /api/documents/[id]/workflow). Re-
+  // publishing an archived or retired document isn't a first publication.
+  if (doc.lifecycle === "draft" && newState === "published") {
+    const publishGate = await prisma.workflowDefinition.findFirst({
+      where: { orgId: doc.orgId, kind: "publish", active: true },
+      select: { id: true },
+    });
+    if (publishGate) return NextResponse.json({
+      error: "Approval workflow required: submit this document for approval",
+      workflowDefinitionId: publishGate.id,
     }, { status: 409 });
   }
   if (newState === "published") {

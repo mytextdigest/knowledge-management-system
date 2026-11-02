@@ -33,6 +33,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isSuperAdmin } from "@/lib/orgGuard";
 import { documentAclSql, documentAclWhere, documentIdsPassingAcl, getUserPrincipals } from "@/lib/access/documentAcl";
+import { UNPUBLISHED_LIFECYCLES } from "@/lib/workflows/publishFlow";
 
 export { getUserPrincipals };
 
@@ -137,7 +138,7 @@ export function repositoryAccessWhere({ orgId, role, userDeptIds, adminDeptIds =
           { project: { scope: "org", orgId, departmentId: { in: userDeptIds } } },
         ],
       },
-      { OR: [{ lifecycle: { not: "draft" } }, ...draftAllowed] },
+      { OR: [{ lifecycle: { notIn: UNPUBLISHED_LIFECYCLES } }, ...draftAllowed] },
       documentAclWhere({ principals }),
     ],
   };
@@ -268,8 +269,12 @@ export async function canViewDocument(document, { userId, role, db = prisma }) {
 
   async function passesRoleRules() {
     const departmentId = effectiveDepartmentId(document);
-    if (document.lifecycle === "draft") {
-      return role === "dept_admin" && Boolean(departmentId) && isDepartmentAdmin(db, departmentId, userId);
+    if (UNPUBLISHED_LIFECYCLES.includes(document.lifecycle)) {
+      if (role === "dept_admin" && departmentId && (await isDepartmentAdmin(db, departmentId, userId))) return true;
+      // B-15: a reviewer assigned in the document's workflow may open it.
+      return Boolean(document.id) && Boolean(await db.workflowTask.findFirst({
+        where: { assigneeId: userId, instance: { documentId: document.id } }, select: { id: true },
+      }));
     }
     if (!departmentId) return true;
     return isDepartmentMember(db, departmentId, userId);
@@ -306,7 +311,7 @@ export async function filterAccessibleDocuments(documents, { userId, role, db = 
 
   const allowed = documents.filter((d) => {
     if (d.userId === userId) return true;
-    if (d.lifecycle === "draft") return adminDeptIds.has(d.departmentId);
+    if (UNPUBLISHED_LIFECYCLES.includes(d.lifecycle)) return adminDeptIds.has(d.departmentId);
     if (!d.departmentId) return true;
     return memberDeptIds.has(d.departmentId);
   });

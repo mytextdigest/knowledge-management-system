@@ -20,10 +20,13 @@ const CATEGORIES = [
 const lifecycleStyles = {
   published: "bg-green-100 text-green-700 border-green-200 dark:bg-green-900/40 dark:text-green-300 dark:border-green-800",
   draft: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-800",
+  in_review: "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800",
   archived: "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700",
   retired: "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/40 dark:text-red-300 dark:border-red-800",
 };
 
+// Mirrors api/documents/[id]/lifecycle. in_review has no manual transitions:
+// the approval workflow moves it (document page → Workflow).
 const ALLOWED_TRANSITIONS = {
   draft: { published: ["super_admin", "dept_admin"] },
   published: {
@@ -269,7 +272,7 @@ export default function RepositoryDocumentCard({
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <span className={`rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${badgeClass}`}>{lifecycle}</span>
+        <span className={`rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${badgeClass}`}>{lifecycle.replace("_", " ")}</span>
         {document?.department?.name || document?.departmentName ? (
           <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-900/40 dark:text-blue-300">{document.department?.name || document.departmentName}</span>
         ) : (

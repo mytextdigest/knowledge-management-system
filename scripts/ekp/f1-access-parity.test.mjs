@@ -285,9 +285,11 @@ async function seed(tx, tag) {
   return { org, users, memberships, projects: Object.values(projects), documents };
 }
 
-// In-memory stand-in for the two Prisma calls the JS checks make.
+// In-memory stand-in for the Prisma calls the JS checks make. The seeded
+// matrix has no approval workflows, so no user is an assigned reviewer (B-15).
 function fakeDb({ memberships, projects }) {
   return {
+    workflowTask: { async findFirst() { return null; } },
     departmentMember: {
       async findUnique({ where }) {
         const { departmentId, userId } = where.departmentId_userId;

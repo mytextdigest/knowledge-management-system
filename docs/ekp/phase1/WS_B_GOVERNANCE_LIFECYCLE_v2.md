@@ -503,3 +503,12 @@ Add a dated note here when a task changes the design (e.g. `2026-10-20 · A-3: d
 
 - `2026-10-22 · v2 (Johurul):` NYPA's RFP Q&A answers added (see "What changed in v2" at the top). New tasks `B-23` (configurable, lightweight summary review) and `B-24` (never-purge option). Statuses, assignees and completion marks are unchanged from `dev` at `2371067`.
 - `2026-10-29 · Phase 1 close (Johurul):` WS-B is merged to `dev` (PR #33). Build tasks `B-2` to `B-20`, `B-23` and `B-24` marked `DONE`. `B-1` (review), `B-21` (end-to-end tests) and `B-22` (RTM update, depends on `B-21`) stay open. Sandeep and Simran move to Phase 2: Workstream C (Sandeep) and D (Simran), see `docs/ekp/phase2/`.
+- `2026-11-02 · B-15/B-16/B-17 completed (Johurul):` the PR #33 engine recorded decisions but never moved the document. Now (`src/lib/workflows/publishFlow.js`):
+  - **Submit** (`POST /api/documents/[id]/workflow`, uploader, owner or super admin; never guests) moves a complete draft to `in_review`. **Final approval** re-checks completeness and publishes; **reject / request changes** (comment required) and **withdraw** (`DELETE`, submitter or super admin) return it to `draft`. Every step is audited and notified.
+  - **Never the submitter:** a stage whose approver is the submitter (or has left the org) goes to an admin of the document's department, then a super admin; with nobody else, submission fails with a clear error.
+  - **Direct publish** (`draft → published`) is refused while a publish workflow is active; **Needs-Review confirm** starts the workflow instead (the confirming admin is the submitter). With no active publish workflow, publishing works as before E22.
+  - **Visibility:** `in_review` is unpublished like `draft` (F1); the assigned reviewers can open the document. A soft-deleted document under review comes back as `draft` on restore.
+  - **UI:** document page → *Workflow* tab (timeline with reviewers, decisions and comments; submit, withdraw, approve/reject); *In review* badge and repository filter.
+  - **B-17 fix:** decommission submit always failed (`lifecycle` wasn't loaded); now covered end to end.
+  - **Phase 1 limits (no migration):** definitions are org-wide (no department/category scoping), one approver per stage (no role/any/all), no per-stage SLA or task escalation.
+  - Tests: `EKP_DB_TESTS=1 npm run ekp:b:e2e` runs the real route handlers in a rolled-back transaction (`scripts/ekp/b/route-harness/`).

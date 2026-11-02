@@ -25,6 +25,9 @@ export async function POST(_req, { params }) {
         data: { deletedAt: null, deletedById: null, purgeAfter: null },
       });
       if (changed.count !== 1) throw new Error("NOT_DELETED");
+      // Deleting cancelled any running workflow, so a document deleted while
+      // in review comes back as a draft (it can be submitted again).
+      await tx.document.updateMany({ where: { id, lifecycle: "in_review" }, data: { lifecycle: "draft" } });
       if (orgId) await tx.auditLog.create({ data: {
         orgId, actorUserId: actor?.id ?? null, action: AUDIT_EVENTS.DOCUMENT_RESTORED,
         entityType: "document", entityId: id,

@@ -6,6 +6,7 @@ import AuditEventList from "@/components/governance/AuditEventList";
 import DocumentVersionsPanel from "@/components/governance/DocumentVersionsPanel";
 import DocumentOwnershipPanel from "@/components/governance/DocumentOwnershipPanel";
 import DocumentCompletenessBadge from "@/components/governance/DocumentCompletenessBadge";
+import DocumentWorkflowPanel from "@/components/governance/DocumentWorkflowPanel";
 import Layout from '@/components/layout/Layout';
 import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -1017,6 +1018,11 @@ function DocumentContent() {
             <Button variant={activeTab === 'history' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('history')}>
               <Clock className="w-4 h-4 mr-1" /> History
             </Button>
+            {doc?.scope === 'repository' && doc?.orgId && (
+              <Button variant={activeTab === 'workflow' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('workflow')}>
+                <CheckCircle2 className="w-4 h-4 mr-1" /> Workflow
+              </Button>
+            )}
             <Button
               variant={activeTab === 'chat' ? 'default' : 'ghost'}
               size="sm"
@@ -1090,6 +1096,8 @@ function DocumentContent() {
           {/* Content Area - Chat, Summary, or Reading Guide */}
           {activeTab === 'versions' ? (
             <div className="overflow-y-auto h-full"><DocumentVersionsPanel documentId={id} /></div>
+          ) : activeTab === 'workflow' && doc?.orgId ? (
+            <div className="overflow-y-auto h-full"><DocumentWorkflowPanel documentId={id} orgId={doc.orgId} onLifecycleChange={() => fetchDocument(id).then((fresh) => fresh && setDoc(fresh))} /></div>
           ) : activeTab === 'history' ? (
              <div className="p-4 overflow-y-auto h-full"><AuditEventList url={id ? `/api/documents/${encodeURIComponent(id)}/history` : null} title="Document history" documentMode /></div>
            ) : activeTab === 'guide' ? (
