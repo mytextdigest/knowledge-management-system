@@ -73,9 +73,14 @@ export async function POST(req, { params }) {
       const documentIds = docs.map((d) => d.id);
       const openTasks = documentIds.length ? await tx.workflowTask.findMany({
         where: { assigneeId: fromUserId, status: 'pending', instance: { orgId, status: 'in_review', documentId: { in: documentIds } } },
-        select: { id: true, instanceId: true, instance: { select: { submittedById: true, documentId: true } } },
+        select: { id: true, instanceId: true, stageId: true, instance: { select: { submittedById: true, documentId: true } } },
       }) : [];
-      const movable = openTasks.filter((t) => t.instance.submittedById !== toUserId);
+      // Not to their own submitter, and not onto a stage where the new owner
+      // already has a task (E22.2 stages can have several approvers).
+      const heldStages = new Set((openTasks.length ? await tx.workflowTask.findMany({
+        where: { assigneeId: toUserId, instanceId: { in: openTasks.map((t) => t.instanceId) } }, select: { instanceId: true, stageId: true },
+      }) : []).map((t) => `${t.instanceId}:${t.stageId}`));
+      const movable = openTasks.filter((t) => t.instance.submittedById !== toUserId && !heldStages.has(`${t.instanceId}:${t.stageId}`));
       for (const task of movable) {
         await tx.workflowTask.update({ where: { id: task.id }, data: { assigneeId: toUserId } });
         await tx.auditLog.create({ data: {

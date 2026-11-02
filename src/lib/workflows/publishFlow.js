@@ -9,6 +9,7 @@
 // submitter, the assigned reviewers and admins can still open them.
 
 import { AUDIT_EVENTS } from "../audit/events.js";
+import { definitionCovers, specificity } from "./engine.mjs";
 
 /** Lifecycle states that are never shown to ordinary members. */
 export const UNPUBLISHED_LIFECYCLES = ["draft", "in_review"];
@@ -23,9 +24,21 @@ export function activeDefinitions(db, orgId, kind) {
 }
 
 /**
- * Which publish definition applies. Workflows are org-wide in Phase 1 (no
- * department/category scoping), so: none active -> null (direct publish, as
- * before E22); one active -> that one; several -> the caller must choose.
+ * E22.3: the active definitions of one kind that apply to a document, i.e.
+ * those covering its department and category, keeping only the most specific
+ * (a workflow scoped to Engineering beats an org-wide one).
+ */
+export async function applicableDefinitions(db, orgId, kind, { departmentId, category }) {
+  const covering = (await activeDefinitions(db, orgId, kind))
+    .filter((d) => definitionCovers(d, { departmentId, category }));
+  const top = Math.max(-1, ...covering.map(specificity));
+  return covering.filter((d) => specificity(d) === top);
+}
+
+/**
+ * Which publish definition applies, from applicableDefinitions(): none ->
+ * null (direct publish, as before E22); one -> that one; several equally
+ * specific -> the caller must choose (requestedId).
  */
 export function choosePublishDefinition(definitions, requestedId) {
   if (requestedId) {
@@ -37,38 +50,63 @@ export function choosePublishDefinition(definitions, requestedId) {
   return { error: "CHOOSE_DEFINITION" };
 }
 
-/**
- * The user who acts on a stage; never the submitter. The stage's approver if
- * they're someone else and still in the org; otherwise an admin of the
- * document's department; otherwise a super admin. null if nobody else can.
- */
-export async function resolveStageAssignee(db, { orgId, stage, submittedById, departmentId }) {
-  if (stage.approverUserId !== submittedById) {
-    const member = await db.organizationMember.findUnique({
-      where: { orgId_userId: { orgId, userId: stage.approverUserId } },
-      select: { userId: true },
+const inOrg = (orgId) => ({ user: { orgMembers: { some: { orgId } } } });
+
+/** The people a stage's approverType names for this document, without fallback. */
+async function namedApprovers(db, { orgId, stage, documentId, departmentId }) {
+  const type = stage.approverType || "user";
+  if (type === "user") return stage.approverUserId ? [stage.approverUserId] : [];
+  if (type === "dept_admin") {
+    if (!departmentId) return [];
+    const admins = await db.departmentMember.findMany({
+      where: { departmentId, role: "admin", ...inOrg(orgId) },
+      orderBy: { createdAt: "asc" }, select: { userId: true },
     });
-    if (member) return stage.approverUserId;
+    return admins.map((a) => a.userId);
+  }
+  if (type === "owner") {
+    const doc = await db.document.findUnique({ where: { id: documentId }, select: { ownerId: true } });
+    return doc?.ownerId ? [doc.ownerId] : [];
+  }
+  const stewards = await db.documentSteward.findMany({
+    where: { documentId, ...inOrg(orgId) }, orderBy: { createdAt: "asc" }, select: { userId: true },
+  });
+  return stewards.map((s) => s.userId);
+}
+
+/**
+ * The users who act on a stage; never the submitter. The people the stage
+ * names (E22.2: a named user, the document department's admins, its owner or
+ * its stewards) who are someone else and still in the org; if none, an admin
+ * of the document's department; otherwise a super admin. A stage that names
+ * several people gets a task for each (approvalMode any/all decides how they
+ * settle it); fallbacks are always one person. [] if nobody else can act.
+ */
+export async function resolveStageAssignees(db, { orgId, stage, submittedById, documentId, departmentId }) {
+  const named = [...new Set(await namedApprovers(db, { orgId, stage, documentId, departmentId }))]
+    .filter((id) => id !== submittedById);
+  if (named.length) {
+    const members = await db.organizationMember.findMany({
+      where: { orgId, userId: { in: named } }, select: { userId: true },
+    });
+    const kept = new Set(members.map((m) => m.userId));
+    const assignees = named.filter((id) => kept.has(id));
+    if (assignees.length) return assignees;
   }
   if (departmentId) {
     const deptAdmin = await db.departmentMember.findFirst({
-      where: {
-        departmentId,
-        role: "admin",
-        userId: { not: submittedById },
-        user: { orgMembers: { some: { orgId } } },
-      },
+      where: { departmentId, role: "admin", userId: { not: submittedById }, ...inOrg(orgId) },
       orderBy: { createdAt: "asc" },
       select: { userId: true },
     });
-    if (deptAdmin) return deptAdmin.userId;
+    if (deptAdmin) return [deptAdmin.userId];
   }
   const superAdmin = await db.organizationMember.findFirst({
     where: { orgId, role: "super_admin", userId: { not: submittedById } },
     orderBy: { userId: "asc" },
     select: { userId: true },
   });
-  return superAdmin?.userId ?? null;
+  return superAdmin ? [superAdmin.userId] : [];
 }
 
 /**
@@ -81,22 +119,22 @@ export async function startWorkflowInstance(db, {
 }) {
   const stage = definition.stages[0];
   if (!stage) throw new Error("INVALID_DEFINITION");
-  const assigneeId = await resolveStageAssignee(db, { orgId, stage, submittedById, departmentId });
-  if (!assigneeId) throw new Error("NO_APPROVER");
+  const assigneeIds = await resolveStageAssignees(db, { orgId, stage, submittedById, documentId, departmentId });
+  if (!assigneeIds.length) throw new Error("NO_APPROVER");
   const instance = await db.workflowInstance.create({
     data: {
       orgId, documentId, definitionId: definition.id, submittedById, targetLifecycle,
-      tasks: { create: { stageId: stage.id, assigneeId } },
+      tasks: { create: assigneeIds.map((assigneeId) => ({ stageId: stage.id, assigneeId })) },
     },
   });
   await db.auditLog.create({
     data: {
       orgId, actorUserId: submittedById, action: AUDIT_EVENTS.WORKFLOW_SUBMITTED,
       entityType: "document", entityId: documentId,
-      metadata: { workflowInstanceId: instance.id, definitionId: definition.id, kind: definition.kind, assigneeId },
+      metadata: { workflowInstanceId: instance.id, definitionId: definition.id, kind: definition.kind, assigneeIds },
     },
   });
-  return { instance, assigneeId };
+  return { instance, assigneeIds };
 }
 
 /** Compare-and-swap a document's lifecycle; false if it changed meanwhile. */

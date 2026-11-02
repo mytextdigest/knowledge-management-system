@@ -1190,6 +1190,10 @@ model WorkflowDefinition {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  // E22.3: which documents this workflow covers; empty = every department /
+  // category. A document gets the most specific active workflow that covers it.
+  departmentIds String[] @default([])
+  categories String[] @default([])
   stages WorkflowStage[]
   instances WorkflowInstance[]
   @@unique([orgId, name])
@@ -1202,7 +1206,11 @@ model WorkflowStage {
   definitionId String
   position Int
   name String
-  approverUserId String
+  // E22.2: who acts on the stage. user = approverUserId; dept_admin = the
+  // admins of the document's department; owner / steward = the document's.
+  approverType String @default("user") // user | dept_admin | owner | steward
+  approverUserId String?
+  approvalMode String @default("any") // any | all, when several people qualify
   definition WorkflowDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
   tasks WorkflowTask[]
   @@unique([definitionId, position])
@@ -1238,7 +1246,7 @@ model WorkflowTask {
   instance WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   stage WorkflowStage @relation(fields: [stageId], references: [id], onDelete: Restrict)
   assignee User @relation("WorkflowAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
-  @@unique([instanceId, stageId])
+  @@unique([instanceId, stageId, assigneeId])
   decisions WorkflowDecision[]
   @@index([assigneeId, status])
 }

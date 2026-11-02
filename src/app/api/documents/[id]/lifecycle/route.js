@@ -6,6 +6,7 @@ import { notify } from "@/lib/notifications/notify";
 import { publishingCompleteness, PUBLISH_SELECT } from "@/lib/governance/publishGate";
 import { AUDIT_EVENTS } from "@/lib/audit/events";
 import { resolveOrgRole, canManageDepartment } from "@/lib/orgGuard";
+import { applicableDefinitions } from "@/lib/workflows/publishFlow";
 
 // allowed[currentState][targetState] = roles permitted to make that transition.
 // in_review has none: only the workflow moves it (approve -> published;
@@ -73,24 +74,19 @@ export async function PATCH(req, { params }) {
   // E23.6: an active decommission definition gates direct archive/retire.
   // The final workflow decision applies the lifecycle transition atomically.
   if (["archived", "retired"].includes(newState)) {
-    const decommissionGate = await prisma.workflowDefinition.findFirst({
-      where: { orgId: doc.orgId, kind: "decommission", active: true },
-      select: { id: true },
-    });
+    const [decommissionGate] = await applicableDefinitions(prisma, doc.orgId, "decommission", doc);
     if (decommissionGate) return NextResponse.json({
       error: "Decommission workflow approval required",
       workflowDefinitionId: decommissionGate.id,
       targetLifecycle: newState,
     }, { status: 409 });
   }
-  // E22: while a publish workflow is active, a draft is published only by
-  // its final approval (submit it via /api/documents/[id]/workflow). Re-
-  // publishing an archived or retired document isn't a first publication.
+  // E22: while a publish workflow covering this document is active (E22.3:
+  // its department and category), a draft is published only by its final
+  // approval (submit it via /api/documents/[id]/workflow). Re-publishing an
+  // archived or retired document isn't a first publication.
   if (doc.lifecycle === "draft" && newState === "published") {
-    const publishGate = await prisma.workflowDefinition.findFirst({
-      where: { orgId: doc.orgId, kind: "publish", active: true },
-      select: { id: true },
-    });
+    const [publishGate] = await applicableDefinitions(prisma, doc.orgId, "publish", doc);
     if (publishGate) return NextResponse.json({
       error: "Approval workflow required: submit this document for approval",
       workflowDefinitionId: publishGate.id,

@@ -5,7 +5,7 @@ import { resolveOrgRole } from '@/lib/orgGuard';
 import { AUDIT_EVENTS } from '@/lib/audit/events';
 import { notify } from '@/lib/notifications/notify';
 import { validateDecommissionTarget } from '@/lib/workflows/engine.mjs';
-import { activeDefinitions, choosePublishDefinition, startWorkflowInstance, moveLifecycle } from '@/lib/workflows/publishFlow';
+import { applicableDefinitions, choosePublishDefinition, startWorkflowInstance, moveLifecycle } from '@/lib/workflows/publishFlow';
 import { publishingCompleteness, PUBLISH_SELECT } from '@/lib/governance/publishGate';
 
 // B-15/B-16 (E22, E23.6): a document's approval workflows.
@@ -20,7 +20,7 @@ async function access(id) {
   if (!session?.user?.email) return { error: fail('Unauthorized', 401) };
   const doc = await prisma.document.findFirst({
     where: { id, scope: 'repository', deletedAt: null },
-    select: { id: true, orgId: true, userId: true, ownerId: true, lifecycle: true, departmentId: true },
+    select: { id: true, orgId: true, userId: true, ownerId: true, lifecycle: true, departmentId: true, category: true },
   });
   if (!doc?.orgId) return { error: fail('Not found', 404) };
   const { user, role } = await resolveOrgRole(session.user.email, doc.orgId);
@@ -53,8 +53,8 @@ export async function GET(_request, { params }) {
       },
       orderBy: { createdAt: 'desc' }, take: 30,
     }),
-    activeDefinitions(prisma, doc.orgId, 'publish'),
-    activeDefinitions(prisma, doc.orgId, 'decommission'),
+    applicableDefinitions(prisma, doc.orgId, 'publish', doc),
+    applicableDefinitions(prisma, doc.orgId, 'decommission', doc),
   ]);
   const active = items.find((w) => w.status === 'in_review') || null;
   const myTask = active?.tasks.find((t) => t.status === 'pending' && t.assigneeId === user.id) || null;
@@ -87,20 +87,24 @@ export async function POST(request, { params }) {
     const result = await prisma.$transaction(async (tx) => {
       const doc = await tx.document.findFirst({
         where: { id, orgId: auth.doc.orgId, scope: 'repository', deletedAt: null },
-        select: { id: true, lifecycle: true, departmentId: true },
+        select: { id: true, lifecycle: true, departmentId: true, category: true },
       });
       if (!doc) throw new Error('DOCUMENT_GONE');
       const running = await tx.workflowInstance.findFirst({ where: { documentId: id, orgId: auth.doc.orgId, status: 'in_review' }, select: { id: true } });
       if (running) throw new Error('ALREADY_ACTIVE');
 
+      // E22.3: only workflows covering the document's department and
+      // category, the most specific first; a requested one must be among them.
       let definition;
       if (requestedId) {
-        definition = await tx.workflowDefinition.findFirst({
-          where: { id: requestedId, orgId: auth.doc.orgId, active: true }, include: { stages: { orderBy: { position: 'asc' } } },
-        });
-        if (!definition?.stages.length) throw new Error('INVALID_DEFINITION');
+        const requested = await tx.workflowDefinition.findFirst({ where: { id: requestedId, orgId: auth.doc.orgId, active: true }, select: { kind: true } });
+        if (!requested) throw new Error('INVALID_DEFINITION');
+        const chosen = choosePublishDefinition(await applicableDefinitions(tx, auth.doc.orgId, requested.kind, doc), requestedId);
+        if (chosen.error) throw new Error(chosen.error);
+        definition = chosen.definition;
+        if (!definition.stages.length) throw new Error('INVALID_DEFINITION');
       } else {
-        const chosen = choosePublishDefinition(await activeDefinitions(tx, auth.doc.orgId, 'publish'), null);
+        const chosen = choosePublishDefinition(await applicableDefinitions(tx, auth.doc.orgId, 'publish', doc), null);
         if (chosen.error) throw new Error(chosen.error);
         if (!chosen.definition) throw new Error('NO_WORKFLOW');
         definition = chosen.definition;
@@ -127,7 +131,7 @@ export async function POST(request, { params }) {
     }, { isolationLevel: 'Serializable' });
 
     await notify({
-      orgId: auth.doc.orgId, userIds: [result.assigneeId], type: 'workflow.task_assigned',
+      orgId: auth.doc.orgId, userIds: result.assigneeIds, type: 'workflow.task_assigned',
       title: 'Document review assigned', body: 'A document is awaiting your approval.',
       link: `/document?id=${encodeURIComponent(id)}`,
     });
@@ -136,8 +140,8 @@ export async function POST(request, { params }) {
     const known = {
       DOCUMENT_GONE: ['Document not found', 404],
       ALREADY_ACTIVE: ['An approval workflow is already running for this document', 409],
-      INVALID_DEFINITION: ['Choose an active workflow with at least one stage', 400],
-      CHOOSE_DEFINITION: ['Several approval workflows are active; choose one', 400],
+      INVALID_DEFINITION: ['Choose an active workflow that covers this document', 400],
+      CHOOSE_DEFINITION: ['Several approval workflows apply to this document; choose one', 400],
       NO_WORKFLOW: ['No approval workflow is active; publish the document directly', 400],
       INVALID_TARGET: ['That decommission action is not allowed for this document', 400],
       NOT_DRAFT: ['Only draft documents can be submitted for publishing', 409],

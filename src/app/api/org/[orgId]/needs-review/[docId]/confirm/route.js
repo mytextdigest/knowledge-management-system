@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notifications/notify";
 import { publishingCompleteness, PUBLISH_SELECT } from "@/lib/governance/publishGate";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-import { activeDefinitions, choosePublishDefinition, startWorkflowInstance } from "@/lib/workflows/publishFlow";
+import { applicableDefinitions, choosePublishDefinition, startWorkflowInstance } from "@/lib/workflows/publishFlow";
 
 // FR-6 — Accept / Reassign / Create-Project. One endpoint, three shapes:
 //   {}                                        -> Accept as-is
@@ -35,6 +35,7 @@ export async function POST(req, { params }) {
     select: {
       id: true, filename: true, filePath: true, departmentId: true, suggestedDepartmentId: true,
       sourceProvider: true, lifecycle: true, classificationStatus: true, userId: true, ownerId: true, visibility: true, deletedAt: true,
+      category: true,
     },
   });
   if (!doc || doc.deletedAt) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -76,15 +77,17 @@ export async function POST(req, { params }) {
   // E22: confirming runs the same publish path as everywhere else. While a
   // publish workflow is active, a draft confirmed into the repository goes to
   // in_review with the confirming admin as submitter (so they can't approve
-  // it); body.workflowDefinitionId picks one when several are active.
+  // it); body.workflowDefinitionId picks one when several apply equally
+  // (E22.3: only workflows covering the confirmed department and category).
   let workflow = null;
   if (doc.lifecycle === "draft" && !newProjectName?.trim()) {
+    const applicable = await applicableDefinitions(prisma, orgId, "publish", { departmentId: targetDepartmentId, category: doc.category });
     const chosen = choosePublishDefinition(
-      await activeDefinitions(prisma, orgId, "publish"),
+      applicable,
       typeof body?.workflowDefinitionId === "string" ? body.workflowDefinitionId : null,
     );
     if (chosen.error === "CHOOSE_DEFINITION") {
-      const options = (await activeDefinitions(prisma, orgId, "publish")).map((d) => ({ id: d.id, name: d.name }));
+      const options = applicable.map((d) => ({ id: d.id, name: d.name }));
       return NextResponse.json({ error: "Several approval workflows are active; choose one", workflowDefinitions: options }, { status: 409 });
     }
     if (chosen.error) return NextResponse.json({ error: "Invalid approval workflow" }, { status: 400 });
@@ -142,7 +145,7 @@ export async function POST(req, { params }) {
           orgId, documentId: doc.id, departmentId: targetDepartmentId, definition: workflow, submittedById: user.id,
         });
         updated.workflowInstanceId = started.instance.id;
-        updated.assigneeId = started.assigneeId;
+        updated.assigneeIds = started.assigneeIds;
       }
       return updated;
     });
@@ -206,12 +209,12 @@ export async function POST(req, { params }) {
       link,
     });
   }
-  if (updatedDoc.assigneeId) {
+  if (updatedDoc.assigneeIds?.length) {
     await notify({
-      orgId, userIds: [updatedDoc.assigneeId], type: "workflow.task_assigned",
+      orgId, userIds: updatedDoc.assigneeIds, type: "workflow.task_assigned",
       title: "Document review assigned", body: "A document is awaiting your approval.", link,
     });
   }
-  const { assigneeId: _assignee, ...document } = updatedDoc;
+  const { assigneeIds: _assignees, ...document } = updatedDoc;
   return NextResponse.json({ document });
 }
