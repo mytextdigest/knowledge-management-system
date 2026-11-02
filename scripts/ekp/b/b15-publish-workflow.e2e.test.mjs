@@ -12,6 +12,7 @@ test("publishing workflow: submit, stages, self-approval fallback, reject, publi
   const workflowRoute = await import("../../../src/app/api/documents/[id]/workflow/route.js");
   const decisionRoute = await import("../../../src/app/api/org/[orgId]/workflow-tasks/[taskId]/decision/route.js");
   const lifecycleRoute = await import("../../../src/app/api/documents/[id]/lifecycle/route.js");
+  const definitionRoute = await import("../../../src/app/api/org/[orgId]/workflows/[definitionId]/route.js");
   const confirmRoute = await import("../../../src/app/api/org/[orgId]/needs-review/[docId]/confirm/route.js");
   const { canViewDocument, repositoryAccessWhere } = await import("../../../src/lib/access/documentAccess.js");
 
@@ -145,7 +146,10 @@ test("publishing workflow: submit, stages, self-approval fallback, reject, publi
     assert.equal(await lifecycleOf(d1.id), "archived");
 
     // With no publish workflow active, direct publish works exactly as before E22.
-    await db.workflowDefinition.update({ where: { id: publishWf.id }, data: { active: false } });
+    as(users.author.email);
+    assert.equal((await call(definitionRoute.PATCH, { method: "PATCH", params: { orgId: org.id, definitionId: publishWf.id }, body: { active: false } })).status, 403, "only super admins switch workflows");
+    as(users.super.email);
+    assert.equal((await call(definitionRoute.PATCH, { method: "PATCH", params: { orgId: org.id, definitionId: publishWf.id }, body: { active: false } })).status, 200);
     const d4 = await doc("d4");
     as(users.super.email);
     r = await call(lifecycleRoute.PATCH, { method: "PATCH", params: { id: d4.id }, body: { lifecycle: "published" } });

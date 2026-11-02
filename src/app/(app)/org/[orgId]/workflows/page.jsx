@@ -20,6 +20,12 @@ export default function WorkflowsPage() {
   }catch(e){setError(e.message)}finally{setLoading(false)}
  },[orgId]);
  useEffect(()=>{load()},[load]);
+ // On/off: an active publish workflow gates every draft's publication, an active decommission workflow every archive/retire.
+ const toggle=async(d)=>{setError('');setNotice('');setSaving(true);
+  try{const res=await fetch(`/api/org/${orgId}/workflows/${d.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:!d.active})});
+   const data=await res.json();if(!res.ok)throw new Error(data.error||'Unable to update workflow');
+   setNotice(d.active?`"${d.name}" turned off: ${(d.kind||'publish')==='publish'?'admins can publish drafts directly again':'archive and retire no longer need approval'}. Running approvals finish as before.`:`"${d.name}" turned on.`);await load();
+  }catch(e){setError(e.message)}finally{setSaving(false)}};
  const updateStage=(i,key,value)=>setStages(prev=>prev.map((s,j)=>j===i?{...s,[key]:value}:s));
  const create=async(e)=>{
   e.preventDefault();setError('');setNotice('');
@@ -46,7 +52,7 @@ export default function WorkflowsPage() {
    <div className="flex flex-wrap gap-3"><button type="button" disabled={stages.length>=12} className="rounded border px-3 py-2 disabled:opacity-40" onClick={()=>setStages(prev=>[...prev,emptyStage()])}>Add stage</button><button disabled={saving} className="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50">{saving?'Saving…':'Create workflow'}</button></div>
   </form>
   <section className="space-y-3"><div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Existing workflows</h2><button className="rounded border px-3 py-1" onClick={load}>Refresh</button></div>
-   {loading?<p>Loading…</p>:definitions.length===0?<p>No workflows configured.</p>:definitions.map(d=><article key={d.id} className="rounded-lg border p-4"><div className="flex justify-between gap-3"><strong>{d.name} ({d.kind||"publish"})</strong><span className="text-sm">{d.active?'Active':'Inactive'}</span></div><ol className="mt-2 list-inside list-decimal text-sm">{(d.stages||[]).map(s=><li key={s.id}>{s.name} — {members.find(m=>m.userId===s.approverUserId)?.name||members.find(m=>m.userId===s.approverUserId)?.email||'Assigned member'}</li>)}</ol></article>)}
+   {loading?<p>Loading…</p>:definitions.length===0?<p>No workflows configured.</p>:definitions.map(d=><article key={d.id} className="rounded-lg border p-4"><div className="flex justify-between gap-3"><strong>{d.name} ({d.kind||"publish"})</strong><span className="flex items-center gap-2 text-sm">{d.active?'Active':'Off'}<button type="button" disabled={saving} onClick={()=>toggle(d)} className="rounded border px-2 py-0.5 text-xs disabled:opacity-50">{d.active?'Turn off':'Turn on'}</button></span></div><ol className="mt-2 list-inside list-decimal text-sm">{(d.stages||[]).map(s=><li key={s.id}>{s.name} — {members.find(m=>m.userId===s.approverUserId)?.name||members.find(m=>m.userId===s.approverUserId)?.email||'Assigned member'}</li>)}</ol></article>)}
   </section>
  </main></Layout>;
 }
