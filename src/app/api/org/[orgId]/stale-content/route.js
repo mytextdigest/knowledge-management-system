@@ -35,8 +35,9 @@ export async function POST(request, { params }) {
  if (auth.role !== 'super_admin') return fail('Forbidden', 403);
  let body;
  try { body = await request.json(); } catch { return fail('Invalid JSON', 400); }
- const options = validateStaleScanOptions(body);
+ // Rules come from the stale.rules setting (Settings → Governance); only the batch size is per request.
+ const options = validateStaleScanOptions({ limit: body?.limit });
  if (options.error) return fail(options.error, 400);
- try { return NextResponse.json(await scanStaleContent({ orgId, actorUserId: auth.user.id, ...options })); }
+ try { return NextResponse.json(await scanStaleContent({ orgId, actorUserId: auth.user.id, limit: options.limit })); }
  catch (error) { console.error('Stale scan failed', error); return fail('Stale scan failed', 500); }
 }

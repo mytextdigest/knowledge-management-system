@@ -273,6 +273,9 @@ export default function RepositoryDocumentCard({
 
       <div className="mt-4 flex flex-wrap gap-2">
         <span className={`rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${badgeClass}`}>{lifecycle.replace("_", " ")}</span>
+        {lifecycleSuggestion === "archived" ? (
+          <span title={lifecycleSuggestionReason || undefined} className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200">May be outdated</span>
+        ) : null}
         {document?.department?.name || document?.departmentName ? (
           <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-900/40 dark:text-blue-300">{document.department?.name || document.departmentName}</span>
         ) : (

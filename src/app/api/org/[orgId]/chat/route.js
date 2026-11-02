@@ -423,6 +423,7 @@ export async function POST(req, { params }) {
       sourceProvider: c.sourceProvider || null,
       contentType: c.contentType || "file",
       label: sourceLabel(c),
+      mayBeOutdated: Boolean(c.mayBeOutdated), // B-19: flagged by the stale-content scan
       department: c.department_name,
       project: c.project_name,
       texts: [],
@@ -457,6 +458,7 @@ export async function POST(req, { params }) {
       externalUrl: g.externalUrl,
       sourceProvider: g.sourceProvider,
       label: g.label,
+      mayBeOutdated: g.mayBeOutdated,
     }))
   );
 

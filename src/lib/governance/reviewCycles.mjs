@@ -9,5 +9,7 @@ export function validateReviewPolicy(p) {
 }
 export function matchesPolicy(doc,p){return p.active && (!p.departmentIds.length||p.departmentIds.includes(doc.departmentId)) && (!p.categories.length||p.categories.includes(doc.category));}
 export function addDays(date,days){return new Date(new Date(date).getTime()+days*86400000);}
-export function reviewerFor(doc,p){return p.reviewerType==='owner'?doc.ownerId:(doc.stewards?.[0]?.userId||null);}
+// A steward policy on a document without stewards falls back to its owner,
+// so the review still has someone accountable.
+export function reviewerFor(doc,p){return p.reviewerType==='owner'?doc.ownerId:(doc.stewards?.[0]?.userId||doc.ownerId||null);}
 export function validOutcome(outcome){return ['valid','update','retire'].includes(outcome);}

@@ -42,3 +42,6 @@ export async function call(handler, { method = "GET", params = {}, body } = {}) 
   const res = await handler(new Request("http://localhost/test", init), { params: Promise.resolve(params) });
   return { status: res.status, body: await res.json().catch(() => null) };
 }
+
+/** The full client (what jobs and routes receive) bound to the open test transaction. */
+export const client = globalThis.prisma;

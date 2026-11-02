@@ -613,6 +613,9 @@ export default function OrgChatPage() {
                                 <span className="truncate">
                                   {label || (isDecision ? 'Decision' : isLesson ? 'Lesson' : 'Source document')}
                                 </span>
+                                {s.mayBeOutdated && (
+                                  <span className="flex-shrink-0 rounded-full bg-amber-100 px-1.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">May be outdated</span>
+                                )}
                               </button>
                             );
                           })}
@@ -775,6 +778,7 @@ export default function OrgChatPage() {
 
             <div className="space-y-1 text-sm text-gray-600 dark:text-gray-300">
               {selectedSource.label && <p>Source: {selectedSource.label}</p>}
+              {selectedSource.mayBeOutdated && <p className="text-amber-700 dark:text-amber-300">May be outdated: this document has been flagged for review.</p>}
               {selectedSource.department && <p>Department: {selectedSource.department}</p>}
               {selectedSource.project && <p>Project: {selectedSource.project}</p>}
             </div>
