@@ -158,7 +158,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
         { label: "Decisions", href: `/org/${orgId}/decisions`, icon: Scale, badge: pendingDecisionCount },
         { label: "Knowledge Graph", href: `/org/${orgId}/knowledge-graph`, icon: Network },
         { label: "Submit for Approval", href: `/org/${orgId}/workflow-submit`, icon: ClipboardList },
-        { label: "My Workflow Tasks", href: `/org/${orgId}/workflow-tasks`, icon: ClipboardList },
+        { label: "My Tasks", href: `/org/${orgId}/workflow-tasks`, icon: ClipboardList },
         ...(isSuperAdmin ? [{ label: "Approval Workflows", href: `/org/${orgId}/workflows`, icon: Settings }] : []),
         ...(isSuperAdmin
           ? [{ label: "Needs Review", href: `/org/${orgId}/needs-review`, icon: ClipboardList }]

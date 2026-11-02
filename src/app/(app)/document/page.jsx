@@ -7,6 +7,7 @@ import DocumentVersionsPanel from "@/components/governance/DocumentVersionsPanel
 import DocumentOwnershipPanel from "@/components/governance/DocumentOwnershipPanel";
 import DocumentCompletenessBadge from "@/components/governance/DocumentCompletenessBadge";
 import DocumentWorkflowPanel from "@/components/governance/DocumentWorkflowPanel";
+import DocumentReviewPrompt from "@/components/governance/DocumentReviewPrompt";
 import Layout from '@/components/layout/Layout';
 import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -951,6 +952,10 @@ function DocumentContent() {
 
       {doc?.scope === "repository" && doc?.orgId && (
         <DocumentCompletenessBadge documentId={doc.id} />
+      )}
+
+      {doc?.scope === "repository" && doc?.orgId && (
+        <DocumentReviewPrompt orgId={doc.orgId} documentId={doc.id} />
       )}
 
       {doc?.lifecycleSuggestion === 'archived' && <div role="status" className="mb-3 rounded border border-amber-400 bg-amber-50 p-3 text-amber-900">May be outdated — this document has been flagged for review.</div>}

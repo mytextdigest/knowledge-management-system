@@ -1,14 +1,19 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Layout from '@/components/layout/Layout';
 import { validateTaskDecision } from '@/lib/workflows/taskInbox.mjs';
+import ReviewTaskCard from '@/components/governance/ReviewTaskCard';
 
 const filters=[['pending','Pending'],['completed','Completed'],['all','All']];
 const actions=[['approve','Approve'],['request_changes','Request changes'],['reject','Reject']];
 export default function WorkflowTasksPage(){
  const {orgId}=useParams();
+ // B-16/B-18: one inbox for approval tasks and periodic reviews (?tab=reviews opens the second).
+ const search=useSearchParams();
+ const [tab,setTab]=useState(search.get('tab')==='reviews'?'reviews':'approvals');
+ const [reviews,setReviews]=useState([]),[reviewPending,setReviewPending]=useState(0);
  const [filter,setFilter]=useState('pending'),[items,setItems]=useState([]),[pendingCount,setPendingCount]=useState(0);
  const [loading,setLoading]=useState(true),[busyId,setBusyId]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [drafts,setDrafts]=useState({});
@@ -17,6 +22,10 @@ export default function WorkflowTasksPage(){
   try {const res=await fetch(`/api/org/${orgId}/workflow-tasks?status=${filter}`,{cache:'no-store'});
    const data=await res.json();if(!res.ok)throw new Error(data.error||'Unable to load tasks');
    setItems(data.items||[]);setPendingCount(data.pendingCount||0);
+   const rr=await fetch(`/api/org/${orgId}/reviews?mine=1&status=all`,{cache:'no-store'});
+   const rd=await rr.json();if(!rr.ok)throw new Error(rd.error||'Unable to load reviews');
+   const all=rd.items||[];setReviewPending(all.filter(r=>r.status==='pending').length);
+   setReviews(filter==='pending'?all.filter(r=>r.status==='pending'):filter==='completed'?all.filter(r=>r.status!=='pending'):all);
   }catch(e){setError(e.message)}finally{setLoading(false)}
  },[orgId,filter]);
  useEffect(()=>{load()},[load]);
@@ -32,11 +41,13 @@ export default function WorkflowTasksPage(){
   }catch(e){setError(e.message)}finally{setBusyId('')}
  };
  return <Layout><main className="mx-auto max-w-5xl space-y-5 p-6">
-  <header><h1 className="text-2xl font-semibold">My Workflow Tasks</h1><p className="text-sm text-gray-500">Only review tasks assigned to your account are shown. Pending tasks: {pendingCount}.</p></header>
+  <header><h1 className="text-2xl font-semibold">My Tasks</h1><p className="text-sm text-gray-500">Approvals and periodic reviews assigned to you.</p></header>
+  <div role="tablist" className="flex gap-1 border-b">{[['approvals','Approvals',pendingCount],['reviews','Periodic reviews',reviewPending]].map(([key,label,count])=><button key={key} role="tab" aria-selected={tab===key} onClick={()=>setTab(key)} className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab===key?'border-blue-700 text-blue-700 dark:text-blue-300':'border-transparent text-gray-500'}`}>{label}{count>0&&<span className="ml-2 rounded-full bg-blue-700 px-2 py-0.5 text-xs text-white">{count}</span>}</button>)}</div>
   {error&&<p role="alert" className="rounded border border-red-300 p-3 text-red-700">{error}</p>}
   {notice&&<p role="status" className="rounded border p-3 text-green-700">{notice}</p>}
   <div className="flex flex-wrap gap-2">{filters.map(([key,label])=><button key={key} onClick={()=>setFilter(key)} aria-pressed={filter===key} className={`rounded border px-3 py-2 text-sm ${filter===key?'bg-blue-700 text-white':''}`}>{label}</button>)}<button onClick={load} className="rounded border px-3 py-2 text-sm">Refresh</button></div>
-  {loading?<p>Loading tasks…</p>:items.length===0?<p>No {filter==='all'?'':filter} tasks found.</p>:<div className="space-y-3">{items.map(task=>{
+  {tab==='reviews'?(loading?<p>Loading reviews…</p>:reviews.length===0?<p>No {filter==='all'?'':filter} reviews found.</p>:<div className="space-y-3">{reviews.map(r=><ReviewTaskCard key={r.id} orgId={orgId} review={r} onDone={()=>{setNotice('Review recorded.');load()}}/>)}</div>):
+  loading?<p>Loading tasks…</p>:items.length===0?<p>No {filter==='all'?'':filter} tasks found.</p>:<div className="space-y-3">{items.map(task=>{
    const draft=drafts[task.id]||{};const action=draft.action||'approve';
    return <article key={task.id} className="space-y-3 rounded-xl border p-4">
     <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="font-semibold">{task.instance.definition.name} — {task.stage.name}</h2><p className="text-sm text-gray-500">Stage {task.stage.position} · Assigned {new Date(task.createdAt).toLocaleString()}</p></div><span className="rounded border px-2 py-1 text-sm">{task.status.replaceAll('_',' ')}</span></div>

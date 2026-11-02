@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Layout from '@/components/layout/Layout';
+import Link from 'next/link';
 import { validateWorkflowDraft } from '@/lib/workflows/uiValidation.mjs';
 const emptyStage = () => ({name:'',approverUserId:''});
 export default function WorkflowsPage() {
@@ -31,7 +32,7 @@ export default function WorkflowsPage() {
   }catch(err){setError(err.message)}finally{setSaving(false)}
  };
  return <Layout><main className="mx-auto max-w-5xl space-y-6 p-6">
-  <header><h1 className="text-2xl font-semibold">Approval Workflows</h1><p className="text-sm text-gray-500">Super administrators can configure sequential review stages. Existing definitions are displayed below.</p></header>
+  <header><h1 className="text-2xl font-semibold">Approval Workflows</h1><p className="text-sm text-gray-500">Super administrators can configure sequential review stages. Existing definitions are displayed below.</p><p className="mt-1 text-sm">Periodic re-reviews of published documents are set up under <Link className="text-blue-600 underline" href={`/org/${orgId}/review-policies`}>Review policies</Link>.</p></header>
   {error&&<p role="alert" className="rounded border border-red-300 p-3 text-red-600">{error}</p>}{notice&&<p role="status" className="text-green-700">{notice}</p>}
   <form onSubmit={create} className="space-y-4 rounded-xl border p-5">
    <h2 className="font-semibold">Create workflow</h2>
