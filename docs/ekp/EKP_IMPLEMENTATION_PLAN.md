@@ -25,7 +25,7 @@ NYPA's RFP lists **32 requirements** for an Enterprise Knowledge Platform (EKP).
 | 14 Oct | Questions to NYPA due | Some requirements wait on NYPA's answers (marked ❓ below) |
 | 19 Oct | NYPA answers | Update affected requirement docs that week |
 | **4 Nov** | **Proposal due** (moved from 28 Oct; NYPA Q&A #82) | Phase 1 (Workstreams A and B) in progress |
-| ~Nov | Demo, within 2 weeks of shortlisting | Show whatever is merged from Phase 1 |
+| ~Nov | Demo, within 2 weeks of shortlisting | Phase 1 complete; show Phase 1 plus whatever Phase 2 has merged |
 | Q1 2027 | Project start | Later phases continue |
 
 ---
@@ -61,7 +61,7 @@ NYPA's RFP lists **32 requirements** for an Enterprise Knowledge Platform (EKP).
 - **Sandeep and Simran agree how to split B between them** when they write the B requirements doc (see §6).
 - **PowerPoint and video are Phase 2** (decided 2026-10-23). NYPA's in-scope content is mostly PPT, PDF and MP4 with VTT transcripts (NYPA Q&A #44, #132, #185), and KMS can't extract text from PPT or video today. Phase 1 stays A + B. Phase 2 starts with E part 1 as soon as Phase 1 is merged.
 - **Phase 2 = C + D + E (both parts)**, 2 Nov – 30 Nov 2026 (decided 2026-10-29 at the end of Phase 1). Owners: C Sandeep, D Simran, E Johurul. Workstream documents, milestones (each one a demoable PR into `dev` with a due date) and the branch approach are in `docs/ekp/phase2/` ([PHASE2_OVERVIEW.md](phase2/PHASE2_OVERVIEW.md)).
-- **Phase 1 is treated as complete.** WS-A and WS-B are merged. `A-16` and `A-23` moved to Workstream E (`E-12`, `E-3`). WS-B's document review (`B-1`), end-to-end tests (`B-21`) and RTM update (`B-22`) stay open, with the Phase 1 cross-testing (`A-19`).
+- **Phase 1 is complete (3 Nov 2026).** WS-A and WS-B are merged; the WS-B gaps found in the audit were closed on `dev` (2 Nov: approval workflows end to end, role-based approvers and department/category coverage, ownership defaults, purge job, stale rules, review UI; 3 Nov: delete/restore, supersede and AI-summary badge in the UI). Cross-testing (`A-19`) and the WS-B end-to-end tests (`B-21`) passed: the automated route suites (`npm run ekp:b:e2e`), a worker smoke test on the dev queue (`scripts/ekp/worker-smoke.mjs`, which found and fixed a chunking failure) and a manual run on EC2. RTM updated (`B-22`, `A-20`). `A-16` and `A-23` moved to Workstream E (`E-12`, `E-3`); Content Server (`A-18`) waits for NYPA.
 - **Order and owners for F and G are decided at the end of Phase 2.**
 
 ---
@@ -311,7 +311,7 @@ The single status board. **Update it in the same PR that completes a requirement
 | # | Requirement (short) | WS | Owner | Phase | Status |
 |---|---|---|---|---|---|
 | E1 | Customizable landing page | F | TBD | TBD | 🟡 |
-| E2 | Unified search across SharePoint/Content Server/ServiceNow, permission-aware | A | Johurul | 1 | 🟡 |
+| E2 | Unified search across SharePoint/Content Server/ServiceNow, permission-aware | A | Johurul | 1 | 🟡 SharePoint + ServiceNow ✅; Content Server after award (`A-18`) |
 | E3 | Hybrid + ontology search | C | Sandeep | 2 | 🟡 |
 | E4 | Taxonomy facets | C | Sandeep | 2 | 🟡 |
 | E5 | Personal home, saved searches, watchlists | F | TBD | TBD | 🟡 |
@@ -321,27 +321,27 @@ The single status board. **Update it in the same PR that completes a requirement
 | E9 | Follow-up questions | — | — | — | ✅ |
 | E10 | Confidence & explainability | F | TBD | TBD | 🟡 |
 | E11 | PPT, images, video | E | Johurul | 2 (part 1: PPTX, video, VTT · part 2: images) | 🟡 |
-| E12 | Site pages, wikis, KB articles | A | Johurul | 1 | ❌ |
+| E12 | Site pages, wikis, KB articles | A | Johurul | 1 | ✅ |
 | E13 | Previews & thumbnails | E | Johurul | 2 | 🟡 |
 | E14 | Asset templates | E | Johurul | 2 | ❌ |
 | E15 | Managed metadata (hierarchy, synonyms) | C | Sandeep | 2 | ❌ |
 | E16 | NYPA taxonomy-tool integration | C | Sandeep (E16.5 capture: Johurul, `A-23`) | 2 | ❌ |
 | E17 | Graph-enriched search/navigation/chat | — | — | — | ✅ |
 | E18 | Drag-and-drop upload | — | — | — | ✅ |
-| E19 | Summary with human review | B | Sandeep & Simran | 1 | 🟡 |
+| E19 | Summary with human review | B | Sandeep & Simran | 1 | ✅ |
 | E20 | Auto-tagging with human review | — | — | — | ✅ |
-| E21 | Metadata completeness before publish | B | Sandeep & Simran | 1 | 🟡 |
-| E22 | Configurable publishing workflow | B | Sandeep & Simran | 1 | 🟡 |
-| E23 | Archive/retire/supersede/delete + audit | B | Sandeep & Simran | 1 | 🟡 |
-| E24 | Ownership & stewardship | B | Sandeep & Simran | 1 | 🟡 |
-| E25 | Configurable review workflows | B | Sandeep & Simran | 1 | ❌ |
-| E26 | Stale detection + review triggers | B | Sandeep & Simran | 1 | 🟡 |
+| E21 | Metadata completeness before publish | B | Sandeep & Simran | 1 | ✅ |
+| E22 | Configurable publishing workflow | B | Sandeep & Simran | 1 | ✅ (task SLA/escalation: later) |
+| E23 | Archive/retire/supersede/delete + audit | B | Sandeep & Simran | 1 | ✅ |
+| E24 | Ownership & stewardship | B | Sandeep & Simran | 1 | ✅ |
+| E25 | Configurable review workflows | B | Sandeep & Simran | 1 | ✅ |
+| E26 | Stale detection + review triggers | B | Sandeep & Simran | 1 | ✅ |
 | E27 | Duplicate detection | — | — | — | ✅ |
 | E28 | Content health dashboard | D | Simran | 2 | 🟡 |
 | E29 | Usage & adoption dashboard | D | Simran | 2 | 🟡 |
 | E30 | Search quality metrics | D | Simran | 2 | 🟡 |
-| E31 | Governance metrics | B | Sandeep & Simran | 1 | ❌ |
-| E32 | M365 single source of truth | A | Johurul | 1 | 🟡 |
+| E31 | Governance metrics | B | Sandeep & Simran | 1 | ✅ |
+| E32 | M365 single source of truth | A | Johurul | 1 | ✅ |
 
 ---
 
