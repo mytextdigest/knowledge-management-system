@@ -267,7 +267,7 @@ async function processChunkJob(job) {
     // Serialize chunk writes for the same document across worker processes.
     // Transaction-scoped advisory lock requires no schema migration.
     await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${docId}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${docId}))`; // returns void: $queryRaw can't deserialize it
       const existingChunks = await tx.chunk.findMany({
         where: { documentId: docId },
         select: { id: true, chunkIndex: true },
@@ -1368,6 +1368,14 @@ async function mainLoop() {
       try {
         await processJob(body);
       } catch (err) {
+        // The queue has no dead-letter queue: a job for a document that no
+        // longer exists (purged, or removed mid-processing) would be retried
+        // until the message expires. Drop it instead.
+        if (body.docId && !(await prisma.document.findUnique({ where: { id: body.docId }, select: { id: true } }).catch(() => ({ id: body.docId })))) {
+          console.warn(`Dropping ${body.type} job: document ${body.docId} no longer exists`);
+          await sqs.send(new DeleteMessageCommand({ QueueUrl: QUEUE_URL, ReceiptHandle: msg.ReceiptHandle })).catch(() => {});
+          continue;
+        }
         console.error("Worker job failed (SQS will retry):", err);
         // Only mark an in-flight document as failed. Never regress a ready,
         // completed, or otherwise advanced document due to a late retry.

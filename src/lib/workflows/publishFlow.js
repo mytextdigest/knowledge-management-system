@@ -36,6 +36,18 @@ export async function applicableDefinitions(db, orgId, kind, { departmentId, cat
 }
 
 /**
+ * E22: lifecycle for a new repository upload. While an active publish
+ * workflow covers its department/category it starts as a draft, to be
+ * submitted for approval once processed; otherwise it's published at once,
+ * as before E22. (Connector documents always start as drafts.)
+ */
+export async function initialUploadLifecycle(db, { orgId, scope, departmentId, category }) {
+  if (scope !== "repository" || !orgId) return "published";
+  return (await applicableDefinitions(db, orgId, "publish", { departmentId: departmentId ?? null, category: category ?? null })).length
+    ? "draft" : "published";
+}
+
+/**
  * Which publish definition applies, from applicableDefinitions(): none ->
  * null (direct publish, as before E22); one -> that one; several equally
  * specific -> the caller must choose (requestedId).

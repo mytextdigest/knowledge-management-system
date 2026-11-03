@@ -127,10 +127,9 @@ export default function UploadToRepositoryModal({
     if (departmentId) ingestForm.append("departmentId", departmentId);
 
     const ingestRes = await fetch("/api/documents/ingest", { method: "POST", body: ingestForm });
-    if (!ingestRes.ok) {
-      const data = await ingestRes.json().catch(() => ({}));
-      throw new Error(data.error || "Ingestion failed.");
-    }
+    const data = await ingestRes.json().catch(() => ({}));
+    if (!ingestRes.ok) throw new Error(data.error || "Ingestion failed.");
+    return data;
   }
 
   async function handleUpload(e) {
@@ -153,11 +152,12 @@ export default function UploadToRepositoryModal({
 
     setIsUploading(true);
     let hadErrors = false;
+    let drafts = 0;
 
     for (const fileItem of pending) {
       setFiles((prev) => prev.map((f) => (f.id === fileItem.id ? { ...f, status: "uploading" } : f)));
       try {
-        await uploadOne(fileItem);
+        if ((await uploadOne(fileItem))?.lifecycle === "draft") drafts++;
         setFiles((prev) => prev.map((f) => (f.id === fileItem.id ? { ...f, status: "success" } : f)));
       } catch (err) {
         hadErrors = true;
@@ -172,6 +172,11 @@ export default function UploadToRepositoryModal({
     setIsUploading(false);
     onUploaded?.();
 
+    // E22: an approval workflow covers this department/type, so the upload
+    // starts as a draft and is published only through approval.
+    if (drafts) {
+      window.alert(`${drafts === 1 ? "This document was" : `${drafts} documents were`} saved as a draft: an approval workflow covers this department. Once processing finishes, open the document and submit it from its Workflow tab.`);
+    }
     if (!hadErrors) {
       resetForm();
       onClose?.();

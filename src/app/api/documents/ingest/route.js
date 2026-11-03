@@ -11,6 +11,7 @@ import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { resolveOrgRole } from "@/lib/orgGuard";
 import { getOrgSubscription, isSubscriptionActive } from "@/lib/subscription";
 import { defaultOwnerId } from "@/lib/governance/defaultOwner";
+import { initialUploadLifecycle } from "@/lib/workflows/publishFlow";
 
 export async function POST(req) {
   try {
@@ -151,6 +152,7 @@ export async function POST(req) {
     // B-10: accountable owner (uploader, or the department's default owner
     // when ownership.default is "department_owner").
     const ownerId = await defaultOwnerId(prisma, { orgId, departmentId, uploaderId: dbUser.id });
+    const lifecycle = await initialUploadLifecycle(prisma, { orgId, scope, departmentId, category });
 
     // Document created with "queued" status
     const [doc] = await prisma.$transaction([
@@ -159,6 +161,7 @@ export async function POST(req) {
           filename,
           filePath: s3Key,
           status: "queued",
+          lifecycle,
           classificationStatus: "pending_classification",
           visibility,
           scope,
@@ -207,7 +210,8 @@ export async function POST(req) {
     return NextResponse.json({
       success: true,
       id: doc.id,
-      status: "queued"
+      status: "queued",
+      lifecycle,
     });
 
   } catch (err) {

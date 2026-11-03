@@ -140,5 +140,17 @@ test("role approvers, any/all and department/category scoping", { skip: !RUN }, 
     r = await call(lifecycleRoute.PATCH, { method: "PATCH", params: { id: f2.id }, body: { lifecycle: "published" } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(await db.auditLog.count({ where: { orgId: org.id, action: "workflow.definition_changed", entityId: orgWide.id } }), 2);
+
+    // Uploads: start as drafts only where an active publish workflow covers them.
+    const { initialUploadLifecycle } = await import("../../../src/lib/workflows/publishFlow.js");
+    const upload = (departmentId, category, scope = "repository") => initialUploadLifecycle(db, { orgId: org.id, scope, departmentId, category });
+    assert.equal(await upload(eng.id, "SOPs"), "draft");
+    assert.equal(await upload(fin.id, "SOPs"), "published");
+    assert.equal(await upload(eng.id, "SOPs", "project"), "published");
+    as(users.super.email);
+    for (const d of [orgWide, engOnly, ownerWf.body]) {
+      await call(definitionRoute.PATCH, { method: "PATCH", params: { orgId: org.id, definitionId: d.id }, body: { active: false } });
+    }
+    assert.equal(await upload(eng.id, "SOPs"), "published", "no active workflow: published at once, as before E22");
   });
 });
