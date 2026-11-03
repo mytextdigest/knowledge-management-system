@@ -33,6 +33,7 @@ import {
   Workflow,
   CalendarClock,
   BarChart3,
+  Trash2,
 } from "lucide-react";
 import Image from "next/image";
 import CreateOrgModal from "@/components/org/CreateOrgModal";
@@ -198,7 +199,10 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
   const governanceNav = orgId
     ? [
         ...(isSuperAdmin ? [{ label: "Needs Review", href: `/org/${orgId}/needs-review`, icon: ClipboardList, badge: taskCounts.needsReview }] : []),
-        ...(isOrgAdmin ? [{ label: "Summary Reviews", href: `/org/${orgId}/summary-reviews`, icon: FileCheck2 }] : []),
+        ...(isOrgAdmin ? [
+          { label: "Summary Reviews", href: `/org/${orgId}/summary-reviews`, icon: FileCheck2 },
+          { label: "Recently Deleted", href: `/org/${orgId}/deleted`, icon: Trash2 },
+        ] : []),
         ...(isSuperAdmin ? [
           { label: "Approval Workflows", href: `/org/${orgId}/workflows`, icon: Workflow },
           { label: "Review Policies", href: `/org/${orgId}/review-policies`, icon: CalendarClock },

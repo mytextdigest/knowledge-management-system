@@ -8,6 +8,7 @@ import DocumentOwnershipPanel from "@/components/governance/DocumentOwnershipPan
 import DocumentCompletenessBadge from "@/components/governance/DocumentCompletenessBadge";
 import DocumentWorkflowPanel from "@/components/governance/DocumentWorkflowPanel";
 import DocumentReviewPrompt from "@/components/governance/DocumentReviewPrompt";
+import DocumentLifecycleActions from "@/components/governance/DocumentLifecycleActions";
 import Layout from '@/components/layout/Layout';
 import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -947,6 +948,10 @@ function DocumentContent() {
       </div>
 
       {doc?.scope === "repository" && doc?.orgId && (
+        <DocumentLifecycleActions doc={doc} onChanged={() => fetchDocument(id).then((fresh) => fresh && setDoc(fresh))} />
+      )}
+
+      {doc?.scope === "repository" && doc?.orgId && (
         <DocumentOwnershipPanel documentId={doc.id} orgId={doc.orgId} />
       )}
 
@@ -1537,8 +1542,11 @@ function DocumentContent() {
 
                   {/* Overview */}
                   <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-                    <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">
+                    <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3 flex flex-wrap items-center gap-2">
                       Summary
+                      {/* E19: AI content is labelled; "pending review" until a reviewer approves this text. */}
+                      {doc?.summaryStatus === 'pending' && <span className="rounded-full border border-amber-400 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">AI-generated · pending review</span>}
+                      {doc?.summaryStatus === 'approved' && <span className="rounded-full border border-green-400 bg-green-50 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-200">AI-generated · reviewed</span>}
                     </h3>
                     <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
                       {summary.overview}

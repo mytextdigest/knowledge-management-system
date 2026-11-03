@@ -12,6 +12,7 @@ import { canViewDocument, filterAccessibleDocuments } from "@/lib/access/documen
 import { getAccessibleRelatedDocuments, getAccessibleExperts } from "@/lib/knowledgeContext";
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 import { canReviewDecision } from "@/lib/decisionAccess";
+import { effectiveSummaryStatus } from "@/lib/governance/summaryReview.mjs";
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -29,6 +30,7 @@ export async function GET(req, { params }) {
       topicDocument: { include: { topic: { select: { id: true, name: true, scope: true } } } },
       project: { select: { orgId: true, departmentId: true, scope: true } },
       decisions: { orderBy: { decidedAt: "desc" } },
+      summaryReview: { select: { status: true, summaryHash: true } },
       conflictsAsDocA: {
         orderBy: { createdAt: "desc" },
         include: {
@@ -148,13 +150,13 @@ export async function GET(req, { params }) {
     : [];
 
   const effectiveDepartmentId = doc.departmentId ?? doc.project?.departmentId ?? null;
-  const canManage =
-    Boolean(isOwner) ||
+  const isDepartmentAdmin =
     isSuperAdmin(role) ||
     (role === "dept_admin" &&
       Boolean(user?.id) &&
       Boolean(effectiveDepartmentId) &&
       (await canManageDepartment(role, effectiveDepartmentId, user.id)));
+  const canManage = Boolean(isOwner) || isDepartmentAdmin;
 
   // Decision Extraction v2, FR-5: a "pending"/"rejected" decision must not
   // appear on the document page either, unless the viewer is a reviewer for
@@ -168,7 +170,7 @@ export async function GET(req, { params }) {
     ? doc.decisions
     : doc.decisions.filter((d) => d.status !== "pending" && d.status !== "rejected");
 
-  const { conflictsAsDocA, conflictsAsDocB, decisions: _rawDecisions, ...docWithoutRawConflicts } = doc;
+  const { conflictsAsDocA, conflictsAsDocB, decisions: _rawDecisions, summaryReview, ...docWithoutRawConflicts } = doc;
 
   return NextResponse.json({
     ...docWithoutRawConflicts,
@@ -179,6 +181,8 @@ export async function GET(req, { params }) {
     fileUrl: signedUrl,
     fileDownloadUrl: downloadUrl,
     created_at: doc.createdAt.toISOString(),
+    // E19: AI summaries are labelled until a reviewer approves the current text.
+    summaryStatus: effectiveSummaryStatus(doc.summary, summaryReview),
     permissions: {
       canManage,
       canRegenerate: canManage && (!!doc.filePath || canStreamFromSource(doc)) && !PROCESSING_STATUSES.has(doc.status),
@@ -187,6 +191,8 @@ export async function GET(req, { params }) {
       canStar: canManage,
       canRename: canManage,
       canDelete: canManage,
+      // E23: same rule as POST /api/documents/[id]/supersede.
+      canSupersede: doc.scope === "repository" && isDepartmentAdmin,
       canUnassign: canManage,
       canMoveToTopic: canManage,
     },
