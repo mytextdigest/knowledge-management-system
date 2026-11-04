@@ -154,7 +154,7 @@ Each milestone ends with a PR from `feature/ekp-ws-e` into `dev`, opened one wor
 
 | Task ID | Milestone · Title | Status | Assignee | Depends On | PR | Started | Completed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `E-1` | Finalize this document (shared design + E-M1), reviewed by Sandeep or Simran | `TODO` | Johurul | — | | | |
+| `E-1` | Finalize this document (shared design + E-M1), reviewed by Sandeep or Simran | `DONE` | Johurul | — | | 2026-10-29 | 2026-11-04 |
 | `E-2` | E-M1 · Schema: `DocumentSourceTag`, `MediaJob`, part 1 `Document` media fields, `SyncRun.filesSkipped` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
 | `E-3` | E-M1 · **`A-23`**: store SharePoint managed-metadata values on synced documents (PRS E16.5) | `IN_PROGRESS` | Johurul | `E-2` | | 2026-11-04 | |
 | `E-4` | E-M1 · E11.4: shared format allow-list (upload, API, SharePoint filter); clear rejection messages | `IN_PROGRESS` | Johurul | `E-1` | | 2026-11-04 | |
