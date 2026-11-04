@@ -34,6 +34,7 @@ import { createAclResolver, aclWriteData } from "../src/lib/connectors/sharepoin
 import { refreshSiteAcls, siteGroupFingerprint } from "../src/lib/connectors/sharepointAclRefresh.js";
 import { syncServiceNow } from "../src/lib/connectors/servicenowSync.js";
 import { tooLargeFileWrites, isTooLargeToIndex, TOO_LARGE } from "../src/lib/connectors/sharepointLargeFiles.js";
+import { createSourceTagReader } from "../src/lib/connectors/sharepointSourceTags.js";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
@@ -830,7 +831,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
         data: { ...sourceFields, ...(refreshAcl ? aclWriteData(await readAcl()) : {}) },
       });
     }
-    return { skipped: true, aclRefreshed: refreshAcl };
+    return { skipped: true, aclRefreshed: refreshAcl, docId: existing.id };
   }
 
   const aclRows = aclResolver ? await readAcl() : null;
@@ -869,7 +870,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
       prisma.user.update({ where: { id: connectedByUserId }, data: { storageUsedBytes: { decrement: freedBytes } } }),
     ]);
     await enqueueChunk({ doc, s3Key: null, filename: change.name, connectedByUserId, orgId });
-    return { skipped: false };
+    return { skipped: false, docId: doc.id };
   }
 
   const dbUser = await prisma.user.findUnique({ where: { id: connectedByUserId } });
@@ -935,7 +936,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
   ]);
 
   await enqueueChunk({ doc, s3Key, filename: change.name, connectedByUserId, orgId });
-  return { skipped: false };
+  return { skipped: false, docId: doc.id };
 }
 
 // Deletes a document's stored copy from S3. Returns the bytes freed (0 if
@@ -952,6 +953,44 @@ async function removeStoredCopy(filePath, name) {
   }
 }
 
+// EKP A-23: read the tags of a site's files synced before tags were kept
+// (every synced file of the site's document library not read this run).
+// A site's URL can prefix another connected site's (the root site and
+// /sites/Engineering): files under a more specific site are that site's.
+async function backfillSourceTags({ orgId, site, allSites = [], driveId, tagReader, skip }) {
+  const stats = { checked: 0, tagged: 0, failed: 0 };
+  if (!site.siteUrl) return stats;
+  const prefixOf = (url) => `${String(url).replace(/\/$/, "")}/`.toLowerCase();
+  const prefix = prefixOf(site.siteUrl);
+  const deeper = allSites
+    .map((s) => s.siteUrl && prefixOf(s.siteUrl))
+    .filter((p) => p && p !== prefix && p.startsWith(prefix));
+  const docs = await prisma.document.findMany({
+    where: {
+      orgId,
+      sourceProvider: "sharepoint",
+      contentType: { not: "page" },
+      externalId: { not: null },
+      externalUrl: { startsWith: prefix, mode: "insensitive" },
+    },
+    select: { id: true, externalId: true, externalUrl: true },
+  });
+  for (const doc of docs) {
+    if (skip.has(doc.id)) continue;
+    const url = doc.externalUrl.toLowerCase();
+    if (deeper.some((p) => url.startsWith(p))) continue;
+    stats.checked++;
+    try {
+      const count = await tagReader.sync({ documentId: doc.id, driveId, itemId: doc.externalId });
+      if (count) stats.tagged++;
+    } catch (err) {
+      stats.failed++;
+      console.error(`⚠️ Couldn't read the SharePoint tags of document ${doc.id}:`, err.message);
+    }
+  }
+  return stats;
+}
+
 // EKP A-24: a file above the size limit: name, permissions and link only.
 async function recordTooLargeFile({ change, existing, integration, site, connectedByUserId, aclRows, sourceFields }) {
   const subscription = await prisma.subscription.findUnique({ where: { orgId: integration.orgId } });
@@ -959,7 +998,7 @@ async function recordTooLargeFile({ change, existing, integration, site, connect
     throw new Error("No active subscription for org");
   }
   const freedBytes = await removeStoredCopy(existing?.filePath, change.name);
-  await prisma.$transaction(
+  const written = await prisma.$transaction(
     tooLargeFileWrites(prisma, {
       existing,
       modifiedAt: change.modifiedAt,
@@ -971,7 +1010,8 @@ async function recordTooLargeFile({ change, existing, integration, site, connect
     })
   );
   console.log(`📦 "${change.name}" is ${Math.round(Number(change.size) / 1048576)} MB, above the size limit: link and permissions only`);
-  return { skipped: false, tooLarge: true };
+  const docId = existing?.id ?? written.find((row) => row?.externalId === change.externalId)?.id ?? null;
+  return { skipped: false, tooLarge: true, docId };
 }
 
 const MIN_PAGE_TEXT = 50; // same floor as processChunkJob
@@ -1151,6 +1191,7 @@ async function processSharePointSyncJob(job) {
     const sites = scopeConfig.sites || [];
     const aclResolver = createAclResolver({ graphToken: accessToken, tenantId: scopeConfig.tenantId });
     if (!aclResolver) console.warn("⚠️ SharePoint certificate not configured: per-file permissions aren't captured");
+    const tagReader = createSourceTagReader(prisma, { accessToken }); // A-23
 
     for (const site of sites) {
       const connector = getConnector("sharepoint", { accessToken, siteId: site.siteId });
@@ -1186,6 +1227,8 @@ async function processSharePointSyncJob(job) {
         }
       }
 
+      const taggedDocIds = new Set(); // A-23: documents whose tags this run already read
+      let tagsFailed = 0;
       for (const change of changes) {
         if (change.deleted) continue; // FR-2 MVP: no orphan/archive handling yet (Open Question #4)
         // E11.4: a format KMS can't read is never downloaded; it's listed with the reason.
@@ -1202,9 +1245,32 @@ async function processSharePointSyncJob(job) {
             skipped.push({ name: change.name, reason: "Above the size limit: only its name, link and permissions are kept.", webUrl: change.webUrl || null });
           }
           if (result.aclRefreshed) aclRefreshed++;
+          // A-23: the file's managed-metadata values (non-fatal: the file itself is in).
+          if (!result.skipped && result.docId) {
+            try {
+              await tagReader.sync({ documentId: result.docId, driveId: change.driveId || siteDriveId, itemId: change.externalId });
+              taggedDocIds.add(result.docId);
+            } catch (err) {
+              tagsFailed++;
+              console.error(`⚠️ Couldn't read the SharePoint tags of "${change.name}":`, err.message);
+            }
+          }
         } catch (err) {
           console.error(`❌ Failed to sync file "${change.name}" (${change.externalId}):`, err.message);
           filesFailed++;
+        }
+      }
+
+      // A-23: files synced before tags were kept are unchanged, so delta won't
+      // bring them back. Read their tags once per site.
+      let sourceTagsReadAt = site.sourceTagsReadAt ?? null;
+      if (!sourceTagsReadAt && siteDriveId) {
+        try {
+          const backfill = await backfillSourceTags({ orgId: integration.orgId, site, allSites: sites, driveId: siteDriveId, tagReader, skip: taggedDocIds });
+          console.log(`🏷️ SharePoint tags backfilled for ${site.siteUrl}:`, backfill);
+          if (!backfill.failed && !tagsFailed) sourceTagsReadAt = new Date().toISOString();
+        } catch (err) {
+          console.error(`⚠️ SharePoint tag backfill failed for ${site.siteUrl} (retried next sync):`, err.message);
         }
       }
 
@@ -1253,6 +1319,7 @@ async function processSharePointSyncJob(job) {
                 ...s,
                 lastSyncCursor: cursor,
                 aclFingerprint,
+                sourceTagsReadAt,
                 driveId: siteDriveId || s.driveId || null,
                 pageLibraries,
                 pagesDriveId: undefined, // replaced by pageLibraries

@@ -380,3 +380,9 @@ export async function getDriveItemFields({ accessToken, driveId, itemId }) {
     throw err;
   }
 }
+
+// A-23: the column definitions of a document library (name, displayName and,
+// for managed-metadata columns, the `term` facet with its term set).
+export async function listDriveColumns({ accessToken, driveId }) {
+  return graphGetAll(`/drives/${driveId}/list/columns`, { accessToken });
+}

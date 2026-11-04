@@ -31,6 +31,11 @@ export async function GET(req, { params }) {
       project: { select: { orgId: true, departmentId: true, scope: true } },
       decisions: { orderBy: { decidedAt: "desc" } },
       summaryReview: { select: { status: true, summaryHash: true } },
+      // A-23: managed-metadata values the file had in SharePoint (raw, until WS-C maps them to terms).
+      sourceTags: {
+        select: { fieldName: true, fieldDisplayName: true, label: true, termGuid: true, syncedAt: true },
+        orderBy: [{ fieldName: "asc" }, { label: "asc" }],
+      },
       conflictsAsDocA: {
         orderBy: { createdAt: "desc" },
         include: {

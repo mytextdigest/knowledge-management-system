@@ -20,6 +20,7 @@ import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
 import PdfViewer from "@/components/documents/PdfViewer";
 import SlideDeckViewer from "@/components/documents/SlideDeckViewer";
+import SourceTagsPanel from "@/components/documents/SourceTagsPanel";
 import DocumentFullscreenModal from "@/components/documents/DocumentFullscreenModal";
 import { cn } from '@/lib/utils';
 import { copySummary, printSummary } from '@/lib/summaryActions';
@@ -965,6 +966,8 @@ function DocumentContent() {
       {doc?.scope === "repository" && doc?.orgId && (
         <DocumentCompletenessBadge documentId={doc.id} />
       )}
+
+      <SourceTagsPanel tags={doc?.sourceTags} />
 
       {doc?.scope === "repository" && doc?.orgId && (
         <DocumentReviewPrompt orgId={doc.orgId} documentId={doc.id} />
