@@ -3,6 +3,7 @@ import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, SendMessageComm
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { extractPdfText } from "./extractPdf.js";
 import { extractSpreadsheetChunks } from "./extractSpreadsheet.js";
+import { extractPptxChunks } from "./extractPptx.js";
 import { runOCR } from "./runOcr.js";
 import mammoth from "mammoth";
 import { PrismaClient } from "@prisma/client";
@@ -112,6 +113,9 @@ function startTimer(label, meta = {}) {
   };
 }
 
+// E11.1: PowerPoint files the worker can never read, and the status they get.
+const UNREADABLE_PPTX = { PPTX_PROTECTED: "password_protected", PPTX_INVALID: "unreadable_file" };
+
 async function processChunkJob(job) {
   const { docId, s3Key, filename, visibility = "private", projectId } = job;
   console.log(`🟦 CHUNK JOB: ${docId} (${visibility})`);
@@ -154,7 +158,7 @@ async function processChunkJob(job) {
   // 3. Extract + sanitize text
   // -----------------------------
   let rawText = "";
-  let sheetChunks = null; // set for spreadsheet docs — bypasses generic chunkText()
+  let sheetChunks = null; // set for spreadsheet and PowerPoint docs — bypasses generic chunkText()
 
   const endExtract = startTimer("TEXT EXTRACTION", { docId, filename });
 
@@ -206,6 +210,21 @@ async function processChunkJob(job) {
     } else {
       endExtract();
     }
+  } else if (ext === ".pptx") {
+    // E11.1: one chunk per slide (title + body + notes), metadata.slide for citations.
+    try {
+      const { chunks: slideChunks, fullText } = await extractPptxChunks(buffer);
+      sheetChunks = slideChunks;
+      rawText = fullText;
+    } catch (err) {
+      endExtract();
+      if (!UNREADABLE_PPTX[err.errorCode]) throw err;
+      // Retrying can't help: stop with a status the document cards explain.
+      console.warn(`⚠️ ${filename}: ${err.message}`);
+      await prisma.document.update({ where: { id: docId }, data: { status: UNREADABLE_PPTX[err.errorCode] } });
+      return;
+    }
+    endExtract();
   } else if (ext === ".txt") {
     rawText = buffer.toString("utf8");
     endExtract();

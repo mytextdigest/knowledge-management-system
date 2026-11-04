@@ -19,6 +19,7 @@ import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
 import PdfViewer from "@/components/documents/PdfViewer";
+import SlideDeckViewer from "@/components/documents/SlideDeckViewer";
 import DocumentFullscreenModal from "@/components/documents/DocumentFullscreenModal";
 import { cn } from '@/lib/utils';
 import { copySummary, printSummary } from '@/lib/summaryActions';
@@ -37,6 +38,8 @@ function DocumentContent() {
   const router = useRouter();
 
   const id = searchParams.get('id');
+  // E11.1: a "slide 7" citation links here with &slide=7.
+  const activeSlide = Number.parseInt(searchParams.get('slide') || '', 10) || null;
 
 
   const [doc, setDoc] = useState(null);
@@ -827,6 +830,10 @@ function DocumentContent() {
           <PdfViewer fileUrl={doc.fileUrl} onPageChange={handleDocPageChange} onTotalPages={setPdfTotalPages} />
         </div>
       );
+    }
+
+    if (ext === "pptx") {
+      return <SlideDeckViewer chunks={doc.chunks} activeSlide={activeSlide} />;
     }
 
     if (ext === "docx") {

@@ -10,6 +10,7 @@
 export const SUPPORTED_FORMATS = [
   { ext: ".pdf", label: "PDF" },
   { ext: ".docx", label: "Word" },
+  { ext: ".pptx", label: "PowerPoint" },
   { ext: ".xlsx", label: "Excel" },
   { ext: ".xls", label: "Excel" },
   { ext: ".csv", label: "CSV" },
@@ -22,10 +23,10 @@ export const SUPPORTED_EXTENSIONS = SUPPORTED_FORMATS.map((f) => f.ext);
 export const ACCEPT_ATTRIBUTE = SUPPORTED_EXTENSIONS.join(",");
 
 // For the upload dialogs' help line.
-export const SUPPORTED_FORMATS_TEXT = "PDF, Word (.docx), Excel (.xlsx, .xls), CSV and TXT";
+export const SUPPORTED_FORMATS_TEXT = "PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .xls), CSV and TXT";
 
 // Old binary Office formats: readable after "Save as" in Office.
-const SAVE_AS = { ".doc": ".docx" };
+const SAVE_AS = { ".ppt": ".pptx", ".doc": ".docx" };
 
 /** The lower-case extension of a file name, with the dot ("" if none). */
 export function fileExtension(name) {
