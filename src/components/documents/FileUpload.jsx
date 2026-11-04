@@ -4,6 +4,7 @@ import { Upload, X, FileText, AlertCircle, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { cn, formatFileSize } from '@/lib/utils';
+import { SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS_TEXT, checkFileFormat } from '@/lib/fileFormats';
 
 const CATEGORIES = [
   "Policies",
@@ -18,7 +19,7 @@ const CATEGORIES = [
 const FileUpload = ({
   onUpload,
   onClose,
-  acceptedTypes = ['.txt', '.pdf', '.docx', '.csv', '.xlsx', '.xls'],
+  acceptedTypes = SUPPORTED_EXTENSIONS, // E11.4: shared allow-list
   maxFileSize = 10 * 1024 * 1024, // 10MB
   className
 }) => {
@@ -63,9 +64,11 @@ const FileUpload = ({
     const errors = [];
     
     // Check file type
-    const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
-    if (!acceptedTypes.includes(fileExtension)) {
-      errors.push(`File type ${fileExtension} is not supported`);
+    const format = checkFileFormat(file.name);
+    if (!format.ok) {
+      errors.push(format.reason);
+    } else if (!acceptedTypes.includes(format.ext)) {
+      errors.push(`KMS can't read ${format.ext} files here.`);
     }
     
     // Check file size
@@ -257,7 +260,7 @@ const FileUpload = ({
                 Drop files here or click to browse
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                Supports {acceptedTypes.join(', ')} files up to {formatFileSize(maxFileSize)}
+                Supports {acceptedTypes === SUPPORTED_EXTENSIONS ? SUPPORTED_FORMATS_TEXT : acceptedTypes.join(', ')} files up to {formatFileSize(maxFileSize)}
               </p>
             </div>
             

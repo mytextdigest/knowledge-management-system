@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
+import { AUDIT_EVENTS } from "@/lib/audit/events";
 
 // Admin-visible sync history (FR-3 NFR: failed syncs must be retryable and
 // must not silently drop files — this is where a failure actually surfaces).
@@ -27,5 +28,16 @@ export async function GET(req, { params }) {
     take: 20,
   });
 
-  return NextResponse.json({ syncRuns });
+  // E11.4 / A-24: which files each run didn't index, and why (worker recordSkippedFiles).
+  const skippedEntries = syncRuns.some((r) => r.filesSkipped > 0)
+    ? await prisma.auditLog.findMany({
+        where: { orgId, action: AUDIT_EVENTS.SYNC_FILES_SKIPPED, entityType: "SyncRun", entityId: { in: syncRuns.map((r) => r.id) } },
+        select: { entityId: true, metadata: true },
+      })
+    : [];
+  const skippedByRun = new Map(skippedEntries.map((e) => [e.entityId, e.metadata?.files || []]));
+
+  return NextResponse.json({
+    syncRuns: syncRuns.map((r) => ({ ...r, skippedFiles: skippedByRun.get(r.id) || [] })),
+  });
 }

@@ -12,6 +12,7 @@ import { resolveOrgRole } from "@/lib/orgGuard";
 import { getOrgSubscription, isSubscriptionActive } from "@/lib/subscription";
 import { defaultOwnerId } from "@/lib/governance/defaultOwner";
 import { initialUploadLifecycle } from "@/lib/workflows/publishFlow";
+import { checkFileFormat } from "@/lib/fileFormats";
 
 export async function POST(req) {
   try {
@@ -56,6 +57,11 @@ export async function POST(req) {
     }
 
     const filename = s3Key.split("/").pop();
+
+    // E11.4: the authoritative format check (the dialogs check too).
+    const format = checkFileFormat(filename);
+    if (!format.ok)
+      return NextResponse.json({ error: format.reason, code: "UNSUPPORTED_FORMAT" }, { status: 415 });
 
     const dbUser = await prisma.user.findUnique({
       where: { email: session.user.email },

@@ -33,6 +33,7 @@
     "ekp:a15:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a15-*.test.mjs",
     "ekp:a17:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a17-*.test.mjs",
     "ekp:a24:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a24-*.test.mjs",
+    "ekp:e:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/e*-*.test.mjs",
     "ekp:a12:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/a12-*.test.mjs",
     "ekp:migration:diff": "node scripts/ekp/migration-diff.mjs",
     "ekp:chat:test": "node --import ./scripts/task-12/register-alias-hook.mjs --test scripts/ekp/chat-*.test.mjs",

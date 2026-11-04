@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { S3Client } from "@aws-sdk/client-s3";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { prisma } from "@/lib/prisma";
+import { checkFileFormat } from "@/lib/fileFormats";
 
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
@@ -20,6 +21,12 @@ export async function POST(req) {
         { error: "Missing parameters" },
         { status: 400 }
       );
+    }
+
+    // E11.4: refuse before anything reaches S3.
+    const format = checkFileFormat(fileName);
+    if (!format.ok) {
+      return NextResponse.json({ error: format.reason, code: "UNSUPPORTED_FORMAT" }, { status: 415 });
     }
 
     // ✅ Exact match (case + extension sensitive) — only enforced for

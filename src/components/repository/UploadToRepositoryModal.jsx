@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Upload, FileText, X, AlertCircle, CheckCircle } from "lucide-react";
 import { cn, formatFileSize } from "@/lib/utils";
+import { ACCEPT_ATTRIBUTE, SUPPORTED_FORMATS_TEXT, checkFileFormat } from "@/lib/fileFormats";
 
 const CATEGORIES = [
   "Policies",
@@ -14,18 +15,13 @@ const CATEGORIES = [
   "Other",
 ];
 
-// Kept in sync with the extraction branches in worker/index.js — .doc (legacy
-// binary Word) and .md are NOT handled there, so they're deliberately left
-// out here rather than accepted client-side and failing ingestion silently.
-const ACCEPTED_TYPES = [".pdf", ".docx", ".xlsx", ".xls", ".csv", ".txt"];
+// E11.4: one allow-list shared with the upload APIs and the SharePoint sync.
 const MAX_FILES = 10;
 
 function makeFileEntry(file) {
-  const ext = "." + file.name.split(".").pop().toLowerCase();
   const errors = [];
-  if (!ACCEPTED_TYPES.includes(ext)) {
-    errors.push(`File type ${ext} is not supported`);
-  }
+  const format = checkFileFormat(file.name);
+  if (!format.ok) errors.push(format.reason);
   return {
     id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 9)}`,
     file,
@@ -231,7 +227,7 @@ export default function UploadToRepositoryModal({
               ref={fileInputRef}
               type="file"
               multiple
-              accept={ACCEPTED_TYPES.join(",")}
+              accept={ACCEPT_ATTRIBUTE}
               onChange={(e) => {
                 if (e.target.files?.length) addFiles(e.target.files);
                 e.target.value = "";
@@ -243,7 +239,7 @@ export default function UploadToRepositoryModal({
               Drop files here or click to browse
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Supports PDF, Word (.docx), Excel (.xlsx, .xls), CSV, and TXT — up to {MAX_FILES} files at once
+              Supports {SUPPORTED_FORMATS_TEXT}, up to {MAX_FILES} files at once
             </p>
           </div>
 

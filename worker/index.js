@@ -36,6 +36,8 @@ import { tooLargeFileWrites, isTooLargeToIndex, TOO_LARGE } from "../src/lib/con
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
+import { checkFileFormat, fileExtension } from "../src/lib/fileFormats.js";
+import { AUDIT_EVENTS } from "../src/lib/audit/events.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
 const S3_BUCKET = process.env.S3_BUCKET;
@@ -158,10 +160,8 @@ async function processChunkJob(job) {
 
   // SharePoint pages (A-15) and ServiceNow articles (A-17) arrive as text.
   const isPage = existingDoc.contentType === "page" || existingDoc.contentType === "article";
-  const isSpreadsheet =
-    filename.endsWith(".xlsx") ||
-    filename.endsWith(".xls") ||
-    filename.endsWith(".csv");
+  const ext = fileExtension(filename); // lower-case: "Deck.PDF" is a PDF too
+  const isSpreadsheet = [".xlsx", ".xls", ".csv"].includes(ext);
 
   if (isPage) {
     rawText = buffer.toString("utf8");
@@ -175,7 +175,7 @@ async function processChunkJob(job) {
     sheetChunks = extractedChunks;
     rawText = fullText;
     endExtract();
-  } else if (filename.endsWith(".pdf")) {
+  } else if (ext === ".pdf") {
     rawText = await extractPdfText(buffer);
 
     // Detect scanned PDF: text layer is absent or too short to be useful
@@ -206,10 +206,10 @@ async function processChunkJob(job) {
     } else {
       endExtract();
     }
-  } else if (filename.endsWith(".txt")) {
+  } else if (ext === ".txt") {
     rawText = buffer.toString("utf8");
     endExtract();
-  } else if (filename.endsWith(".docx")) {
+  } else if (ext === ".docx") {
     const result = await mammoth.extractRawText({ buffer });
     rawText = result.value;
     endExtract();
@@ -1121,6 +1121,7 @@ async function processSharePointSyncJob(job) {
   let filesFailed = 0;
   let aclRefreshed = 0;
   let filesTooLarge = 0; // A-24: counted in filesFound too (they still need review)
+  const skipped = []; // E11.4 / A-24: [{ name, reason }], files this run didn't index
   let runError = null;
   let scopeConfig = integration.scopeConfig;
 
@@ -1168,10 +1169,19 @@ async function processSharePointSyncJob(job) {
 
       for (const change of changes) {
         if (change.deleted) continue; // FR-2 MVP: no orphan/archive handling yet (Open Question #4)
+        // E11.4: a format KMS can't read is never downloaded; it's listed with the reason.
+        const format = checkFileFormat(change.name);
+        if (!format.ok) {
+          skipped.push({ name: change.name, reason: format.reason, webUrl: change.webUrl || null });
+          continue;
+        }
         try {
           const result = await syncOneFile({ change, integration, site, connectedByUserId, accessToken, aclResolver, siteDriveId });
           if (!result.skipped) filesFound++;
-          if (result.tooLarge) filesTooLarge++;
+          if (result.tooLarge) {
+            filesTooLarge++;
+            skipped.push({ name: change.name, reason: "Above the size limit: only its name, link and permissions are kept.", webUrl: change.webUrl || null });
+          }
           if (result.aclRefreshed) aclRefreshed++;
         } catch (err) {
           console.error(`❌ Failed to sync file "${change.name}" (${change.externalId}):`, err.message);
@@ -1247,13 +1257,35 @@ async function processSharePointSyncJob(job) {
       finishedAt: new Date(),
       filesFound,
       filesFailed,
+      filesSkipped: skipped.length,
       error: runError,
     },
   });
+  await recordSkippedFiles({ orgId: integration.orgId, syncRunId, skipped });
 
-  console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed} aclRefreshed=${aclRefreshed} tooLarge=${filesTooLarge}`);
+  console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed} skipped=${skipped.length} aclRefreshed=${aclRefreshed} tooLarge=${filesTooLarge}`);
 
   await sendDigest({ orgId: integration.orgId, source: "SharePoint", filesFound });
+}
+
+// E11.4 / A-24: the files a sync run didn't index, with the reason, in one
+// audit entry per run (the sync history shows them). Non-fatal.
+const MAX_SKIPPED_LISTED = 500;
+async function recordSkippedFiles({ orgId, syncRunId, skipped }) {
+  if (!skipped.length) return;
+  try {
+    await prisma.auditLog.create({
+      data: {
+        orgId,
+        action: AUDIT_EVENTS.SYNC_FILES_SKIPPED,
+        entityType: "SyncRun",
+        entityId: syncRunId,
+        metadata: { count: skipped.length, files: skipped.slice(0, MAX_SKIPPED_LISTED) },
+      },
+    });
+  } catch (err) {
+    console.error("⚠️ Couldn't record the skipped files of the sync run:", err.message);
+  }
 }
 
 // FR-7 — one digest email per sync run (not one per file), only when

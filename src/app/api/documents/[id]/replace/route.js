@@ -8,6 +8,7 @@ import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { prisma } from "@/lib/prisma";
 import { AUDIT_EVENTS } from "@/lib/audit/events";
 import { snapshotVersion } from "@/lib/lifecycle/versioning.mjs";
+import { checkFileFormat } from "@/lib/fileFormats";
 
 // Replace the binary behind the same logical document. The normal worker pipeline
 // deletes/rebuilds chunks, embeddings, classifications, and pending duplicate flags.
@@ -21,6 +22,8 @@ export async function POST(req, { params }) {
   const body = await req.json();
   const s3Key = String(body?.s3Key || "").trim();
   if (!s3Key) return NextResponse.json({ error: "s3Key is required" }, { status: 400 });
+  const format = checkFileFormat(s3Key.split("/").pop()); // E11.4
+  if (!format.ok) return NextResponse.json({ error: format.reason, code: "UNSUPPORTED_FORMAT" }, { status: 415 });
 
   const doc = await prisma.document.findFirst({
     where: { id, user: { email: session.user.email } },
