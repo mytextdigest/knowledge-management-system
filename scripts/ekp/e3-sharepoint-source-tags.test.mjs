@@ -140,3 +140,18 @@ test("document API returns the tags and the page shows them", () => {
   const page = readFileSync(new URL("../../src/app/(app)/document/page.jsx", import.meta.url), "utf8");
   assert.match(page, /<SourceTagsPanel tags=\{doc\?\.sourceTags\} \/>/);
 });
+
+test("real NGI payload: encoded column name, full-width ampersand from the term store", () => {
+  // /sites/Engineering only-emp1.docx, 2026-11-04 (Graph listItem fields)
+  const fields = {
+    NGI_x0020_Topics: [
+      { Label: "Product Development", TermGuid: "1e117ab2-e3ba-4b8b-9d9b-ca51b94b517d", WssId: 2 },
+      { Label: "Security \uFF06 Compliance", TermGuid: "8a3aee31-bd31-49d3-b02c-a40742f7170a", WssId: 3 },
+    ],
+  };
+  const rows = taxonomyValues(fields, columnInfo([{ name: "NGI_x0020_Topics", displayName: "NGI Topics" }]));
+  assert.deepEqual(rows.map((r) => [r.fieldName, r.fieldDisplayName, r.label]), [
+    ["NGI_x0020_Topics", "NGI Topics", "Product Development"],
+    ["NGI_x0020_Topics", "NGI Topics", "Security & Compliance"],
+  ]);
+});

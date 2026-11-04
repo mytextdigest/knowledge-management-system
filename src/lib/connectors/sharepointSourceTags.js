@@ -28,7 +28,8 @@ const pick = (obj, name) => obj[name] ?? obj[name[0].toLowerCase() + name.slice(
 function termValue(value) {
   if (!value || typeof value !== "object") return null;
   const termGuid = String(pick(value, "TermGuid") || "").toLowerCase();
-  const label = String(pick(value, "Label") || "").trim();
+  // The term store stores "&" as a full-width ampersand (U+FF06) in labels.
+  const label = String(pick(value, "Label") || "").replace(/\uFF06/g, "&").trim();
   if (!GUID.test(termGuid) || termGuid === EMPTY_GUID || !label) return null;
   return { label, termGuid };
 }
