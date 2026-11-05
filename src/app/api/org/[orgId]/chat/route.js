@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-import { hybridOrgSearch } from "@/lib/hybridSearch";
+import { search } from "@/lib/search/searchService";
 import { expandQuery } from "@/lib/queryExpansion";
 import { extractQuestionEntities } from "@/lib/entityExtraction";
 import { getRecentMemory, recordMemoryTopics } from "@/lib/orgMemberMemory";
@@ -342,7 +342,9 @@ export async function POST(req, { params }) {
   }
 
   if (chunks.length === 0 && workflowRequest.action !== "stop") {
-    chunks = await hybridOrgSearch({
+    const { results: retrievedChunks } = await search({
+        kind: "chat",
+        query: question,
       queries: [...expandedQueries, ...extraKeywordQueries],
       embeddings: queryEmbeddings,
       userId: user.id,
@@ -355,6 +357,7 @@ export async function POST(req, { params }) {
       feedbackQuestion: question,
       exactTermQuestion: question,
     });
+    chunks = retrievedChunks;
 
     if (workflowRequest.action === "start") {
       const candidateIds = [...new Set(chunks.map((chunk) => chunk.document_id).filter(Boolean))];

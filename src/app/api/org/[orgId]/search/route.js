@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-import { hybridOrgSearch } from "@/lib/hybridSearch";
+import { search } from "@/lib/search/searchService";
 import { expandQuery } from "@/lib/queryExpansion";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 
@@ -46,7 +46,9 @@ export async function POST(req, { params }) {
   });
   const queryEmbeddings = embRes.data.map((item) => item.embedding);
 
-  const rows = await hybridOrgSearch({
+  const { results: rows, searchEventId } = await search({
+    kind: "search",
+    query,
     queries: expandedQueries,
     embeddings: queryEmbeddings,
     userId: user.id,
@@ -59,6 +61,7 @@ export async function POST(req, { params }) {
   });
 
   return NextResponse.json({
+    searchEventId,
     retrieval: {
       mode: "hybrid",
       scope,
