@@ -4,7 +4,7 @@
 // speaker notes), one card per slide, from the chunks the worker stored
 // (metadata.kind === "slide", worker/extractPptx.js). `activeSlide` (from
 // /document?id=…&slide=7, the link in a "slide 7" citation) scrolls to that
-// slide and highlights it.
+// slide and highlights it. Rendered inside FileViewerFrame, which scrolls.
 
 import { useEffect, useMemo, useRef } from "react";
 import { EyeOff, StickyNote } from "lucide-react";
@@ -23,7 +23,7 @@ export default function SlideDeckViewer({ chunks, activeSlide = null }) {
 
   if (!slides.length) {
     return (
-      <div className="w-full h-full flex items-center justify-center rounded-lg border border-gray-200 bg-white text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+      <div className="w-full h-full flex items-center justify-center p-6 text-center text-sm text-gray-500 dark:text-gray-400">
         The slides are still being processed. You can download the original file in the meantime.
       </div>
     );
@@ -33,7 +33,7 @@ export default function SlideDeckViewer({ chunks, activeSlide = null }) {
   const rows = Array.from({ length: total }, (_, i) => bySlide.get(i + 1) || { slide: i + 1, empty: true });
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3 dark:border-gray-700 dark:bg-gray-950">
+    <div ref={containerRef} className="w-full min-h-full bg-gray-50 p-4 space-y-3 dark:bg-gray-950">
       <p className="text-xs text-gray-500 dark:text-gray-400">
         {total} slide{total === 1 ? "" : "s"} · the text KMS read from each slide, with speaker notes
       </p>

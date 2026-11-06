@@ -40,7 +40,8 @@ export default function DocumentFullscreenModal({ open, onClose, doc, ext, docxH
 
   if (!open || !doc) return null;
 
-  const supportsZoom = ['pdf', 'txt', 'docx'].includes(ext);
+  // The PDF viewer has its own toolbar (zoom, pages, print); these buttons zoom text.
+  const supportsZoom = ['txt', 'docx'].includes(ext);
 
   return (
     <AnimatePresence>
@@ -106,7 +107,7 @@ export default function DocumentFullscreenModal({ open, onClose, doc, ext, docxH
           {/* Content */}
           <div className="flex-1 min-h-0 overflow-auto bg-gray-100 dark:bg-gray-900">
             {ext === 'pdf' && (
-              <PdfViewer fileUrl={doc.fileUrl} zoom={zoom} />
+              <PdfViewer fileUrl={doc.fileUrl} filename={doc.filename} />
             )}
 
             {ext === 'txt' && (
@@ -130,7 +131,7 @@ export default function DocumentFullscreenModal({ open, onClose, doc, ext, docxH
               </div>
             )}
 
-            {!supportsZoom && (
+            {!supportsZoom && ext !== 'pdf' && (
               <div className="flex items-center justify-center h-full">
                 <p className="text-gray-500 dark:text-gray-400">Unsupported file type: {ext}</p>
               </div>

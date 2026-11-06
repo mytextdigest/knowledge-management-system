@@ -18,6 +18,10 @@ import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
 import PdfViewer from "@/components/documents/PdfViewer";
 import SlideDeckViewer from "@/components/documents/SlideDeckViewer";
+import FileViewerFrame from "@/components/documents/viewer/FileViewerFrame";
+import { ViewerToolbarHost } from "@/components/documents/viewer/ViewerToolbar";
+import { slidesFromChunks } from "@/lib/slideCitations";
+import { printHtml } from "@/lib/printDocument";
 import SourceTagsPanel from "@/components/documents/SourceTagsPanel";
 import DocumentFullscreenModal from "@/components/documents/DocumentFullscreenModal";
 import { copySummary, printSummary } from '@/lib/summaryActions';
@@ -32,6 +36,16 @@ import OpenInSourceLink from '@/components/documents/OpenInSourceLink';
 
 
 const WORDS_PER_PAGE = 400;
+
+const escapeHtml = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Wraps a document body for the system print dialog (from My Text Digest).
+const printableHtml = (title, body) => `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(title)}</title>
+<style>body{font-family:Georgia,serif;max-width:760px;margin:32px auto;color:#111;line-height:1.6}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px}h2{font-size:16px;margin:24px 0 6px}</style>
+</head><body>${body}</body></html>`;
+
+// Signed file links from the document API last an hour; refresh them before that.
+const FILE_LINK_TTL_MS = 50 * 60 * 1000;
 
 function DocumentContent() {
   const searchParams = useSearchParams();
@@ -67,6 +81,7 @@ function DocumentContent() {
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
   // The left header row's slot that viewer toolbars render into.
   const [toolbarHost, setToolbarHost] = useState(null);
+  const toolbarSlot = useMemo(() => ({ host: toolbarHost }), [toolbarHost]);
 
   // Reading Guide state
   const [pagesRead, setPagesRead] = useState(0);
@@ -280,6 +295,24 @@ function DocumentContent() {
     if (!response.ok || !data?.id) return null;
     return data;
   }, []);
+
+  // Download / Open in new tab for the viewers (viewer/ViewerToolbar.jsx).
+  // Reuses the links from the last load and fetches fresh ones (same access
+  // check) once they're near expiry, without reloading the viewer.
+  const fileLinksRef = useRef(null);
+  useEffect(() => {
+    fileLinksRef.current = doc?.fileUrl
+      ? { fileUrl: doc.fileUrl, downloadUrl: doc.fileDownloadUrl, at: Date.now() }
+      : null;
+  }, [doc?.fileUrl, doc?.fileDownloadUrl]);
+  const getFileLinks = useCallback(async () => {
+    const cached = fileLinksRef.current;
+    if (cached && Date.now() - cached.at < FILE_LINK_TTL_MS) return cached;
+    const fresh = await fetchDocument(id);
+    if (!fresh?.fileUrl) return cached;
+    fileLinksRef.current = { fileUrl: fresh.fileUrl, downloadUrl: fresh.fileDownloadUrl, at: Date.now() };
+    return fileLinksRef.current;
+  }, [fetchDocument, id]);
 
   // Load document
   useEffect(() => {
@@ -810,48 +843,78 @@ function DocumentContent() {
 
 
 
+  // The viewers render frameless; their toolbars portal into the left header row.
   const renderDocument = () => {
     if (!doc) return null;
 
     const ext = doc.filename.split(".").pop().toLowerCase();
+    const fileLinks = doc.fileUrl ? getFileLinks : undefined;
 
     // A SharePoint page (A-15) or ServiceNow article (A-17) has no file; show its text.
     if (ext === "txt" || doc.contentType === "page" || doc.contentType === "article") {
       return (
-        <div ref={docScrollRef} onScroll={handleDocScroll} className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
-          <pre className="whitespace-pre-wrap text-gray-900 dark:text-gray-100 p-6 font-mono text-sm leading-relaxed max-w-5xl mx-auto">
+        <FileViewerFrame
+          ref={docScrollRef}
+          onScroll={handleDocScroll}
+          getFileLinks={fileLinks}
+          onPrint={() => printHtml(printableHtml(doc.filename, `<pre style="white-space:pre-wrap;font:13px/1.6 ui-monospace,monospace">${escapeHtml(doc.content)}</pre>`))}
+        >
+          <pre className="whitespace-pre-wrap text-gray-900 dark:text-gray-100 p-6 font-mono text-sm leading-relaxed">
             {doc.content}
           </pre>
-        </div>
+        </FileViewerFrame>
       );
     }
 
     if (ext === "pdf") {
       return (
-        <div className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <PdfViewer fileUrl={doc.fileUrl} onPageChange={handleDocPageChange} onTotalPages={setPdfTotalPages} />
-        </div>
-      );
-    }
-
-    if (ext === "pptx") {
-      return <SlideDeckViewer chunks={doc.chunks} activeSlide={activeSlide} />;
-    }
-
-    if (ext === "docx") {
-      return (
-        <div ref={docScrollRef} onScroll={handleDocScroll} className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
-          <div
-            className="prose prose-gray dark:prose-invert max-w-none p-6"
-            dangerouslySetInnerHTML={{ __html: docxHtml || "<p>Loading...</p>" }}
+        <div className="w-full h-full overflow-hidden">
+          <PdfViewer
+            fileUrl={doc.fileUrl}
+            getFileLinks={fileLinks}
+            filename={doc.filename}
+            onPageChange={handleDocPageChange}
+            onTotalPages={setPdfTotalPages}
           />
         </div>
       );
     }
 
+    if (ext === "pptx") {
+      const { slides } = slidesFromChunks(doc.chunks);
+      return (
+        <FileViewerFrame
+          getFileLinks={fileLinks}
+          onPrint={slides.length ? () => printHtml(printableHtml(doc.filename, slides.map((sl) =>
+            `<h2>Slide ${sl.slide}${sl.title ? `: ${escapeHtml(sl.title)}` : ""}</h2>` +
+            (sl.body ? `<p style="white-space:pre-wrap">${escapeHtml(sl.body)}</p>` : "") +
+            (sl.notes ? `<p style="white-space:pre-wrap;color:#555"><em>Speaker notes:</em> ${escapeHtml(sl.notes)}</p>` : "")
+          ).join(""))) : undefined}
+        >
+          <SlideDeckViewer chunks={doc.chunks} activeSlide={activeSlide} />
+        </FileViewerFrame>
+      );
+    }
+
+    if (ext === "docx") {
+      return (
+        <FileViewerFrame
+          ref={docScrollRef}
+          onScroll={handleDocScroll}
+          getFileLinks={fileLinks}
+          onPrint={docxHtml ? () => printHtml(printableHtml(doc.filename, docxHtml)) : undefined}
+        >
+          <div
+            className="prose prose-gray dark:prose-invert max-w-none p-6"
+            dangerouslySetInnerHTML={{ __html: docxHtml || "<p>Loading...</p>" }}
+          />
+        </FileViewerFrame>
+      );
+    }
+
     if (["xlsx", "xls", "csv"].includes(ext)) {
       return (
-        <div className="w-full h-full overflow-auto bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-5">
+        <FileViewerFrame getFileLinks={fileLinks} contentClassName="p-4 space-y-5">
           {sheets.length === 0 ? (
             <div className="text-sm text-gray-500 dark:text-gray-400">Spreadsheet data is still being processed. You can download the original file in the meantime.</div>
           ) : sheets.map((sheet) => (
@@ -877,12 +940,12 @@ function DocumentContent() {
               {(sheet.previewRows || []).length === 0 ? <p className="p-3 text-xs text-gray-500">No data rows extracted for this sheet.</p> : null}
             </div>
           ))}
-        </div>
+        </FileViewerFrame>
       );
     }
 
     return (
-      <div className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center">
+      <div className="w-full h-full flex items-center justify-center">
         <p className="text-gray-500 dark:text-gray-400">Unsupported file type: {ext}</p>
       </div>
     );
@@ -992,7 +1055,9 @@ function DocumentContent() {
       ))}
 
       <div className="flex-1 min-h-0 overflow-hidden">
-        {renderDocument()}
+        <ViewerToolbarHost.Provider value={toolbarSlot}>
+          {renderDocument()}
+        </ViewerToolbarHost.Provider>
       </div>
     </div>
   );
