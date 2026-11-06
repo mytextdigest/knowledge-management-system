@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 // Drawing happens off-screen and is then copied in, so on zoom the old bitmap
 // stays visible (stretched) until the sharp one is ready instead of flashing
 // blank. Leaving `active` frees the bitmap.
+// KMS: an invisible text layer over the drawing keeps PDF text selectable and
+// copyable, as the previous KMS viewer did (.pdfTextLayer in globals.css).
 //
 // size: unscaled { w, h } in CSS px at zoom 1 (PDF points × 96/72), already
 // swapped for rotation. The page is shown at size × scale.
@@ -16,6 +18,7 @@ const PdfPage = forwardRef(function PdfPage(
   ref
 ) {
   const canvasRef = useRef(null);
+  const textLayerRef = useRef(null);
   const [drawnKey, setDrawnKey] = useState(null);
   const key = `${scale.toFixed(4)}|${rotation}`;
 
@@ -25,6 +28,7 @@ const PdfPage = forwardRef(function PdfPage(
       if (drawnKey && canvasRef.current) {
         canvasRef.current.width = 0;
         canvasRef.current.height = 0;
+        if (textLayerRef.current) textLayerRef.current.innerHTML = "";
         setDrawnKey(null);
       }
       return;
@@ -33,6 +37,7 @@ const PdfPage = forwardRef(function PdfPage(
 
     let cancelled = false;
     let task = null;
+    let textTask = null;
     // Re-draws after a zoom wait a beat, so a burst of zoom clicks only draws once.
     const timer = setTimeout(async () => {
       try {
@@ -51,6 +56,22 @@ const PdfPage = forwardRef(function PdfPage(
         canvas.height = off.height;
         canvas.getContext("2d").drawImage(off, 0, 0);
         setDrawnKey(key);
+
+        // Selectable text, laid out at the page's CSS size (no device-pixel scaling).
+        const layer = textLayerRef.current;
+        if (layer) {
+          const textContent = await page.getTextContent();
+          if (cancelled) return;
+          const pdfjs = await import("pdfjs-dist");
+          layer.innerHTML = "";
+          textTask = pdfjs.renderTextLayer({
+            textContent,
+            container: layer,
+            viewport: page.getViewport({ scale: scale * PT_TO_PX, rotation: (page.rotate + rotation) % 360 }),
+            textDivs: [],
+          });
+          await textTask?.promise;
+        }
       } catch (err) {
         if (!cancelled && err?.name !== "RenderingCancelledException") {
           console.error(`PDF page ${pageNum} render error:`, err);
@@ -62,6 +83,7 @@ const PdfPage = forwardRef(function PdfPage(
       cancelled = true;
       clearTimeout(timer);
       task?.cancel();
+      textTask?.cancel?.();
     };
   }, [pdf, pageNum, key, active, drawnKey, scale, rotation]);
 
@@ -77,6 +99,7 @@ const PdfPage = forwardRef(function PdfPage(
       {...rest}
     >
       <canvas ref={canvasRef} className="absolute inset-0 block" style={{ width, height }} />
+      <div ref={textLayerRef} className="pdfTextLayer absolute inset-0" />
       {children}
     </div>
   );
