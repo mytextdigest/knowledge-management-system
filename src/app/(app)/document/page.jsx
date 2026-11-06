@@ -296,6 +296,20 @@ function DocumentContent() {
     return data;
   }, []);
 
+  // Re-fetches (summary polling, workflow and lifecycle changes) return newly
+  // signed file links. Keep the ones the viewer already has while they point at
+  // the same file, so the viewer doesn't reload the document on every fetch.
+  // getFileLinks below refreshes them for Download / Open in new tab.
+  const applyFreshDoc = useCallback((fresh) => {
+    if (!fresh) return;
+    const base = (url) => String(url || "").split("?")[0];
+    setDoc((prev) =>
+      prev && prev.id === fresh.id && prev.fileUrl && base(prev.fileUrl) === base(fresh.fileUrl)
+        ? { ...fresh, fileUrl: prev.fileUrl, fileDownloadUrl: prev.fileDownloadUrl }
+        : fresh
+    );
+  }, []);
+
   // Download / Open in new tab for the viewers (viewer/ViewerToolbar.jsx).
   // Reuses the links from the last load and fetches fresh ones (same access
   // check) once they're near expiry, without reloading the viewer.
@@ -327,7 +341,7 @@ function DocumentContent() {
           return;
         }
 
-        setDoc(data);
+        applyFreshDoc(data);
         void fetch(`/api/documents/${id}/interactions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -453,7 +467,7 @@ function DocumentContent() {
           return;
         }
 
-        setDoc(data);
+        applyFreshDoc(data);
 
         if (data?.summary) {
           let parsed;
@@ -531,7 +545,10 @@ function DocumentContent() {
         console.error("Failed to start/load conversation:", e);
       }
     })();
-  }, [doc]);
+    // Once per document: re-fetches of `doc` (e.g. summary polling every 3s)
+    // must not start a new conversation each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id]);
 
   // regenerate document summary
   // Generate summary when user clicks "Regenerate summary"
@@ -569,7 +586,7 @@ function DocumentContent() {
         return;
       }
 
-      setDoc(fresh);
+      applyFreshDoc(fresh);
 
       // If summary already present (rare), update UI immediately
       if (fresh?.summary) {
@@ -606,7 +623,7 @@ function DocumentContent() {
         const polled = await fetchDocument(doc.id);
         if (!polled) continue;
 
-        setDoc(polled);
+        applyFreshDoc(polled);
 
         if (polled?.summary) {
           let parsedSummary;
@@ -671,7 +688,7 @@ function DocumentContent() {
       !isGeneratingSummary
     ) {
       fetchDocument(id).then((data) => {
-        if (data) setDoc(data);
+        if (data) applyFreshDoc(data);
       });
     }
   }, [activeTab, doc, summary, isGeneratingSummary, id, fetchDocument]);
@@ -985,7 +1002,7 @@ function DocumentContent() {
 
   const isRepositoryDoc = doc?.scope === "repository" && Boolean(doc?.orgId);
   const hasDetails = isRepositoryDoc || (doc?.sourceTags?.length ?? 0) > 0;
-  const refreshDoc = () => fetchDocument(id).then((fresh) => fresh && setDoc(fresh));
+  const refreshDoc = () => fetchDocument(id).then((fresh) => fresh && applyFreshDoc(fresh));
   const backHref = doc?.projectId
     ? `/project?id=${doc.projectId}`
     : doc?.orgId
@@ -1117,7 +1134,7 @@ function DocumentContent() {
           ) : activeTab === 'versions' ? (
             <div className="overflow-y-auto h-full"><DocumentVersionsPanel documentId={id} /></div>
           ) : activeTab === 'workflow' && doc?.orgId ? (
-            <div className="overflow-y-auto h-full"><DocumentWorkflowPanel documentId={id} orgId={doc.orgId} onLifecycleChange={() => fetchDocument(id).then((fresh) => fresh && setDoc(fresh))} /></div>
+            <div className="overflow-y-auto h-full"><DocumentWorkflowPanel documentId={id} orgId={doc.orgId} onLifecycleChange={() => fetchDocument(id).then((fresh) => fresh && applyFreshDoc(fresh))} /></div>
           ) : activeTab === 'history' ? (
              <div className="p-4 overflow-y-auto h-full"><AuditEventList url={id ? `/api/documents/${encodeURIComponent(id)}/history` : null} title="Document history" documentMode /></div>
            ) : activeTab === 'guide' ? (
