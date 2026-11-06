@@ -5,6 +5,7 @@ import OpenAI from "openai";
 import { resolveOpenAIKey } from "@/utils/key_helper";
 import { activeRequests } from "@/lib/requestCancellation";
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
+import { documentIndexState, hasIncompleteIndex, queueReprocessing } from "@/lib/documentReprocess";
 
 // const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -68,6 +69,20 @@ export async function POST(req, { params }) {
     }
 
     const openai = new OpenAI({ apiKey });
+
+    // A ready document whose chunks are missing search vectors was left
+    // half-processed. Answer from its text as usual (step 6 embeds what's
+    // needed for this chat), and queue the worker's embed job once, which
+    // rebuilds the vectors and then the summary.
+    let notice = null;
+    try {
+      if (hasIncompleteIndex(doc, await documentIndexState(prisma, documentId))) {
+        await queueReprocessing(prisma, doc);
+        notice = "This document wasn't fully processed, so its search index and summary are incomplete. KMS has started reprocessing it; this usually takes a minute or two. Answers may be less complete until it's done.";
+      }
+    } catch (err) {
+      console.error("Couldn't queue reprocessing for document", documentId, err);
+    }
 
     // ----------------------------
     // 3) ENSURE CONVERSATION EXISTS
@@ -340,7 +355,8 @@ export async function POST(req, { params }) {
     return NextResponse.json({
       success: true,
       conversationId,
-      answer: assistantText
+      answer: assistantText,
+      ...(notice ? { notice, reprocessing: true } : {})
     });
 
   } catch (err) {

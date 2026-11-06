@@ -45,14 +45,15 @@ export async function POST(req, { params }) {
     }
 
     // A-14: a no-copy SharePoint document has no filePath; the summary is
-    // rebuilt from its stored chunks, so it can still be regenerated.
-    if (!doc.filePath && !canStreamFromSource(doc))
+    // rebuilt from its stored chunks, so it can still be regenerated. So can
+    // any document whose original file is gone but whose chunks are stored.
+    if (!doc.filePath && !canStreamFromSource(doc) && !(await prisma.chunk.count({ where: { documentId } })))
       return NextResponse.json(
         { error: "Document filePath missing (cannot regenerate)" },
         { status: 400 }
       );
 
-    const filename = doc.filename || doc.filePath.split("/").pop();
+    const filename = doc.filename || doc.filePath?.split("/").pop() || "document";
 
     // Update status → regenerating (treated like summarizing)
     await prisma.document.update({

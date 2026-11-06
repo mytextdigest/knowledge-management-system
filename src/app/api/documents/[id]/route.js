@@ -6,6 +6,7 @@ import { getSetting } from "@/lib/settings";
 import { calculatePurgeAfter } from "@/lib/lifecycle/softDelete.mjs";
 import { generateSignedUrl, generateSignedDownloadUrl } from "@/lib/s3SignedUrl";
 import { canStreamFromSource, sourcePreviewUrl } from "@/lib/documentSource";
+import { PROCESSING_STATUSES } from "@/lib/documentStatus";
 import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
 import { resolveOrgRole, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
 import { canViewDocument, filterAccessibleDocuments } from "@/lib/access/documentAccess";
@@ -93,10 +94,6 @@ export async function GET(req, { params }) {
     downloadUrl = sourcePreviewUrl(doc.id, { download: true });
   }
 
-  const PROCESSING_STATUSES = new Set([
-    'queued', 'extracting', 'running_ocr', 'chunked',
-    'embedding', 'embedded', 'summarizing', 'clustering',
-  ]);
 
   const rawConflicts = [
     ...doc.conflictsAsDocA.map((c) => ({
@@ -190,7 +187,7 @@ export async function GET(req, { params }) {
     summaryStatus: effectiveSummaryStatus(doc.summary, summaryReview),
     permissions: {
       canManage,
-      canRegenerate: canManage && (!!doc.filePath || canStreamFromSource(doc)) && !PROCESSING_STATUSES.has(doc.status),
+      canRegenerate: canManage && (!!doc.filePath || canStreamFromSource(doc) || (doc.chunks?.length ?? 0) > 0) && !PROCESSING_STATUSES.has(doc.status),
       canAsk: canManage,
       canClearChat: canManage,
       canStar: canManage,

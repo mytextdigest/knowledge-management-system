@@ -22,6 +22,7 @@ import FileViewerFrame from "@/components/documents/viewer/FileViewerFrame";
 import { ViewerToolbarHost } from "@/components/documents/viewer/ViewerToolbar";
 import { slidesFromChunks } from "@/lib/slideCitations";
 import { printHtml } from "@/lib/printDocument";
+import { isProcessingStatus } from "@/lib/documentStatus";
 import SourceTagsPanel from "@/components/documents/SourceTagsPanel";
 import DocumentFullscreenModal from "@/components/documents/DocumentFullscreenModal";
 import { copySummary, printSummary } from '@/lib/summaryActions';
@@ -456,27 +457,24 @@ function DocumentContent() {
 
   }, [doc]);
 
+  // Poll while the worker is on the document (status queued … clustering);
+  // stop once it settles, with or without a summary. A ready document with no
+  // summary shows "Regenerate" on the Summary tab instead of waiting forever.
+  const isProcessing = isProcessingStatus(doc?.status);
   useEffect(() => {
-    let interval = null;
-  
-    const pollSummary = async () => {
+    if (!id || !isProcessing) return;
+    const interval = setInterval(async () => {
       try {
         const data = await fetchDocument(id);
-        if (!data) {
-          clearInterval(interval);
-          return;
-        }
-
+        if (!data) return clearInterval(interval);
         applyFreshDoc(data);
-
-        if (data?.summary) {
+        if (data.summary) {
           let parsed;
           try {
             parsed = JSON.parse(data.summary);
           } catch {
             parsed = { overview: data.summary, keyPoints: [] };
           }
-  
           setSummary({
             title: data.filename,
             overview: parsed.overview,
@@ -486,20 +484,13 @@ function DocumentContent() {
             documentType: data.filename.split(".").pop().toUpperCase(),
             lastModified: new Date(data.created_at).toLocaleDateString(),
           });
-  
-          clearInterval(interval);
         }
       } catch (err) {
-        console.error("Error polling summary:", err);
+        console.error("Error polling document:", err);
       }
-    };
-  
-    if (doc && !doc.summary) {
-      interval = setInterval(pollSummary, 3000);
-    }
-  
+    }, 3000);
     return () => clearInterval(interval);
-  }, [id, doc, fetchDocument]);
+  }, [id, isProcessing, fetchDocument, applyFreshDoc]);
 
 
   useEffect(() => {
@@ -678,20 +669,6 @@ function DocumentContent() {
   };
 
 
-  // Generate summary when switching to summary tab
-  useEffect(() => {
-    if (
-      activeTab === "summary" &&
-      doc &&
-      !summary &&
-      doc.status === "ready" &&
-      !isGeneratingSummary
-    ) {
-      fetchDocument(id).then((data) => {
-        if (data) applyFreshDoc(data);
-      });
-    }
-  }, [activeTab, doc, summary, isGeneratingSummary, id, fetchDocument]);
 
 
   //  --- Asking document queries ----
@@ -743,6 +720,13 @@ function DocumentContent() {
       if (res?.success) {
         setChat(prev => [
           ...prev,
+          // The document was half-processed and the server queued reprocessing.
+          ...(res.notice ? [{
+            id: `notice-${Date.now()}`,
+            role: "system",
+            content: res.notice,
+            timestamp: new Date()
+          }] : []),
           {
             id: `assistant-${Date.now()}-${Math.random()}`,
             role: "assistant",
@@ -750,6 +734,8 @@ function DocumentContent() {
             timestamp: new Date()
           }
         ]);
+        // Pick up the new status so the page polls until reprocessing finishes.
+        if (res.reprocessing) fetchDocument(id).then(applyFreshDoc);
   
         if (res.conversationId && res.conversationId !== conversationId) {
           setConversationId(res.conversationId);
@@ -869,17 +855,25 @@ function DocumentContent() {
 
     const ext = doc.filename.split(".").pop().toLowerCase();
     const fileLinks = doc.fileUrl ? getFileLinks : undefined;
+    // The original file is gone (no stored copy, no source to stream from);
+    // slides and spreadsheets render from chunks, everything else from its text.
+    const fileMissing = !doc.fileUrl && !["pptx", "xlsx", "xls", "csv"].includes(ext);
 
     // A SharePoint page (A-15) or ServiceNow article (A-17) has no file; show its text.
-    if (ext === "txt" || doc.contentType === "page" || doc.contentType === "article") {
+    if (ext === "txt" || doc.contentType === "page" || doc.contentType === "article" || fileMissing) {
       return (
         <FileViewerFrame
           {...scrollProps}
           getFileLinks={fileLinks}
           onPrint={() => printHtml(printableHtml(doc.filename, `<pre style="white-space:pre-wrap;font:13px/1.6 ui-monospace,monospace">${escapeHtml(doc.content)}</pre>`))}
         >
+          {fileMissing && ext !== "txt" && (
+            <p role="status" className="mx-6 mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+              The original file isn&apos;t available, so this is the text KMS extracted from it.
+            </p>
+          )}
           <pre className="whitespace-pre-wrap text-gray-900 dark:text-gray-100 p-6 font-mono text-sm leading-relaxed">
-            {doc.content}
+            {doc.content || "No text was extracted from this document."}
           </pre>
         </FileViewerFrame>
       );
@@ -1617,17 +1611,26 @@ function DocumentContent() {
                 <div className="flex items-center justify-center h-full">
                   <div className="text-center">
                     <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600 dark:text-gray-400 mb-4">
-                      No summary available
+                    <p className="text-gray-900 dark:text-gray-100 font-medium mb-1">
+                      {isProcessing ? "The summary will appear when processing finishes" : "This document has no summary"}
                     </p>
-                    <Button
-                      onClick={generateSummary}
-                      disabled={!canRegenerateSummary || isGeneratingSummary}
-                      className="flex items-center space-x-2"
-                    >
-                      <BarChart3 className="h-4 w-4" />
-                      <span>Generate Summary</span>
-                    </Button>
+                    {!isProcessing && (
+                      <p className="max-w-sm mx-auto text-sm text-gray-500 dark:text-gray-400 mb-4">
+                        {canRegenerateSummary
+                          ? "Processing finished without one. Regenerate it from the document's text."
+                          : "Processing finished without one. Ask an owner or department admin of this document to regenerate it."}
+                      </p>
+                    )}
+                    {!isProcessing && canRegenerateSummary && (
+                      <Button
+                        onClick={generateSummary}
+                        disabled={isGeneratingSummary}
+                        className="inline-flex items-center space-x-2"
+                      >
+                        <BarChart3 className="h-4 w-4" />
+                        <span>Regenerate summary</span>
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
