@@ -1007,6 +1007,20 @@ function DocumentContent() {
       key: 'outdated',
       body: 'May be outdated: this document has been flagged for review.',
     },
+    // Processing stopped part-way (e.g. no search index); Regenerate finishes it.
+    doc?.processing?.missing && !isProcessing && {
+      key: 'incomplete',
+      body: (
+        <>
+          Processing didn&apos;t finish: the {doc.processing.missing} is missing.{' '}
+          {doc.processing.repairable === false
+            ? 'Upload the document again to process it.'
+            : canRegenerateSummary
+              ? <button type="button" onClick={generateSummary} disabled={isGeneratingSummary} className="font-medium underline disabled:opacity-50">Finish processing</button>
+              : 'Ask an owner or department admin of this document to regenerate it.'}
+        </>
+      ),
+    },
     doc?.supersededById && {
       key: 'superseded',
       body: (

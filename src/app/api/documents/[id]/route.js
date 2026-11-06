@@ -6,7 +6,8 @@ import { getSetting } from "@/lib/settings";
 import { calculatePurgeAfter } from "@/lib/lifecycle/softDelete.mjs";
 import { generateSignedUrl, generateSignedDownloadUrl } from "@/lib/s3SignedUrl";
 import { canStreamFromSource, sourcePreviewUrl } from "@/lib/documentSource";
-import { PROCESSING_STATUSES } from "@/lib/documentStatus";
+import { FILE_PROBLEM_STATUSES, PROCESSING_STATUSES } from "@/lib/documentStatus";
+import { firstMissingStage, pipelineState, STAGE_LABELS } from "@/lib/documentPipeline";
 import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
 import { resolveOrgRole, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
 import { canViewDocument, filterAccessibleDocuments } from "@/lib/access/documentAccess";
@@ -160,6 +161,11 @@ export async function GET(req, { params }) {
       (await canManageDepartment(role, effectiveDepartmentId, user.id)));
   const canManage = Boolean(isOwner) || isDepartmentAdmin;
 
+  // What the worker pipeline left undone (null when complete or still running).
+  const missingStage = PROCESSING_STATUSES.has(doc.status) || FILE_PROBLEM_STATUSES.has(doc.status)
+    ? null
+    : firstMissingStage(doc, await pipelineState(prisma, doc));
+
   // Decision Extraction v2, FR-5: a "pending"/"rejected" decision must not
   // appear on the document page either, unless the viewer is a reviewer for
   // this document's department (or super_admin). Everyone else only sees
@@ -182,12 +188,14 @@ export async function GET(req, { params }) {
     experts,
     fileUrl: signedUrl,
     fileDownloadUrl: downloadUrl,
+    // e.g. { missing: "search index" } for a document whose processing stopped part-way.
+    processing: { missing: missingStage ? (STAGE_LABELS[missingStage] || missingStage) : null, repairable: missingStage !== "unrepairable" },
     created_at: doc.createdAt.toISOString(),
     // E19: AI summaries are labelled until a reviewer approves the current text.
     summaryStatus: effectiveSummaryStatus(doc.summary, summaryReview),
     permissions: {
       canManage,
-      canRegenerate: canManage && (!!doc.filePath || canStreamFromSource(doc) || (doc.chunks?.length ?? 0) > 0) && !PROCESSING_STATUSES.has(doc.status),
+      canRegenerate: canManage && missingStage !== "unrepairable" && !PROCESSING_STATUSES.has(doc.status) && !FILE_PROBLEM_STATUSES.has(doc.status),
       canAsk: canManage,
       canClearChat: canManage,
       canStar: canManage,

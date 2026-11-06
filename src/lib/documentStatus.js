@@ -7,3 +7,8 @@ export const PROCESSING_STATUSES = new Set([
 ]);
 
 export const isProcessingStatus = (status) => PROCESSING_STATUSES.has(status);
+
+// Settled statuses where the file itself is the problem (KMS can't open it,
+// or it's above the SharePoint size limit). Reprocessing can't fix these;
+// the document cards already say what to do.
+export const FILE_PROBLEM_STATUSES = new Set(["password_protected", "unreadable_file", "skipped_too_large"]);

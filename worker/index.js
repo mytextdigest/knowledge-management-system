@@ -34,6 +34,7 @@ import { createAclResolver, aclWriteData } from "../src/lib/connectors/sharepoin
 import { refreshSiteAcls, siteGroupFingerprint } from "../src/lib/connectors/sharepointAclRefresh.js";
 import { syncServiceNow } from "../src/lib/connectors/servicenowSync.js";
 import { tooLargeFileWrites, isTooLargeToIndex, TOO_LARGE } from "../src/lib/connectors/sharepointLargeFiles.js";
+import { pipelineState, firstMissingStage, STAGE_LABELS } from "../src/lib/documentPipeline.js";
 import { createSourceTagReader } from "../src/lib/connectors/sharepointSourceTags.js";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
@@ -1435,10 +1436,38 @@ async function processServiceNowSyncJob(job) {
   await sendDigest({ orgId: integration.orgId, source: "ServiceNow", filesFound: stats.found });
 }
 
+// Repair (document page: Regenerate, or a chat on a half-processed
+// document). Checks what the pipeline left behind *now* and runs the first
+// missing stage; that stage queues the next one exactly as in normal
+// processing (chunk → embed → summarize → cluster → ready), so everything
+// after it is redone too. With nothing missing it regenerates the summary
+// when asked to (the old Regenerate behaviour), else just settles the status.
+async function processRepairJob(job) {
+  const doc = await prisma.document.findUnique({ where: { id: job.docId } });
+  if (!doc) return;
+  const state = await pipelineState(prisma, doc);
+  const stage = firstMissingStage(doc, state);
+  console.log(`🛠️ REPAIR JOB: ${doc.id} — ${stage ? `missing ${STAGE_LABELS[stage] || stage}` : "nothing missing"}`, state);
+
+  const base = { docId: doc.id, filename: doc.filename, projectId: doc.projectId, userId: doc.userId, orgId: doc.orgId };
+  if (stage === "chunk") return processChunkJob({ ...base, s3Key: doc.filePath, visibility: doc.visibility });
+  if (stage === "embed") return processEmbeddingJob(base);
+  if (stage === "summarize") return processSummarizationJob({ ...base, regenerate: false });
+  if (stage === "cluster") return processJob({ type: "cluster", ...base });
+  if (stage === "unrepairable") {
+    console.warn(`⚠️ Can't repair ${doc.id}: no text and no file or source to read it from`);
+    await prisma.document.update({ where: { id: doc.id }, data: { status: "error" } });
+    return;
+  }
+  if (job.regenerateSummary) return processSummarizationJob({ ...base, regenerate: true });
+  await prisma.document.update({ where: { id: doc.id }, data: { status: "ready" } });
+}
+
 async function processJob(job) {
   if (job.type === "chunk")    return processChunkJob(job);
   if (job.type === "embed")    return processEmbeddingJob(job);
   if (job.type === "summarize") return processSummarizationJob(job);
+  if (job.type === "repair") return processRepairJob(job);
   if (job.type === "cluster") {
     const result = await processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
     try { await processKnowledgeContext(job.docId); } catch (error) { console.error("Knowledge context job failed", error); }
@@ -1497,11 +1526,14 @@ async function mainLoop() {
         console.error("Worker job failed (SQS will retry):", err);
         // Only mark an in-flight document as failed. Never regress a ready,
         // completed, or otherwise advanced document due to a late retry.
-        if (["embed", "summarize"].includes(body.type) && body.docId) {
+        if (["embed", "summarize", "repair"].includes(body.type) && body.docId) {
           try {
+            // A repair runs whichever stage was missing, so any in-flight status can be its own.
             const allowedStatuses = body.type === "embed"
               ? ["chunked", "embedding"]
-              : ["embedded", "summarizing"];
+              : body.type === "summarize"
+                ? ["embedded", "summarizing"]
+                : ["queued", "chunked", "embedding", "embedded", "summarizing", "clustering"];
             await prisma.document.updateMany({
               where: { id: body.docId, status: { in: allowedStatuses } },
               data: { status: "error" },
