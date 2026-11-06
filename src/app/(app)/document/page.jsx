@@ -11,10 +11,9 @@ import DocumentReviewPrompt from "@/components/governance/DocumentReviewPrompt";
 import DocumentLifecycleActions from "@/components/governance/DocumentLifecycleActions";
 import Layout from '@/components/layout/Layout';
 import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network, Info } from 'lucide-react';
+import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network, Info, ArrowLeft } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
@@ -28,6 +27,7 @@ import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
 import MessageActions from "@/components/chat/MessageActions";
 import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
 import { useToast, ToastProvider } from "@/components/ui/Toast";
+import DocumentTabs from "@/components/documents/document/DocumentTabs";
 import OpenInSourceLink from '@/components/documents/OpenInSourceLink';
 
 
@@ -66,6 +66,8 @@ function DocumentContent() {
 
   const [expandedMessage, setExpandedMessage] = useState(null);
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+  // The left header row's slot that viewer toolbars render into.
+  const [toolbarHost, setToolbarHost] = useState(null);
 
   // Reading Guide state
   const [pagesRead, setPagesRead] = useState(0);
@@ -918,74 +920,84 @@ function DocumentContent() {
     );
   }
 
-  // Document Preview Panel (Left Column)
-  const documentPanel = (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="h-full flex flex-col space-y-4 pt-2.5"
-    >
-      {/* Header with Back Button */}
-      <div className="flex items-center justify-between">
-        <BackButton
-          href={
-            doc?.projectId
-              ? `/project?id=${doc.projectId}`
-              : doc?.orgId
-                ? `/org/${doc.orgId}/repository`
-                : '/welcome-back'
-          }
-          label={doc?.projectId ? 'Back to Project' : 'Back to Repository'}
-        />
-      </div>
-
-      {/* Document title; ownership, metadata and tags live in the right panel's Details tab */}
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-        <h1 className="min-w-0 truncate text-xl font-bold text-gray-900 dark:text-gray-100" title={doc.filename}>
-          {doc.filename}
-        </h1>
-        {doc.externalUrl && (
-          <OpenInSourceLink url={doc.externalUrl} sourceProvider={doc.sourceProvider} />
-        )}
-      </div>
-
-      {doc?.scope === "repository" && doc?.orgId && (
-        <DocumentReviewPrompt orgId={doc.orgId} documentId={doc.id} />
-      )}
-
-      {doc?.lifecycleSuggestion === 'archived' && <div role="status" className="mb-3 rounded border border-amber-400 bg-amber-50 p-3 text-amber-900">May be outdated — this document has been flagged for review.</div>}
-      {doc?.supersededById && (
-        <div role="status" className="rounded border border-amber-400 bg-amber-50 p-3 text-amber-900">
-          This document has been superseded. <a className="underline" href={`/document?id=${encodeURIComponent(doc.supersededById)}`}>Open the replacement document</a>.
-        </div>
-      )}
-
-      {/* Document Content */}
-      <div className="flex-1 min-h-0">
-        <Card className="h-full relative">
-          <button
-            type="button"
-            onClick={() => setIsFullscreenOpen(true)}
-            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-900/80 hover:bg-gray-900 text-white text-xs font-medium shadow-md backdrop-blur transition"
-            aria-label="Open document in fullscreen"
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-            <span>Fullscreen</span>
-          </button>
-          <CardContent className="p-0 h-full">
-            <div className="h-full overflow-hidden">
-              {renderDocument()}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </motion.div>
-  );
-
   const isRepositoryDoc = doc?.scope === "repository" && Boolean(doc?.orgId);
   const hasDetails = isRepositoryDoc || (doc?.sourceTags?.length ?? 0) > 0;
   const refreshDoc = () => fetchDocument(id).then((fresh) => fresh && setDoc(fresh));
+  const backHref = doc?.projectId
+    ? `/project?id=${doc.projectId}`
+    : doc?.orgId
+      ? `/org/${doc.orgId}/repository`
+      : '/welcome-back';
+  const notices = [
+    doc?.lifecycleSuggestion === 'archived' && {
+      key: 'outdated',
+      body: 'May be outdated: this document has been flagged for review.',
+    },
+    doc?.supersededById && {
+      key: 'superseded',
+      body: (
+        <>
+          This document has been superseded.{' '}
+          <a className="font-medium underline" href={`/document?id=${encodeURIComponent(doc.supersededById)}`}>Open the replacement document</a>.
+        </>
+      ),
+    },
+  ].filter(Boolean);
+
+  // Document Preview Panel (Left Column): a header row (Back, filename, source
+  // link, viewer controls) over notices and the frameless viewer. Ported from
+  // My Text Digest's workspace layout; ownership, metadata and tags are in the
+  // right panel's Details tab.
+  const documentPanel = (
+    <div className="h-full flex flex-col bg-white dark:bg-gray-900">
+      <div className="@container shrink-0 h-12 flex items-center gap-2 pl-3 pr-2 border-b border-gray-200 dark:border-gray-700">
+        <button
+          type="button"
+          onClick={() => router.push(backHref)}
+          title={doc?.projectId ? 'Back to project' : 'Back to repository'}
+          className="shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span>Back</span>
+        </button>
+        <h1 className="flex-1 min-w-0 truncate text-sm font-semibold text-gray-900 dark:text-gray-100" title={doc.filename}>
+          {doc.filename}
+        </h1>
+        {doc.externalUrl && (
+          <div className="shrink-0">
+            <OpenInSourceLink url={doc.externalUrl} sourceProvider={doc.sourceProvider} />
+          </div>
+        )}
+        <div ref={setToolbarHost} className="shrink-0 flex items-center" />
+        <button
+          type="button"
+          onClick={() => setIsFullscreenOpen(true)}
+          title="Fullscreen"
+          aria-label="Open document in fullscreen"
+          className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
+        >
+          <Maximize2 className="h-4 w-4" />
+        </button>
+      </div>
+
+      {isRepositoryDoc && (
+        <div className="shrink-0 px-3 pt-3 empty:hidden">
+          <DocumentReviewPrompt orgId={doc.orgId} documentId={doc.id} />
+        </div>
+      )}
+      {notices.map((n) => (
+        <div key={n.key} role="status" className="shrink-0 flex items-center gap-2 px-3 py-2 text-sm border-b border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="min-w-0">{n.body}</span>
+        </div>
+      ))}
+
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {renderDocument()}
+      </div>
+    </div>
+  );
+
 
   // Details tab (right column): document actions, ownership, metadata, source tags
   const detailsPanel = (
@@ -999,120 +1011,41 @@ function DocumentContent() {
 
   const insightsCount = (doc?.experts?.length || 0) + (doc?.relatedDocuments?.length || 0) + (doc?.projectLinks?.length || 0);
 
-  // Chat Interface Panel (Right Column)
+  const hasChatHistory = chat.some(msg => msg.role !== "system");
+  const tabs = [
+    { id: 'chat', label: 'Chat', icon: MessageCircle },
+    { id: 'summary', label: 'Summary', icon: BarChart3 },
+    { id: 'guide', label: 'Pagewise Summary', icon: BookOpen },
+    hasDetails && { id: 'details', label: 'Details', icon: Info },
+    { id: 'versions', label: 'Versions', icon: Clock },
+    { id: 'history', label: 'History', icon: Clock },
+    isRepositoryDoc && { id: 'workflow', label: 'Workflow', icon: CheckCircle2 },
+    { id: 'insights', label: 'Insights', icon: Network, count: insightsCount },
+  ].filter(Boolean);
+
+  // Analysis Panel (Right Column): tabs (+ clear chat on the Chat tab) in a
+  // header row that lines up with the document's, over the active tab; no card.
   const chatPanel = (
-    <div className="chat-container">
-      <Card className="chat-container">
-        <CardHeader className="flex-shrink-0 pb-2">
-        <div className="flex items-center justify-between w-full mb-4">
-            <CardTitle className="flex items-center space-x-2">
-              <MessageCircle className="h-5 w-5 text-primary-600" />
-              <span>Document Analysis</span>
-            </CardTitle>
-            
-            {/* Clear Chat Button - Only show when chat has messages */}
-            {canClearDocumentChat && chat.some(msg => msg.role !== "system") && (
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleClearChat}
-                  className="hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-600 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </motion.div>
-            )}
-          </div>
+    <div className="h-full flex flex-col bg-white dark:bg-gray-900">
+      <div className="shrink-0 h-12 flex items-center gap-2 pl-3 pr-2 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex-1 min-w-0">
+          <DocumentTabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
+        </div>
+        {activeTab === 'chat' && canClearDocumentChat && (
+          <button
+            type="button"
+            onClick={handleClearChat}
+            disabled={!hasChatHistory}
+            title={hasChatHistory ? "Clear chat" : "No chat to clear"}
+            aria-label="Clear chat"
+            className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50 dark:text-gray-400 dark:hover:text-red-400 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
+      </div>
 
-          {/* Tab Navigation */}
-          <div className="flex flex-wrap gap-1 mt-4">
-            <Button
-              variant={activeTab === 'chat' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setActiveTab('chat')}
-              className={cn(
-                "flex items-center space-x-2",
-                activeTab === 'chat'
-                  ? "text-white dark:text-gray-200"
-                  : "text-gray-600 dark:text-gray-400"
-              )}
-            >
-              <MessageCircle className="h-4 w-4" />
-              <span>Chat</span>
-            </Button>
-            <Button
-              variant={activeTab === 'summary' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setActiveTab('summary')}
-              className={cn(
-                "flex items-center space-x-2",
-                activeTab === 'summary'
-                  ? "text-white dark:text-gray-200"
-                  : "text-gray-600 dark:text-gray-400"
-              )}
-            >
-              <BarChart3 className="h-4 w-4" />
-              <span>Summary</span>
-            </Button>
-            <Button
-              variant={activeTab === 'guide' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setActiveTab('guide')}
-              className={cn(
-                "flex items-center space-x-2",
-                activeTab === 'guide'
-                  ? "text-white dark:text-gray-200"
-                  : "text-gray-600 dark:text-gray-400"
-              )}
-            >
-              <BookOpen className="h-4 w-4" />
-              <span>Pagewise Summary</span>
-            </Button>
-            {hasDetails && (
-              <Button variant={activeTab === 'details' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('details')}>
-                <Info className="w-4 h-4 mr-1" /> Details
-              </Button>
-            )}
-            <Button variant={activeTab === 'versions' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('versions')}>
-              <Clock className="w-4 h-4 mr-1" /> Versions
-            </Button>
-            <Button variant={activeTab === 'history' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('history')}>
-              <Clock className="w-4 h-4 mr-1" /> History
-            </Button>
-            {doc?.scope === 'repository' && doc?.orgId && (
-              <Button variant={activeTab === 'workflow' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('workflow')}>
-                <CheckCircle2 className="w-4 h-4 mr-1" /> Workflow
-              </Button>
-            )}
-            <Button
-              variant={activeTab === 'insights' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setActiveTab('insights')}
-              className={cn(
-                "flex items-center space-x-2",
-                activeTab === 'insights'
-                  ? "text-white dark:text-gray-200"
-                  : "text-gray-600 dark:text-gray-400"
-              )}
-            >
-              <Network className="h-4 w-4" />
-              <span>Insights</span>
-              {insightsCount > 0 && (
-                <span className={cn(
-                  "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
-                  activeTab === 'insights'
-                    ? "bg-white/25 text-white"
-                    : "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
-                )}>
-                  {insightsCount}
-                </span>
-              )}
-            </Button>
-          </div>
-        </CardHeader>
-
-        <CardContent className="chat-card-content p-0">
+      <div className="chat-card-content">
           {/* Content Area - Chat, Summary, or Reading Guide */}
           {activeTab === 'details' && hasDetails ? (
             detailsPanel
@@ -1730,19 +1663,20 @@ function DocumentContent() {
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 
   return (
-    <Layout orgId={doc?.orgId} fixedHeight>
-      <div className="h-full">
+    <Layout orgId={doc?.orgId} fixedHeight fullBleed>
+      <div className="flex-1 min-h-0">
         <TwoColumnLayout
           leftColumn={documentPanel}
           rightColumn={chatPanel}
-          leftTitle="Document Preview"
+          leftTitle="Document"
           rightTitle="Chat"
+          resizable="document"
+          minDesktopWidth={1280}
         />
       </div>
       {showClearDialog && (
