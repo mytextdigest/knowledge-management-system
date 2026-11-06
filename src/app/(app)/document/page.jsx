@@ -14,7 +14,7 @@ import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network } from 'lucide-react';
+import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network, Info } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
@@ -48,7 +48,7 @@ function DocumentContent() {
   const [chat, setChat] = useState([]);
   const [question, setQuestion] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'summary' | 'guide' | 'insights'
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'summary' | 'guide' | 'insights' | 'details' | 'versions' | 'history' | 'workflow'
   const [summary, setSummary] = useState(null);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [summaryCopied, setSummaryCopied] = useState(false);
@@ -940,34 +940,15 @@ function DocumentContent() {
         />
       </div>
 
-      {/* Document Info */}
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+      {/* Document title; ownership, metadata and tags live in the right panel's Details tab */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <h1 className="min-w-0 truncate text-xl font-bold text-gray-900 dark:text-gray-100" title={doc.filename}>
           {doc.filename}
         </h1>
-        <p className="text-gray-600 dark:text-gray-400">
-          Document Preview
-        </p>
         {doc.externalUrl && (
-          <div className="mt-2 flex justify-center">
-            <OpenInSourceLink url={doc.externalUrl} sourceProvider={doc.sourceProvider} />
-          </div>
+          <OpenInSourceLink url={doc.externalUrl} sourceProvider={doc.sourceProvider} />
         )}
       </div>
-
-      {doc?.scope === "repository" && doc?.orgId && (
-        <DocumentLifecycleActions doc={doc} onChanged={() => fetchDocument(id).then((fresh) => fresh && setDoc(fresh))} />
-      )}
-
-      {doc?.scope === "repository" && doc?.orgId && (
-        <DocumentOwnershipPanel documentId={doc.id} orgId={doc.orgId} />
-      )}
-
-      {doc?.scope === "repository" && doc?.orgId && (
-        <DocumentCompletenessBadge documentId={doc.id} />
-      )}
-
-      <SourceTagsPanel tags={doc?.sourceTags} />
 
       {doc?.scope === "repository" && doc?.orgId && (
         <DocumentReviewPrompt orgId={doc.orgId} documentId={doc.id} />
@@ -1002,6 +983,20 @@ function DocumentContent() {
     </motion.div>
   );
 
+  const isRepositoryDoc = doc?.scope === "repository" && Boolean(doc?.orgId);
+  const hasDetails = isRepositoryDoc || (doc?.sourceTags?.length ?? 0) > 0;
+  const refreshDoc = () => fetchDocument(id).then((fresh) => fresh && setDoc(fresh));
+
+  // Details tab (right column): document actions, ownership, metadata, source tags
+  const detailsPanel = (
+    <div className="h-full overflow-y-auto p-4 space-y-4">
+      {isRepositoryDoc && <DocumentLifecycleActions doc={doc} onChanged={refreshDoc} />}
+      {isRepositoryDoc && <DocumentOwnershipPanel documentId={doc.id} orgId={doc.orgId} />}
+      {isRepositoryDoc && <DocumentCompletenessBadge documentId={doc.id} />}
+      <SourceTagsPanel tags={doc?.sourceTags} />
+    </div>
+  );
+
   const insightsCount = (doc?.experts?.length || 0) + (doc?.relatedDocuments?.length || 0) + (doc?.projectLinks?.length || 0);
 
   // Chat Interface Panel (Right Column)
@@ -1031,18 +1026,7 @@ function DocumentContent() {
           </div>
 
           {/* Tab Navigation */}
-          <div className="flex space-x-1 mt-4">
-            <Button variant={activeTab === 'versions' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('versions')}>
-              <Clock className="w-4 h-4 mr-1" /> Versions
-            </Button>
-            <Button variant={activeTab === 'history' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('history')}>
-              <Clock className="w-4 h-4 mr-1" /> History
-            </Button>
-            {doc?.scope === 'repository' && doc?.orgId && (
-              <Button variant={activeTab === 'workflow' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('workflow')}>
-                <CheckCircle2 className="w-4 h-4 mr-1" /> Workflow
-              </Button>
-            )}
+          <div className="flex flex-wrap gap-1 mt-4">
             <Button
               variant={activeTab === 'chat' ? 'default' : 'ghost'}
               size="sm"
@@ -1085,6 +1069,22 @@ function DocumentContent() {
               <BookOpen className="h-4 w-4" />
               <span>Pagewise Summary</span>
             </Button>
+            {hasDetails && (
+              <Button variant={activeTab === 'details' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('details')}>
+                <Info className="w-4 h-4 mr-1" /> Details
+              </Button>
+            )}
+            <Button variant={activeTab === 'versions' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('versions')}>
+              <Clock className="w-4 h-4 mr-1" /> Versions
+            </Button>
+            <Button variant={activeTab === 'history' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('history')}>
+              <Clock className="w-4 h-4 mr-1" /> History
+            </Button>
+            {doc?.scope === 'repository' && doc?.orgId && (
+              <Button variant={activeTab === 'workflow' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('workflow')}>
+                <CheckCircle2 className="w-4 h-4 mr-1" /> Workflow
+              </Button>
+            )}
             <Button
               variant={activeTab === 'insights' ? 'default' : 'ghost'}
               size="sm"
@@ -1114,7 +1114,9 @@ function DocumentContent() {
 
         <CardContent className="chat-card-content p-0">
           {/* Content Area - Chat, Summary, or Reading Guide */}
-          {activeTab === 'versions' ? (
+          {activeTab === 'details' && hasDetails ? (
+            detailsPanel
+          ) : activeTab === 'versions' ? (
             <div className="overflow-y-auto h-full"><DocumentVersionsPanel documentId={id} /></div>
           ) : activeTab === 'workflow' && doc?.orgId ? (
             <div className="overflow-y-auto h-full"><DocumentWorkflowPanel documentId={id} orgId={doc.orgId} onLifecycleChange={() => fetchDocument(id).then((fresh) => fresh && setDoc(fresh))} /></div>
