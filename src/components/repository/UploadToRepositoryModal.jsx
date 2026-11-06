@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Upload, FileText, X, AlertCircle, CheckCircle } from "lucide-react";
 import { cn, formatFileSize } from "@/lib/utils";
-import { ACCEPT_ATTRIBUTE, SUPPORTED_FORMATS_TEXT, checkFileFormat } from "@/lib/fileFormats";
+import { ACCEPT_ATTRIBUTE, MAX_UPLOAD_TEXT, SUPPORTED_FORMATS_TEXT, checkFileFormat, checkFileSize } from "@/lib/fileFormats";
 
 const CATEGORIES = [
   "Policies",
@@ -22,6 +22,8 @@ function makeFileEntry(file) {
   const errors = [];
   const format = checkFileFormat(file.name);
   if (!format.ok) errors.push(format.reason);
+  const size = checkFileSize(file.size); // EQ-5
+  if (!size.ok) errors.push(size.reason);
   return {
     id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 9)}`,
     file,
@@ -100,6 +102,7 @@ export default function UploadToRepositoryModal({
       body: JSON.stringify({
         fileName: fileItem.file.name,
         fileType: fileItem.file.type,
+        fileSize: fileItem.file.size,
         userId,
         orgId,
       }),
@@ -239,7 +242,7 @@ export default function UploadToRepositoryModal({
               Drop files here or click to browse
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Supports {SUPPORTED_FORMATS_TEXT}, up to {MAX_FILES} files at once
+              Supports {SUPPORTED_FORMATS_TEXT}, up to {MAX_UPLOAD_TEXT} each and {MAX_FILES} files at once
             </p>
           </div>
 

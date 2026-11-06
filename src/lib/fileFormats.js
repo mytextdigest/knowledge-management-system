@@ -51,3 +51,24 @@ export function checkFileFormat(name) {
 }
 
 export const isSupportedFile = (name) => checkFileFormat(name).ok;
+
+// EQ-5: the largest file a person can upload (dialogs, presign policy, ingest
+// and replace). Uploads go from the browser straight to S3, but the worker
+// reads the whole file into memory to extract it, so this guards the worker.
+// SharePoint sync has its own admin setting (maxFileSizeMb, default 200 MB).
+export const MAX_UPLOAD_MB = 100;
+export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+export const MAX_UPLOAD_TEXT = `${MAX_UPLOAD_MB} MB`;
+
+/**
+ * Whether a file is small enough to upload. Returns { ok: true } or
+ * { ok: false, reason } where reason is a sentence to show the user as it is.
+ */
+export function checkFileSize(bytes) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size <= MAX_UPLOAD_BYTES) return { ok: true };
+  return {
+    ok: false,
+    reason: `This file is ${Math.ceil(size / (1024 * 1024))} MB. Uploads are limited to ${MAX_UPLOAD_TEXT}; for larger files, sync them from SharePoint.`,
+  };
+}

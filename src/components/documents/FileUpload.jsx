@@ -4,7 +4,7 @@ import { Upload, X, FileText, AlertCircle, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { cn, formatFileSize } from '@/lib/utils';
-import { SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS_TEXT, checkFileFormat } from '@/lib/fileFormats';
+import { MAX_UPLOAD_TEXT, SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS_TEXT, checkFileFormat, checkFileSize } from '@/lib/fileFormats';
 
 const CATEGORIES = [
   "Policies",
@@ -20,7 +20,6 @@ const FileUpload = ({
   onUpload,
   onClose,
   acceptedTypes = SUPPORTED_EXTENSIONS, // E11.4: shared allow-list
-  maxFileSize = 10 * 1024 * 1024, // 10MB
   className
 }) => {
   const [dragActive, setDragActive] = useState(false);
@@ -71,10 +70,9 @@ const FileUpload = ({
       errors.push(`KMS can't read ${format.ext} files here.`);
     }
     
-    // Check file size
-    if (file.size > maxFileSize) {
-      errors.push(`File size exceeds ${formatFileSize(maxFileSize)} limit`);
-    }
+    // Check file size (EQ-5: one limit, shared with the upload APIs)
+    const size = checkFileSize(file.size);
+    if (!size.ok) errors.push(size.reason);
     
     return errors;
   };
@@ -94,7 +92,7 @@ const FileUpload = ({
     });
     
     setFiles(prev => [...prev, ...newFiles]);
-  }, [acceptedTypes, maxFileSize]);
+  }, [acceptedTypes]);
 
   const handleDrag = useCallback((e) => {
     e.preventDefault();
@@ -260,7 +258,7 @@ const FileUpload = ({
                 Drop files here or click to browse
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                Supports {acceptedTypes === SUPPORTED_EXTENSIONS ? SUPPORTED_FORMATS_TEXT : acceptedTypes.join(', ')} files up to {formatFileSize(maxFileSize)}
+                Supports {acceptedTypes === SUPPORTED_EXTENSIONS ? SUPPORTED_FORMATS_TEXT : acceptedTypes.join(', ')} files up to {MAX_UPLOAD_TEXT} each
               </p>
             </div>
             

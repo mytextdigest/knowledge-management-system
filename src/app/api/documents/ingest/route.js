@@ -12,7 +12,7 @@ import { resolveOrgRole } from "@/lib/orgGuard";
 import { getOrgSubscription, isSubscriptionActive } from "@/lib/subscription";
 import { defaultOwnerId } from "@/lib/governance/defaultOwner";
 import { initialUploadLifecycle } from "@/lib/workflows/publishFlow";
-import { checkFileFormat } from "@/lib/fileFormats";
+import { checkFileFormat, checkFileSize } from "@/lib/fileFormats";
 
 export async function POST(req) {
   try {
@@ -132,6 +132,12 @@ export async function POST(req) {
         { error: "Unable to determine file size" },
         { status: 400 }
       );
+    }
+
+    // EQ-5: the presign policy already caps uploads; this covers keys put in S3 another way.
+    const size = checkFileSize(fileSizeBytes);
+    if (!size.ok) {
+      return NextResponse.json({ error: size.reason, code: "FILE_TOO_LARGE" }, { status: 413 });
     }
 
 
