@@ -8,7 +8,9 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
 
-export default function DocumentFullscreenModal({ open, onClose, doc, ext, docxHtml }) {
+// children: the page's own viewer for every other format (slides, spreadsheets,
+// SharePoint pages), rendered here at full size.
+export default function DocumentFullscreenModal({ open, onClose, doc, ext, docxHtml, children }) {
   const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
@@ -132,9 +134,13 @@ export default function DocumentFullscreenModal({ open, onClose, doc, ext, docxH
             )}
 
             {!supportsZoom && ext !== 'pdf' && (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-gray-500 dark:text-gray-400">Unsupported file type: {ext}</p>
-              </div>
+              children ? (
+                <div className="h-full">{children}</div>
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-gray-500 dark:text-gray-400">Unsupported file type: {ext}</p>
+                </div>
+              )
             )}
           </div>
         </div>

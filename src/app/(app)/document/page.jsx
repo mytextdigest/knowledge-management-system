@@ -844,8 +844,11 @@ function DocumentContent() {
 
 
   // The viewers render frameless; their toolbars portal into the left header row.
-  const renderDocument = () => {
+  // inModal: the fullscreen view's copy, which must not take over the page's
+  // scroll tracking (docScrollRef drives the Pagewise Summary).
+  const renderDocument = ({ inModal = false } = {}) => {
     if (!doc) return null;
+    const scrollProps = inModal ? {} : { ref: docScrollRef, onScroll: handleDocScroll };
 
     const ext = doc.filename.split(".").pop().toLowerCase();
     const fileLinks = doc.fileUrl ? getFileLinks : undefined;
@@ -854,8 +857,7 @@ function DocumentContent() {
     if (ext === "txt" || doc.contentType === "page" || doc.contentType === "article") {
       return (
         <FileViewerFrame
-          ref={docScrollRef}
-          onScroll={handleDocScroll}
+          {...scrollProps}
           getFileLinks={fileLinks}
           onPrint={() => printHtml(printableHtml(doc.filename, `<pre style="white-space:pre-wrap;font:13px/1.6 ui-monospace,monospace">${escapeHtml(doc.content)}</pre>`))}
         >
@@ -899,8 +901,7 @@ function DocumentContent() {
     if (ext === "docx") {
       return (
         <FileViewerFrame
-          ref={docScrollRef}
-          onScroll={handleDocScroll}
+          {...scrollProps}
           getFileLinks={fileLinks}
           onPrint={docxHtml ? () => printHtml(printableHtml(doc.filename, docxHtml)) : undefined}
         >
@@ -1653,7 +1654,9 @@ function DocumentContent() {
         doc={doc}
         ext={ext}
         docxHtml={docxHtml}
-      />
+      >
+        {isFullscreenOpen && !['pdf', 'txt', 'docx'].includes(ext) ? renderDocument({ inModal: true }) : null}
+      </DocumentFullscreenModal>
     </Layout>
   );
 }
