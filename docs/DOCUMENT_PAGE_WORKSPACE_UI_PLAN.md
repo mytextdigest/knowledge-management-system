@@ -27,7 +27,8 @@ Chat, Summary, Pagewise Summary, Details, Versions, History, Workflow (repositor
 |---|---|---|
 | Height | `calc(100vh - 4rem)` under a top nav bar | Full screen height; there is no top bar, and the sidebar is fixed on the left |
 | Two-column breakpoint | 1024px | 1280px, because the 268px sidebar takes space |
-| Download | Owner of the document only | KMS document access rules. A SharePoint file with no stored copy (A-14) shows "Open in SharePoint" instead |
+| Download | `GET /api/documents/[id]/download`, owner only | No new route. The viewers use the document API's own `fileUrl`/`fileDownloadUrl`, which are issued after `canViewDocument`; SharePoint no-copy files stream through `/preview`. The page re-fetches the links after 50 minutes (signed URLs last an hour) without reloading the viewer |
+| PDF text | Canvas only | KMS keeps the invisible pdf.js text layer the old KMS viewer had, so text stays selectable and copyable |
 | PowerPoint | — | `SlideDeckViewer` in the same frame |
 | 👍/👎 feedback | New columns on `Message` / `ProjectMessage` | Deferred: it needs a shared-DB migration, so a schema-only PR on `dev` must come first |
 | Chat answer format | Light markdown | Document chat switches from "plain text only" to MTD's light-markdown wording. Org chat stays as it is |
@@ -62,3 +63,14 @@ Chat, Summary, Pagewise Summary, Details, Versions, History, Workflow (repositor
   - Download, print and Open in new tab.
   - A window narrower than 1280px (single column with a Document/Chat switcher).
   - After phase 4, the other pages: repository, org chat, settings, governance.
+
+## Status
+
+| Phase | Commit | Notes |
+|---|---|---|
+| 1 Shell | `b319c05` | Two columns from 1280px |
+| 2 Chat | `bfb5686` | Document chat only; project and org chat unchanged |
+| 3 Viewer | `e11bf93`, `be3c9d2` | `be3c9d2` restores selectable PDF text. No image viewer, because KMS doesn't accept images yet (E-M4) |
+| 4 CSS | `4ff5d87` | Affects every page |
+
+`next build` passes (2026-11-06). Manual checks are still to do (see Verification).
