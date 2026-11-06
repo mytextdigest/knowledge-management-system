@@ -204,6 +204,7 @@ export default function RepositoryPage({ params }) {
             <RepositoryDocumentCard
               key={document.id}
               document={document}
+              orgId={orgId}
               orgRole={orgRole}
               departments={departments}
               onDocumentSignalChange={(docId, patch) =>

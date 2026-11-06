@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { syncDocumentCategory } from "../src/lib/taxonomy/defaultCategory.mjs";
 import { getSetting } from "../src/lib/settings/index.js";
 
 export const CATEGORY_TAXONOMY = [
@@ -178,6 +179,14 @@ export async function classifyDocument({ prisma, openai, documentId, filename, t
       contentHash: computeContentHash(text),
     },
   });
+
+  // Phase 2 dual-write: preserve Document.category for legacy readers while
+  // maintaining the Category term when the org has explicitly seeded taxonomy.
+  if (effectiveOrgId) {
+    await syncDocumentCategory(prisma, {
+      documentId, orgId: effectiveOrgId, category: acceptedCategory, source: "auto",
+    });
+  }
 
   return {
     category: acceptedCategory,
