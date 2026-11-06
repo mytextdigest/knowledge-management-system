@@ -12,8 +12,7 @@ import DocumentLifecycleActions from "@/components/governance/DocumentLifecycleA
 import Layout from '@/components/layout/Layout';
 import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network, Info, ArrowLeft } from 'lucide-react';
+import { FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Trash2, CheckCircle2, Copy, Check, Printer, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network, Info, ArrowLeft } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
@@ -21,10 +20,10 @@ import PdfViewer from "@/components/documents/PdfViewer";
 import SlideDeckViewer from "@/components/documents/SlideDeckViewer";
 import SourceTagsPanel from "@/components/documents/SourceTagsPanel";
 import DocumentFullscreenModal from "@/components/documents/DocumentFullscreenModal";
-import { cn } from '@/lib/utils';
 import { copySummary, printSummary } from '@/lib/summaryActions';
 import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
-import MessageActions from "@/components/chat/MessageActions";
+import ChatMessage, { AssistantPendingRow, TypingDots } from "@/components/chat/ChatMessage";
+import ChatComposer from "@/components/chat/ChatComposer";
 import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
 import { useToast, ToastProvider } from "@/components/ui/Toast";
 import DocumentTabs from "@/components/documents/document/DocumentTabs";
@@ -1186,147 +1185,35 @@ function DocumentContent() {
             </div>
           ) : activeTab === 'chat' ? (
             <div className="chat-container">
-              <div className="chat-messages-area p-4 space-y-4 bg-gray-50 dark:bg-gray-900/50 chat-scrollbar">
+              <div className="chat-messages-area px-5 py-5 space-y-6 bg-white dark:bg-gray-900 chat-scrollbar">
                 {chat.map((message) => (
-                  <motion.div
+                  <ChatMessage
                     key={message.id}
-                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                    transition={{ duration: 0.4, ease: "easeOut" }}
-                    className={cn(
-                      "flex items-start space-x-3",
-                      message.role === 'user' ? 'flex-row-reverse space-x-reverse' : 'flex-row'
-                    )}
-                  >
-                    {/* Avatar */}
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ delay: 0.1 }}
-                      className={cn(
-                        "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-md",
-                        message.role === 'user'
-                          ? 'bg-gradient-to-br from-blue-500 to-blue-600'
-                          : 'bg-gradient-to-br from-purple-500 to-purple-600'
-                      )}
-                    >
-                      {message.role === 'user' ? (
-                        <User className="w-4 h-4 text-white" />
-                      ) : (
-                        <Bot className="w-4 h-4 text-white" />
-                      )}
-                    </motion.div>
-
-                    {/* Message Bubble */}
-                    <div
-                      className={cn(
-                        "flex flex-col max-w-[85%]",
-                        message.role === 'user' ? 'items-end' : 'items-start'
-                      )}
-                    >
-
-                      {/* MESSAGE BUBBLE */}
-                      <div
-                        className={cn(
-                          "rounded-2xl px-4 py-3 overflow-hidden",
-                          message.role === 'user'
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700'
-                        )}
-                      >
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed break-words overflow-wrap-anywhere">
-                          {message.content}
-                        </p>
-                      </div>
-
-                      {/* ACTION BUTTONS BELOW */}
-                      <MessageActions
-                        content={message.content}
-                        onExpand={() => openExpanded(message)}
-                        align={message.role === 'user' ? "right" : "left"}
-                      />
-
-                    </div>
-
-
-                  </motion.div>
+                    message={message}
+                    onExpand={() => openExpanded(message)}
+                  />
                 ))}
 
                 {isTyping && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex justify-start"
-                  >
-                    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-3 rounded-lg">
-                      <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                        <div
-                          className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                          style={{ animationDelay: "0.1s" }}
-                        ></div>
-                        <div
-                          className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                          style={{ animationDelay: "0.2s" }}
-                        ></div>
-                      </div>
-                    </div>
-                  </motion.div>
+                  <AssistantPendingRow>
+                    <TypingDots />
+                  </AssistantPendingRow>
                 )}
 
                 <div ref={chatEndRef} />
               </div>
 
-              {/* Chat-specific footer - Fixed at bottom */}
-              {/* {chat.some(msg => msg.role !== "system") && (
-                <div className="flex-shrink-0 p-4 border-t border-gray-200 dark:border-gray-700 bg-yellow-50 dark:bg-yellow-950/30 flex justify-between items-center">
-                  <div className="flex items-center space-x-2 text-yellow-700 dark:text-yellow-300">
-                    <AlertCircle className="h-4 w-4" />
-                    <p className="text-sm font-medium">You can clear this chat to start fresh.</p>
-                  </div>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={handleClearChat}
-                  >
-                    Clear Chat
-                  </Button>
-                </div>
-              )} */}
-
-              {/* Input Area - Fixed at bottom */}
-              <form onSubmit={handleAsk} className="flex-shrink-0 p-4 border-t border-gray-200 dark:border-gray-700">
-                <div className="flex space-x-2">
-                  <Input
-                    ref={inputRef}
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    placeholder="Ask about this document..."
-                    className="flex-1"
-                    disabled={isTyping || !canAskDocument}
-                  />
-                  {isTyping ? (
-                    <Button
-                      type="button"
-                      size="icon"
-                      onClick={handleCancelRequest}
-                      className="flex-shrink-0 bg-gray-600 hover:bg-gray-700 text-white"
-                    >
-                      <Square className="h-4 w-4 fill-current" />
-                    </Button>
-                  ) : (
-                    <Button
-                      type="submit"
-                      size="icon"
-                      disabled={!question.trim() || !canAskDocument}
-                      className="flex-shrink-0"
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </form>
+              <ChatComposer
+                ref={inputRef}
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onSubmit={handleAsk}
+                onCancel={handleCancelRequest}
+                isTyping={isTyping}
+                canSend={Boolean(question.trim()) && canAskDocument}
+                disabled={!canAskDocument}
+                placeholder="Ask about this document..."
+              />
             </div>
           ) : activeTab === 'insights' ? (
             /* Insights Area - people who know this, related documents, suggested project links */

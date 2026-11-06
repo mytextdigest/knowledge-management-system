@@ -241,7 +241,9 @@ export async function POST(req, { params }) {
         - NEVER use information that is not present in the document context.
         - NEVER invent facts, numbers, names, or claims.
         - If the document does not fully answer the question, provide the closest accurate information the document contains (do not say "I don't know").
-        - Plain text only (no markdown, no bullets, no special formatting).
+        - You may use light markdown formatting where it aids clarity — **bold** for key terms or
+          figures, short bullet lists for multiple items. Keep it natural and sparing; this is a
+          chat reply, not a report.
         - Be concise, factual, and avoid assumptions.
       `.trim()
     };
