@@ -22,6 +22,7 @@ import FileViewerFrame from "@/components/documents/viewer/FileViewerFrame";
 import { ViewerToolbarHost } from "@/components/documents/viewer/ViewerToolbar";
 import { slidesFromChunks } from "@/lib/slideCitations";
 import { printHtml } from "@/lib/printDocument";
+import { cn } from "@/lib/utils";
 import { isProcessingStatus } from "@/lib/documentStatus";
 import SourceTagsPanel from "@/components/documents/SourceTagsPanel";
 import DocumentFullscreenModal from "@/components/documents/DocumentFullscreenModal";
@@ -83,6 +84,12 @@ function DocumentContent() {
   // The left header row's slot that viewer toolbars render into.
   const [toolbarHost, setToolbarHost] = useState(null);
   const toolbarSlot = useMemo(() => ({ host: toolbarHost }), [toolbarHost]);
+  // PowerPoint: the deck as designed (a PDF, one page per slide) when there is
+  // one; "text" shows what KMS read from each slide, with speaker notes.
+  const [slidePreview, setSlidePreview] = useState(null); // { status, url? }
+  const [slideView, setSlideView] = useState("slides");
+  // Stable, so the viewer jumps to a cited slide once rather than on every render.
+  const slideJump = useMemo(() => (activeSlide ? { page: activeSlide, nonce: activeSlide } : null), [activeSlide]);
 
   // Reading Guide state
   const [pagesRead, setPagesRead] = useState(0);
@@ -328,6 +335,37 @@ function DocumentContent() {
     fileLinksRef.current = { fileUrl: fresh.fileUrl, downloadUrl: fresh.fileDownloadUrl, at: Date.now() };
     return fileLinksRef.current;
   }, [fetchDocument, id]);
+
+  // Slide preview for a deck: use it if it's there, otherwise ask the worker
+  // to render it and check back for a few minutes (text view meanwhile).
+  const isDeck = /\.pptx$/i.test(doc?.filename || "");
+  useEffect(() => {
+    if (!id || !isDeck) return;
+    let cancelled = false;
+    let timer = null;
+    const check = () => fetch(`/api/documents/${id}/slides`, { credentials: "include" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    (async () => {
+      let res = await check();
+      if (cancelled || !res) return;
+      setSlidePreview(res);
+      if (res.status !== "missing") return;
+      await fetch(`/api/documents/${id}/slides`, { method: "POST", credentials: "include" }).catch(() => {});
+      setSlidePreview({ status: "rendering" });
+      const started = Date.now();
+      const poll = async () => {
+        res = await check();
+        if (cancelled) return;
+        if (res?.status === "ready") return setSlidePreview(res);
+        if (Date.now() - started < 3 * 60 * 1000) timer = setTimeout(poll, 4000);
+        else setSlidePreview({ status: "missing" });
+      };
+      timer = setTimeout(poll, 4000);
+    })();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [id, isDeck]);
 
   // Load document
   useEffect(() => {
@@ -894,6 +932,18 @@ function DocumentContent() {
     }
 
     if (ext === "pptx") {
+      if (slideView === "slides" && slidePreview?.status === "ready") {
+        return (
+          <div className="w-full h-full overflow-hidden">
+            <PdfViewer
+              fileUrl={slidePreview.url}
+              getFileLinks={fileLinks}
+              filename={doc.filename}
+              jumpTo={slideJump}
+            />
+          </div>
+        );
+      }
       const { slides } = slidesFromChunks(doc.chunks);
       return (
         <FileViewerFrame
@@ -904,6 +954,11 @@ function DocumentContent() {
             (sl.notes ? `<p style="white-space:pre-wrap;color:#555"><em>Speaker notes:</em> ${escapeHtml(sl.notes)}</p>` : "")
           ).join(""))) : undefined}
         >
+          {slidePreview?.status === "rendering" && (
+            <p role="status" className="mx-4 mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-200">
+              Preparing the slides as designed; they&apos;ll appear here in a moment. Meanwhile, this is the text of each slide.
+            </p>
+          )}
           <SlideDeckViewer chunks={doc.chunks} activeSlide={activeSlide} />
         </FileViewerFrame>
       );
@@ -1056,6 +1111,25 @@ function DocumentContent() {
         {doc.externalUrl && (
           <div className="shrink-0">
             <OpenInSourceLink url={doc.externalUrl} sourceProvider={doc.sourceProvider} className="h-8" labelClassName="hidden @5xl:inline" />
+          </div>
+        )}
+        {ext === 'pptx' && slidePreview?.status === 'ready' && (
+          <div role="group" aria-label="Slide view" className="shrink-0 inline-flex h-8 items-center rounded-md border border-gray-200 p-0.5 dark:border-gray-700">
+            {[['slides', 'Slides'], ['text', 'Text']].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={slideView === value}
+                onClick={() => setSlideView(value)}
+                title={value === 'slides' ? 'The slides as designed' : 'The text KMS read from each slide, with speaker notes'}
+                className={cn(
+                  'h-full rounded px-2.5 text-xs font-medium transition-colors',
+                  slideView === value ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100'
+                )}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         )}
         <div ref={setToolbarHost} className="shrink-0 flex items-center" />

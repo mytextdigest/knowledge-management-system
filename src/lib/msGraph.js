@@ -325,8 +325,10 @@ export async function getUserGroupIds({ accessToken, userId }) {
 
 // App-only-token call: a drive item's content as a fetch Response (Graph
 // redirects to a short-lived download URL; fetch follows it). For streaming.
-export async function fetchDriveItemContent({ accessToken, driveId, itemId }) {
-  const res = await fetchWithRetry(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}/content`, {
+// format: "pdf" has SharePoint convert the file (e.g. a PowerPoint deck) first.
+export async function fetchDriveItemContent({ accessToken, driveId, itemId, format = null }) {
+  const query = format ? `?format=${encodeURIComponent(format)}` : "";
+  const res = await fetchWithRetry(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}/content${query}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw await parseGraphError(res);

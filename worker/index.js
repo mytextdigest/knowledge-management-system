@@ -35,6 +35,8 @@ import { refreshSiteAcls, siteGroupFingerprint } from "../src/lib/connectors/sha
 import { syncServiceNow } from "../src/lib/connectors/servicenowSync.js";
 import { tooLargeFileWrites, isTooLargeToIndex, TOO_LARGE } from "../src/lib/connectors/sharepointLargeFiles.js";
 import { pipelineState, firstMissingStage, STAGE_LABELS } from "../src/lib/documentPipeline.js";
+import { slidePreviewKey, isSlideDeck } from "../src/lib/slidePreview.js";
+import { renderPptxToPdf, SlideRenderUnavailable } from "./renderSlides.js";
 import { createSourceTagReader } from "../src/lib/connectors/sharepointSourceTags.js";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
@@ -369,6 +371,9 @@ async function processChunkJob(job) {
       console.error("Non-fatal chunk notification failure:", mailError.message);
     }
   }
+
+  // A stored deck also gets its slides rendered (in parallel with embedding).
+  if (isSlideDeck(filename) && (s3Key || existingDoc.filePath)) await queueSlidePreview(docId);
 
   // -----------------------------
   // 8. Enqueue embedding job
@@ -1449,6 +1454,8 @@ async function processRepairJob(job) {
   const stage = firstMissingStage(doc, state);
   console.log(`🛠️ REPAIR JOB: ${doc.id} — ${stage ? `missing ${STAGE_LABELS[stage] || stage}` : "nothing missing"}`, state);
 
+  if (isSlideDeck(doc.filename) && doc.filePath) await queueSlidePreview(doc.id);
+
   const base = { docId: doc.id, filename: doc.filename, projectId: doc.projectId, userId: doc.userId, orgId: doc.orgId };
   if (stage === "chunk") return processChunkJob({ ...base, s3Key: doc.filePath, visibility: doc.visibility });
   if (stage === "embed") return processEmbeddingJob(base);
@@ -1463,11 +1470,44 @@ async function processRepairJob(job) {
   await prisma.document.update({ where: { id: doc.id }, data: { status: "ready" } });
 }
 
+// Slide previews: a stored PowerPoint rendered to PDF (src/lib/slidePreview.js),
+// so the document page shows slides as designed. Never retried: a deck that
+// can't be rendered falls back to the text view.
+async function queueSlidePreview(docId) {
+  try {
+    await sqs.send(new SendMessageCommand({ QueueUrl: QUEUE_URL, MessageBody: JSON.stringify({ type: "slide_preview", docId }) }));
+  } catch (err) {
+    console.error(`⚠️ Couldn't queue the slide preview for ${docId}:`, err.message);
+  }
+}
+
+async function processSlidePreviewJob(job) {
+  const doc = await prisma.document.findUnique({ where: { id: job.docId }, select: { id: true, filename: true, filePath: true } });
+  if (!doc?.filePath || !isSlideDeck(doc.filename)) return;
+  const Key = slidePreviewKey(doc.id);
+  if (!job.force) {
+    const exists = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key })).then(() => true, () => false);
+    if (exists) return;
+  }
+  try {
+    const end = startTimer("SLIDE PREVIEW", { docId: doc.id });
+    const deck = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: doc.filePath }));
+    const pdf = await renderPptxToPdf(await streamToBuffer(deck.Body));
+    await s3.send(new PutObjectCommand({ Bucket: S3_BUCKET, Key, Body: pdf, ContentType: "application/pdf" }));
+    end();
+    console.log(`🖼️ Slide preview stored for ${doc.id} (${pdf.length} bytes)`);
+  } catch (err) {
+    if (err instanceof SlideRenderUnavailable) console.warn(`⚠️ Slide previews are off on this worker: ${err.message}`);
+    else console.error(`⚠️ Slide preview failed for ${doc.id}:`, err.message);
+  }
+}
+
 async function processJob(job) {
   if (job.type === "chunk")    return processChunkJob(job);
   if (job.type === "embed")    return processEmbeddingJob(job);
   if (job.type === "summarize") return processSummarizationJob(job);
   if (job.type === "repair") return processRepairJob(job);
+  if (job.type === "slide_preview") return processSlidePreviewJob(job);
   if (job.type === "cluster") {
     const result = await processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
     try { await processKnowledgeContext(job.docId); } catch (error) { console.error("Knowledge context job failed", error); }

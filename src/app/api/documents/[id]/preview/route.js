@@ -11,6 +11,7 @@ import { resolveDriveId } from "@/lib/connectors/sharepointLocate";
 // download work without KMS storing the original. Same access rule as the
 // document page (uploader, or the F1 browse policy including the file's
 // SharePoint permissions). ?download=1 sends it as an attachment.
+// ?format=pdf has SharePoint convert it first (slide previews of no-copy decks).
 export async function GET(req, { params }) {
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -40,12 +41,13 @@ export async function GET(req, { params }) {
     return NextResponse.json({ error: "SharePoint isn't connected" }, { status: 409 });
   }
 
+  const asPdf = new URL(req.url).searchParams.get("format") === "pdf";
   let upstream;
   try {
     const accessToken = await getCachedAppOnlyToken(integration.scopeConfig?.tenantId);
     const driveId = await resolveDriveId(doc, { scopeConfig: integration.scopeConfig, accessToken });
     if (!driveId) return NextResponse.json({ error: "This file's SharePoint site is no longer connected" }, { status: 404 });
-    upstream = await fetchDriveItemContent({ accessToken, driveId, itemId: doc.externalId });
+    upstream = await fetchDriveItemContent({ accessToken, driveId, itemId: doc.externalId, format: asPdf ? "pdf" : null });
   } catch (err) {
     console.error("SharePoint preview failed:", err.message);
     const status = err.status === 404 ? 404 : 502;
@@ -53,9 +55,9 @@ export async function GET(req, { params }) {
   }
 
   const download = new URL(req.url).searchParams.get("download") === "1";
-  const filename = (doc.filename || "document").replace(/["\r\n]/g, "");
+  const filename = (asPdf ? (doc.filename || "document").replace(/\.[^.]+$/, "") + ".pdf" : doc.filename || "document").replace(/["\r\n]/g, "");
   const headers = new Headers({
-    "Content-Type": upstream.headers.get("content-type") || "application/octet-stream",
+    "Content-Type": asPdf ? "application/pdf" : upstream.headers.get("content-type") || "application/octet-stream",
     "Content-Disposition": `${download ? "attachment" : "inline"}; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
     "Cache-Control": "private, no-store",
   });
