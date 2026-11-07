@@ -1,82 +1,363 @@
 import pLimit from "p-limit";
-import OpenAI from "openai";
 
-// const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const limit = pLimit(5);
 
-const limit = pLimit(5);   // concurrency for summarizing chunks
+function safeJsonParse(raw, fallback) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
 
 export async function summarizeChunks(openai, chunks, filename) {
-  console.log(`🟡 Starting summarization for: ${filename} (${chunks.length} chunks)`);
+  console.log(`Starting summarization for: ${filename} (${chunks.length} chunks)`);
 
   const summarizeChunk = async (chunkText, idx) => {
+    const text = (chunkText || "").trim();
+
+    if (!text) {
+      return "";
+    }
+
     const start = Date.now();
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: "You are a helpful assistant who summarizes text clearly and concisely." },
-        { role: "user", content: `Summarize this chunk:\n\n${chunkText}` },
+        {
+          role: "system",
+          content: "You summarize document chunks clearly and concisely.",
+        },
+        {
+          role: "user",
+          content: `Summarize this document chunk in 3-5 bullet points:\n\n${text.slice(0, 12000)}`,
+        },
       ],
       temperature: 0.3,
       max_tokens: 300,
     });
 
-    const summary = completion.choices[0].message.content.trim();
+    const summary = completion.choices?.[0]?.message?.content?.trim() || "";
 
-    console.log(`   ⏱️ Chunk ${idx + 1}/${chunks.length} summarized in ${(Date.now() - start) / 1000}s`);
+    console.log(
+      `Chunk ${idx + 1}/${chunks.length} summarized in ${(Date.now() - start) / 1000}s`
+    );
+
     return summary;
   };
 
-  const results = await Promise.all(
+  return Promise.all(
     chunks.map((chunk, idx) => limit(() => summarizeChunk(chunk, idx)))
   );
-
-  return results;
 }
 
 export async function createStructuredSummary(openai, chunkSummaries, filename) {
-  const joined = chunkSummaries.join("\n\n");
+  const joined = chunkSummaries.filter(Boolean).join("\n\n");
+
+  if (!joined.trim()) {
+    return {
+      overview: "No readable text was available for this document.",
+      keyPoints: [],
+      workflowSteps: [],
+    };
+  }
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
-    response_format: { type: "json_object" },   // 👈 FORCE VALID JSON
+    response_format: { type: "json_object" },
     messages: [
       {
         role: "system",
-        content: `
-You must output ONLY valid JSON. 
-No commentary, no explanations, no markdown, no quotes around the entire object.
-Your output must parse using JSON.parse().
-`
+        content:
+          "You must output only valid JSON. Do not include markdown or commentary.",
       },
       {
         role: "user",
         content: `
-Create a structured summary from the following chunk summaries:
+Create a structured summary for the document "${filename}".
 
-Requirements:
+Return JSON with exactly:
 {
-  "overview": "3–5 sentence plain-text overview",
-  "keyPoints": ["5–8 plain-text bullet points"]
+  "overview": "3-5 sentence overview",
+  "keyPoints": ["5-8 key points"],
+  "workflowSteps": ["ordered imperative step"]
 }
 
+For workflowSteps, include an ordered walkthrough only when the document clearly contains at least 3 sequential procedural steps written as actions. Rewrite each as a concise imperative instruction while preserving the document's meaning. Otherwise return an empty array.
+
 Chunk summaries:
-${joined}
-`
+${joined.slice(0, 24000)}
+`,
       },
     ],
     temperature: 0.2,
+    max_tokens: 700,
+  });
+
+  const raw = completion.choices?.[0]?.message?.content?.trim() || "";
+
+  const parsed = safeJsonParse(raw, {
+    overview: raw || "Summary could not be parsed.",
+    keyPoints: [],
+    workflowSteps: [],
+  });
+
+  const workflowSteps = Array.isArray(parsed.workflowSteps)
+    ? parsed.workflowSteps.map((step) => String(step || "").trim()).filter(Boolean)
+    : [];
+
+  return {
+    overview: String(parsed.overview || "Summary could not be parsed."),
+    keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints : [],
+    workflowSteps: workflowSteps.length >= 3 ? workflowSteps : [],
+  };
+}
+
+const ENTITY_TYPES = ["person", "project", "department", "system"];
+
+export async function extractEntities(openai, chunkSummaries, filename) {
+  const joined = chunkSummaries.filter(Boolean).join("\n\n");
+
+  if (!joined.trim()) {
+    return [];
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "You extract named entities from organizational documents. You must output only valid JSON. Do not include markdown or commentary.",
+      },
+      {
+        role: "user",
+        content: `
+Identify named entities in the document "${filename}" from the summaries below.
+
+Return JSON with exactly:
+{
+  "entities": [{ "name": "entity name", "type": "person" | "project" | "department" | "system" }]
+}
+
+Only include entities explicitly named in the text (real people, named projects/initiatives, organizational departments/teams, and named systems/tools/platforms). Omit anything not confidently one of these four types. Deduplicate by name.
+
+Summaries:
+${joined.slice(0, 24000)}
+`,
+      },
+    ],
+    temperature: 0.1,
+    max_tokens: 700,
+  });
+
+  const raw = completion.choices?.[0]?.message?.content?.trim() || "";
+  const parsed = safeJsonParse(raw, { entities: [] });
+  const entities = Array.isArray(parsed.entities) ? parsed.entities : [];
+
+  const seen = new Set();
+  return entities.reduce((acc, e) => {
+    const name = String(e?.name || "").trim();
+    const type = String(e?.type || "").trim().toLowerCase();
+    if (!name || !ENTITY_TYPES.includes(type)) return acc;
+    const key = `${type}:${name.toLowerCase()}`;
+    if (seen.has(key)) return acc;
+    seen.add(key);
+    acc.push({ name, type });
+    return acc;
+  }, []);
+}
+
+function parseDecidedAt(value) {
+  if (!value || typeof value !== "string") return null;
+  const match = value.trim().match(/^\d{4}-\d{2}-\d{2}/);
+  if (!match) return null;
+  const date = new Date(match[0]);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export async function extractDecisions(openai, chunkSummaries, filename) {
+  const joined = chunkSummaries.filter(Boolean).join("\n\n");
+
+  if (!joined.trim()) {
+    return [];
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "You extract decisions and their stated rationale from organizational documents. You must output only valid JSON. Do not include markdown or commentary.",
+      },
+      {
+        role: "user",
+        content: `
+Identify decisions made or recorded in the document "${filename}" from the summaries below.
+
+Return JSON with exactly:
+{
+  "decisions": [{ "statement": "what was decided", "rationale": "why it was decided, or null if not stated", "decidedAt": "YYYY-MM-DD date the decision was made, or null if no date is given" }]
+}
+
+Only include actual decisions explicitly stated in the text (a choice that was made, approved, or committed to) — not general facts, plans, or open questions. Omit anything that isn't clearly a decision.
+
+Summaries:
+${joined.slice(0, 24000)}
+`,
+      },
+    ],
+    temperature: 0.1,
+    max_tokens: 700,
+  });
+
+  const raw = completion.choices?.[0]?.message?.content?.trim() || "";
+  const parsed = safeJsonParse(raw, { decisions: [] });
+  const decisions = Array.isArray(parsed.decisions) ? parsed.decisions : [];
+
+  return decisions.reduce((acc, d) => {
+    const statement = String(d?.statement || "").trim();
+    if (!statement) return acc;
+    const rationale = d?.rationale ? String(d.rationale).trim() : null;
+    acc.push({ statement, rationale: rationale || null, decidedAt: parseDecidedAt(d?.decidedAt) });
+    return acc;
+  }, []);
+}
+
+// Rank 11 FR-3: cheap keyword pre-filter before spending an LLM call on
+// lesson extraction (Open Question 3 in
+// docs/tier-2/REQUIREMENTS_LESSONS_LEARNED_INTELLIGENCE.md — prefer a cheap
+// pre-filter over classifying every document). Checks the filename and the
+// first chunk summary only, not the whole document, since a retrospective's
+// nature is normally obvious from its title/opening.
+const RETROSPECTIVE_PATTERNS = [
+  /retro(spective)?/i,
+  /post[- ]?mortem/i,
+  /lessons?[ -]learned/i,
+  /after[ -]action review/i,
+  /\baar\b/i,
+  /project (review|wrap[ -]?up|debrief)/i,
+  /sprint review/i,
+];
+
+export function isRetrospectiveShaped(filename, chunkSummaries) {
+  const haystack = `${filename || ""} ${chunkSummaries?.[0] || ""}`;
+  return RETROSPECTIVE_PATTERNS.some((pattern) => pattern.test(haystack));
+}
+
+export async function extractLessons(openai, chunkSummaries, filename) {
+  const joined = chunkSummaries.filter(Boolean).join("\n\n");
+
+  if (!joined.trim()) {
+    return [];
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "You extract retrospective-style lessons learned from organizational documents. You must output only valid JSON. Do not include markdown or commentary.",
+      },
+      {
+        role: "user",
+        content: `
+The document "${filename}" reads like a retrospective, post-mortem, or lessons-learned writeup. Extract the lesson(s) it records from the summaries below.
+
+Return JSON with exactly:
+{
+  "lessons": [{
+    "topic": "short topic/tag for this lesson, or null",
+    "whatHappened": "what happened, required",
+    "whatWorked": "what worked well, or null if not stated",
+    "whatDidntWork": "what didn't work, or null if not stated",
+    "recommendation": "what to do differently next time, or null if not stated"
+  }]
+}
+
+Only include lessons clearly stated in the text as a reflection on an outcome — not general project facts or plans. If nothing in the text actually reflects on what happened/worked/didn't, return an empty "lessons" array. Omit anything speculative.
+
+Summaries:
+${joined.slice(0, 24000)}
+`,
+      },
+    ],
+    temperature: 0.1,
+    max_tokens: 900,
+  });
+
+  const raw = completion.choices?.[0]?.message?.content?.trim() || "";
+  const parsed = safeJsonParse(raw, { lessons: [] });
+  const lessons = Array.isArray(parsed.lessons) ? parsed.lessons : [];
+
+  return lessons.reduce((acc, l) => {
+    const whatHappened = String(l?.whatHappened || "").trim();
+    if (!whatHappened) return acc;
+    acc.push({
+      topic: l?.topic ? String(l.topic).trim() || null : null,
+      whatHappened,
+      whatWorked: l?.whatWorked ? String(l.whatWorked).trim() || null : null,
+      whatDidntWork: l?.whatDidntWork ? String(l.whatDidntWork).trim() || null : null,
+      recommendation: l?.recommendation ? String(l.recommendation).trim() || null : null,
+    });
+    return acc;
+  }, []);
+}
+
+export async function createPageInsight(openai, pageContent, pageNumber) {
+  const content = (pageContent || "").trim();
+
+  if (!content) {
+    return {
+      keyPoints: [],
+      questions: [],
+    };
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a reading companion. Return only valid JSON with keyPoints and questions arrays.",
+      },
+      {
+        role: "user",
+        content: `
+The user has read up to page ${pageNumber}. Use only the content provided.
+
+Content:
+${content.slice(0, 12000)}
+
+Return JSON:
+{
+  "keyPoints": ["3-5 concise key points"],
+  "questions": ["2-3 thoughtful reflection questions"]
+}
+`,
+      },
+    ],
+    temperature: 0.4,
     max_tokens: 500,
   });
 
-  const raw = completion.choices[0].message.content.trim();
+  const raw = completion.choices?.[0]?.message?.content?.trim() || "";
 
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error("❌ JSON parsing failed. Using fallback.");
-    return {
-      overview: raw,
-      keyPoints: [],
-    };
-  }
+  const parsed = safeJsonParse(raw, {
+    keyPoints: [],
+    questions: [],
+  });
+
+  return {
+    keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints : [],
+    questions: Array.isArray(parsed.questions) ? parsed.questions : [],
+  };
 }

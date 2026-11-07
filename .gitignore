@@ -53,3 +53,5 @@ my_text_digest.db
 
 # User data storage
 .env*.local
+temp.txt
+/temp.txt

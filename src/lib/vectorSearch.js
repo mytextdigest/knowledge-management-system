@@ -1,5 +1,50 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { computeBM25, exactQueryTerms, tokenize } from "@/lib/keywordSearch";
+import { searchAccessSql } from "@/lib/access/documentAccess";
+
+export function scopeSql({ scope = "organization", departmentId = null, userId = null }) {
+  if (scope === "department") {
+    if (departmentId) {
+      // A document's department can come directly (repository-scoped docs)
+      // or only via its project (project-scoped docs have Document.departmentId
+      // = null; the department lives on Project.departmentId instead) — match
+      // both, or every project-scoped document silently vanishes from
+      // department-scoped search/recommendations/decision-evidence.
+      return Prisma.sql`AND (
+        d."departmentId" = ${departmentId}
+        OR EXISTS (
+          SELECT 1 FROM "Project" scope_proj
+          WHERE scope_proj.id = d."projectId" AND scope_proj."departmentId" = ${departmentId}
+        )
+      )`;
+    }
+
+    // No specific department chosen (e.g. the requester belongs to none) —
+    // restrict to departments they're actually a member of via the `dm`
+    // join already present in every caller's WHERE clause, not every
+    // department in the org. isSuperAdmin does NOT bypass this: "Department"
+    // scope is a narrowing choice, and narrowing to a department you're not
+    // in must never silently widen to "all departments." Same
+    // direct-or-via-project reasoning as above applies to this membership
+    // check too.
+    return Prisma.sql`AND (
+      (d."departmentId" IS NOT NULL AND dm."userId" IS NOT NULL)
+      OR EXISTS (
+        SELECT 1 FROM "Project" scope_proj
+        JOIN "DepartmentMember" scope_pm
+          ON scope_pm."departmentId" = scope_proj."departmentId" AND scope_pm."userId" = ${userId}
+        WHERE scope_proj.id = d."projectId"
+      )
+    )`;
+  }
+
+  if (scope === "personal") {
+    return Prisma.sql`AND d.scope = 'private'`;
+  }
+
+  return Prisma.empty;
+}
 
 export async function similaritySearch(queryEmbedding, { projectId, limit = 8 }) {
   const embStr = JSON.stringify(queryEmbedding);
@@ -15,31 +60,263 @@ export async function similaritySearch(queryEmbedding, { projectId, limit = 8 })
   `;
 }
 
-export async function orgSearch(queryEmbedding, { userId, orgId, limit = 8 }) {
+export async function orgSearch(
+  queryEmbedding,
+  {
+    userId,
+    orgId,
+    limit = 8,
+    isSuperAdmin = false,
+    scope = "organization",
+    departmentId = null,
+  }
+) {
   const embStr = JSON.stringify(queryEmbedding);
+  const scopeFilter = scopeSql({ scope, departmentId, userId });
+
   return prisma.$queryRaw`
     SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
-           d.filename, d."orgId", d."departmentId", d.scope,
-           (c.embedding_vec <=> ${embStr}::vector) AS distance
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           dept.name AS department_name,
+           proj.name AS project_name,
+           (c.embedding_vec <=> ${embStr}::vector) AS distance,
+           0::float AS keyword_score
     FROM "Chunk" c
     JOIN "Document" d ON c.document_id = d.id
+    LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
     LEFT JOIN "DepartmentMember" dm
       ON d."departmentId" = dm."departmentId" AND dm."userId" = ${userId}
     WHERE d."orgId" = ${orgId}
       AND c.embedding_vec IS NOT NULL
-      AND (
-        (d.scope = 'repository'
-         AND d.lifecycle = 'published'
-         AND (d."departmentId" IS NULL OR dm."userId" IS NOT NULL))
-        OR
-        EXISTS (
-          SELECT 1 FROM "Project" p
-          WHERE p.id = d."projectId"
-            AND p.scope = 'org'
-            AND p."orgId" = ${orgId}
-        )
-      )
+      ${scopeFilter}
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
     ORDER BY distance ASC
     LIMIT ${Prisma.raw(String(limit))}
   `;
+}
+
+export async function orgKeywordSearch(
+  query,
+  {
+    userId,
+    orgId,
+    limit = 8,
+    isSuperAdmin = false,
+    scope = "organization",
+    departmentId = null,
+  }
+) {
+  const safeQuery = String(query || "").trim();
+  if (!safeQuery) return [];
+
+  const terms = tokenize(safeQuery).slice(0, 8);
+  if (terms.length === 0) return [];
+
+  const scopeFilter = scopeSql({ scope, departmentId, userId });
+  const termFilters = terms.map(
+    (term) => Prisma.sql`
+      (
+        c.text ILIKE ${`%${term}%`}
+        OR c.summary ILIKE ${`%${term}%`}
+        OR d.filename ILIKE ${`%${term}%`}
+      )
+    `
+  );
+
+  // Bounded candidate pool (RBAC/scope-filtered) for computeBM25 to rank in
+  // memory, rather than scoring the entire org corpus per query.
+  const candidatePoolSize = Math.max(limit * 15, 150);
+
+  const candidates = await prisma.$queryRaw`
+    SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           dept.name AS department_name,
+           proj.name AS project_name
+    FROM "Chunk" c
+    JOIN "Document" d ON c.document_id = d.id
+    LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    LEFT JOIN "DepartmentMember" dm
+      ON d."departmentId" = dm."departmentId" AND dm."userId" = ${userId}
+    WHERE d."orgId" = ${orgId}
+      ${scopeFilter}
+      AND (${Prisma.join(termFilters, " OR ")})
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    LIMIT ${Prisma.raw(String(candidatePoolSize))}
+  `;
+
+  if (candidates.length === 0) return [];
+
+  return computeBM25(candidates, safeQuery)
+    .filter((c) => c.score > 0)
+    .slice(0, limit)
+    .map((c) => ({ ...c, distance: 1, keyword_score: c.score }));
+}
+
+export async function orgFallbackTextSearch(
+  query,
+  {
+    userId,
+    orgId,
+    limit = 8,
+    isSuperAdmin = false,
+    scope = "organization",
+    departmentId = null,
+  }
+) {
+  const safeQuery = String(query || "").trim();
+  const terms = safeQuery
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3)
+    .slice(0, 6);
+
+  if (terms.length === 0) return [];
+
+  const scopeFilter = scopeSql({ scope, departmentId, userId });
+
+  const termFilters = terms.map(
+    (term) => Prisma.sql`
+      (
+        c.text ILIKE ${`%${term}%`}
+        OR c.summary ILIKE ${`%${term}%`}
+        OR d.filename ILIKE ${`%${term}%`}
+      )
+    `
+  );
+
+  return prisma.$queryRaw`
+    SELECT c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           dept.name AS department_name,
+           proj.name AS project_name,
+           1::float AS distance,
+           0.5::float AS keyword_score
+    FROM "Chunk" c
+    JOIN "Document" d ON c.document_id = d.id
+    LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    LEFT JOIN "DepartmentMember" dm
+      ON d."departmentId" = dm."departmentId" AND dm."userId" = ${userId}
+    WHERE d."orgId" = ${orgId}
+      ${scopeFilter}
+      AND (${Prisma.join(termFilters, " OR ")})
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    LIMIT ${Prisma.raw(String(limit))}
+  `;
+}
+
+/**
+ * Exact-word matches for the distinctive words of a question (code names,
+ * IDs, rare terms like "KESTREL"), so they aren't crowded out by broader
+ * matches. A word counts as distinctive when it appears (as a whole word, in
+ * text or file name) in at least 1 and at most `maxDocsPerTerm` documents
+ * the user can access; counts only ever include accessible documents.
+ *
+ * Returns { terms: [{ term, documentCount }], rows } where rows are the best
+ * chunk per (distinctive term, document), shaped like orgKeywordSearch rows
+ * plus `exactTerm`.
+ */
+export async function orgExactTermSearch(
+  question,
+  {
+    userId, orgId, isSuperAdmin = false, scope = "organization", departmentId = null, maxDocsPerTerm = 3, db = prisma,
+    terms: givenTerms = null, sourceProvider = null, contentType = null,
+  }
+) {
+  const words = givenTerms ?? exactQueryTerms(question);
+  if (!words.length) return { terms: [], rows: [] };
+  const scopeFilter = Prisma.sql`${scopeSql({ scope, departmentId, userId })} ${sourceFilterSql({ sourceProvider, contentType })}`;
+  const matches = Prisma.sql`(c.text ~* ('\\m' || q.term || '\\M') OR d.filename ~* ('\\m' || q.term || '\\M'))`;
+
+  const counts = await db.$queryRaw`
+    SELECT q.term, COUNT(DISTINCT d.id)::int AS "documentCount"
+    FROM unnest(${words}::text[]) AS q(term)
+    JOIN "Chunk" c ON TRUE
+    JOIN "Document" d ON c.document_id = d.id
+    WHERE d."orgId" = ${orgId}
+      ${scopeFilter}
+      AND ${matches}
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    GROUP BY q.term
+  `;
+  const countByTerm = new Map(counts.map((r) => [r.term, r.documentCount]));
+  const terms = words.map((term) => ({ term, documentCount: countByTerm.get(term) || 0 }));
+  const distinctive = terms.filter((t) => t.documentCount >= 1 && t.documentCount <= maxDocsPerTerm).map((t) => t.term);
+  if (!distinctive.length) return { terms, rows: [] };
+
+  const rows = await db.$queryRaw`
+    SELECT DISTINCT ON (q.term, d.id)
+           q.term AS "exactTerm",
+           c.id, c.text, c.summary, c.chunk_index, c.document_id, c.metadata,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           dept.name AS department_name,
+           proj.name AS project_name
+    FROM unnest(${distinctive}::text[]) AS q(term)
+    JOIN "Chunk" c ON TRUE
+    JOIN "Document" d ON c.document_id = d.id
+    LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    WHERE d."orgId" = ${orgId}
+      ${scopeFilter}
+      AND ${matches}
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    ORDER BY q.term, d.id, (c.text ~* ('\\m' || q.term || '\\M')) DESC, c.chunk_index
+  `;
+  // Rarest words first (most specific), then in question order.
+  const rank = (term) => countByTerm.get(term) * 100 + words.indexOf(term);
+  rows.sort((a, b) => rank(a.exactTerm) - rank(b.exactTerm));
+  return { terms, rows: rows.map((r) => ({ ...r, distance: 1, keyword_score: 1 })) };
+}
+
+// "SharePoint pages", "SharePoint files": optional source/kind filters.
+function sourceFilterSql({ sourceProvider = null, contentType = null }) {
+  return Prisma.sql`${sourceProvider ? Prisma.sql`AND d.source_provider = ${sourceProvider}` : Prisma.empty}
+    ${contentType ? Prisma.sql`AND d.content_type = ${contentType}` : Prisma.empty}`;
+}
+
+/**
+ * Documents the user can access, filtered by source/kind and optionally by a
+ * phrase (in the title or text, case-insensitive), by title; at most
+ * `limit`. Each comes with its best chunk (the one with the phrase, else the
+ * first), shaped like the other search rows, so it can be cited.
+ * Returns { total, rows }.
+ */
+export async function orgListDocuments({
+  userId, orgId, isSuperAdmin = false, scope = "organization", departmentId = null,
+  sourceProvider = null, contentType = null, phrase = null, limit = 25, db = prisma,
+}) {
+  const like = phrase ? `%${phrase.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%` : null;
+  const phraseFilter = like
+    ? Prisma.sql`AND (d.filename ILIKE ${like} OR EXISTS (SELECT 1 FROM "Chunk" pc WHERE pc.document_id = d.id AND pc.text ILIKE ${like}))`
+    : Prisma.empty;
+  const rows = await db.$queryRaw`
+    SELECT COUNT(*) OVER ()::int AS total,
+           fc.id, fc.text, fc.summary, fc.chunk_index, d.id AS document_id, fc.metadata,
+           d.filename, d.file_path AS "filePath", d.external_url AS "externalUrl", d.source_provider AS "sourceProvider", d.content_type AS "contentType", d."orgId", d."departmentId", d."projectId", d.scope, d.category,
+           dept.name AS department_name,
+           proj.name AS project_name
+    FROM "Document" d
+    LEFT JOIN LATERAL (
+      SELECT c.id, c.text, c.summary, c.chunk_index, c.metadata
+      FROM "Chunk" c
+      WHERE c.document_id = d.id
+      ORDER BY ${like ? Prisma.sql`(c.text ILIKE ${like}) DESC,` : Prisma.empty} c.chunk_index
+      LIMIT 1
+    ) fc ON TRUE
+    LEFT JOIN "Department" dept ON dept.id = d."departmentId"
+    LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    WHERE d."orgId" = ${orgId}
+      ${scopeSql({ scope, departmentId, userId })}
+      ${sourceFilterSql({ sourceProvider, contentType })}
+      ${phraseFilter}
+      AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    ORDER BY d.filename
+    LIMIT ${Prisma.raw(String(Math.max(1, Math.min(100, Number(limit) || 25))))}
+  `;
+  return {
+    total: rows[0]?.total ?? 0,
+    rows: rows.map(({ total, ...r }) => ({ ...r, distance: 1, keyword_score: 1 })),
+  };
 }

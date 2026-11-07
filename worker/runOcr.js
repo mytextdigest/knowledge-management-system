@@ -41,16 +41,22 @@ function pixelDataToPngBuffer(imgData) {
     }
     png.data = rgba;
   } else if (kind === ImageKind.GRAYSCALE_1BPP) {
-    // 1 bit per pixel (packed) → RGBA
-    const pixelCount = width * height;
-    const rgba = Buffer.alloc(pixelCount * 4);
-    for (let p = 0; p < pixelCount; p++) {
-      const bit = (data[Math.floor(p / 8)] >> (7 - (p % 8))) & 1;
-      const val = bit ? 255 : 0;
-      rgba[p * 4] = val;
-      rgba[p * 4 + 1] = val;
-      rgba[p * 4 + 2] = val;
-      rgba[p * 4 + 3] = 255;
+    // 1 bit per pixel (packed) → RGBA.
+    // Each row is padded to a byte boundary (PDF spec / pdfjs convention),
+    // so the bit offset must be computed per-row, not as one continuous bitstream.
+    const rowBytes = (width + 7) >> 3;
+    const rgba = Buffer.alloc(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const bitIndex = y * rowBytes * 8 + x;
+        const bit = (data[bitIndex >> 3] >> (7 - (bitIndex % 8))) & 1;
+        const val = bit ? 255 : 0;
+        const p = y * width + x;
+        rgba[p * 4] = val;
+        rgba[p * 4 + 1] = val;
+        rgba[p * 4 + 2] = val;
+        rgba[p * 4 + 3] = 255;
+      }
     }
     png.data = rgba;
   } else {

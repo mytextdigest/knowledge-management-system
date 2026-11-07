@@ -1,4 +1,5 @@
-import { prisma } from "@/lib/prisma";
+// Relative import: the worker's purge job (plain Node) uses this module too.
+import { prisma } from "./prisma.mjs";
 
 function cosineSimilarity(a, b) {
   let dot = 0, normA = 0, normB = 0;

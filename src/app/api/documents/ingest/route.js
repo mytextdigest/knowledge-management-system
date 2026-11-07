@@ -8,6 +8,11 @@ import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { resolveOrgRole } from "@/lib/orgGuard";
+import { getOrgSubscription, isSubscriptionActive } from "@/lib/subscription";
+import { defaultOwnerId } from "@/lib/governance/defaultOwner";
+import { initialUploadLifecycle } from "@/lib/workflows/publishFlow";
+import { checkFileFormat, checkFileSize } from "@/lib/fileFormats";
 
 export async function POST(req) {
   try {
@@ -16,38 +21,98 @@ export async function POST(req) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const formData = await req.formData();
-    const projectId = formData.get("projectId");
-    const s3Key = formData.get("s3Key");
-    const visibility = formData.get("visibility") || "private";
+    const projectId    = formData.get("projectId")    || null;
+    const s3Key        = formData.get("s3Key");
+    const visibility   = formData.get("visibility")   || "private";
+    const scope        = formData.get("scope")        || "private";
+    let   orgId        = formData.get("orgId")        || null;
+    const departmentId = formData.get("departmentId") || null;
+    const category     = formData.get("category")     || null;
 
+    if (!s3Key)
+      return NextResponse.json({ error: "Missing s3Key" }, { status: 400 });
 
-    if (!projectId || !s3Key) {
-      return NextResponse.json({ error: "Missing projectId or s3Key" }, { status: 400 });
+    if (!["public", "private"].includes(visibility))
+      return NextResponse.json({ error: "Invalid visibility" }, { status: 400 });
+
+    if (!["private", "project", "repository"].includes(scope))
+      return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
+
+    // repository-scoped uploads require an orgId; all others require a projectId
+    if (scope === "repository") {
+      if (!orgId)
+        return NextResponse.json({ error: "orgId is required for repository scope" }, { status: 400 });
+    } else {
+      if (!projectId)
+        return NextResponse.json({ error: "projectId is required" }, { status: 400 });
     }
 
-    if (!["public", "private"].includes(visibility)) {
-      return NextResponse.json({ error: "Invalid visibility" }, { status: 400 });
+    // every project belongs to an org; backfill orgId when the caller only sent projectId
+    if (projectId && !orgId) {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { orgId: true },
+      });
+      orgId = project?.orgId || null;
     }
 
     const filename = s3Key.split("/").pop();
 
+    // E11.4: the authoritative format check (the dialogs check too).
+    const format = checkFileFormat(filename);
+    if (!format.ok)
+      return NextResponse.json({ error: format.reason, code: "UNSUPPORTED_FORMAT" }, { status: 415 });
+
     const dbUser = await prisma.user.findUnique({
       where: { email: session.user.email },
-      include: {
-        subscription: {
-          include: { plan: true }
-        }
-      }
     });
-    
+
     if (!dbUser)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
-    
-    if (!dbUser.subscription || !dbUser.subscription.plan) {
+
+    const orgSubscription = await getOrgSubscription(orgId);
+
+    if (!isSubscriptionActive(orgSubscription) || !orgSubscription.plan) {
       return NextResponse.json(
         { error: "No active subscription" },
         { status: 403 }
       );
+    }
+
+    // Verify org membership before accepting a repository-scoped upload
+    if (scope === "repository") {
+      const { role } = await resolveOrgRole(session.user.email, orgId);
+
+      if (!role) {
+        return NextResponse.json(
+          { error: "Forbidden: not an org member" },
+          { status: 403 }
+        );
+      }
+
+      if (role === "guest") {
+        return NextResponse.json(
+          { error: "Forbidden: guests cannot upload to the repository" },
+          { status: 403 }
+        );
+      }
+
+      if (departmentId) {
+        const department = await prisma.department.findFirst({
+          where: {
+            id: departmentId,
+            orgId,
+          },
+          select: { id: true },
+        });
+
+        if (!department) {
+          return NextResponse.json(
+            { error: "Invalid department for this organization" },
+            { status: 400 }
+          );
+        }
+      }
     }
 
 
@@ -69,10 +134,16 @@ export async function POST(req) {
       );
     }
 
+    // EQ-5: the presign policy already caps uploads; this covers keys put in S3 another way.
+    const size = checkFileSize(fileSizeBytes);
+    if (!size.ok) {
+      return NextResponse.json({ error: size.reason, code: "FILE_TOO_LARGE" }, { status: 413 });
+    }
+
 
 
     const planLimitBytes =
-      dbUser.subscription.plan.storageLimitGb * 1024 * 1024 * 1024;
+      orgSubscription.plan.storageLimitGb * 1024 * 1024 * 1024;
 
     const currentUsage = BigInt(dbUser.storageUsedBytes);
     const incomingSize = BigInt(fileSizeBytes);
@@ -82,13 +153,18 @@ export async function POST(req) {
       return NextResponse.json(
         {
           error: "Storage limit exceeded",
-          limitGb: dbUser.subscription.plan.storageLimitGb,
+          limitGb: orgSubscription.plan.storageLimitGb,
           usedBytes: Number(currentUsage),
           incomingBytes: Number(incomingSize)
         },
         { status: 413 }
       );
     }
+
+    // B-10: accountable owner (uploader, or the department's default owner
+    // when ownership.default is "department_owner").
+    const ownerId = await defaultOwnerId(prisma, { orgId, departmentId, uploaderId: dbUser.id });
+    const lifecycle = await initialUploadLifecycle(prisma, { orgId, scope, departmentId, category });
 
     // Document created with "queued" status
     const [doc] = await prisma.$transaction([
@@ -97,9 +173,16 @@ export async function POST(req) {
           filename,
           filePath: s3Key,
           status: "queued",
+          lifecycle,
+          classificationStatus: "pending_classification",
           visibility,
-          project: { connect: { id: projectId } },
+          scope,
+          ...(projectId    ? { project:      { connect: { id: projectId    } } } : {}),
+          ...(orgId        ? { organization: { connect: { id: orgId        } } } : {}),
+          ...(departmentId ? { department:   { connect: { id: departmentId } } } : {}),
+          ...(category     ? { category }                                         : {}),
           user: { connect: { id: dbUser.id } },
+          owner: { connect: { id: ownerId } },
         },
       }),
     
@@ -124,6 +207,7 @@ export async function POST(req) {
       filename,
       projectId,
       userId: dbUser.id,
+      orgId,              // worker uses this to resolve the correct OpenAI API key
       visibility,
       regenerate: false
     });
@@ -138,7 +222,8 @@ export async function POST(req) {
     return NextResponse.json({
       success: true,
       id: doc.id,
-      status: "queued"
+      status: "queued",
+      lifecycle,
     });
 
   } catch (err) {
@@ -146,3 +231,5 @@ export async function POST(req) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
+
+

@@ -46,31 +46,41 @@ export async function POST(req) {
 
 
 async function handleCheckoutCompleted(session) {
-  const userId = session.metadata.userId;
-  const planId = session.metadata.planId;
+  const { orgId, managedByUserId, planId } = session.metadata;
 
   const subscription = await stripe.subscriptions.retrieve(
     session.subscription
   );
 
-  await prisma.subscription.upsert({
-    where: { userId },
-    update: {
-      planId,
-      status: subscription.status,
-      stripeCustomerId: subscription.customer,
-      stripeSubscriptionId: subscription.id,
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000)
-    },
-    create: {
-      userId,
-      planId,
-      status: subscription.status,
-      stripeCustomerId: subscription.customer,
-      stripeSubscriptionId: subscription.id,
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000)
-    }
+  const data = {
+    managedByUserId: managedByUserId || null,
+    planId,
+    status: subscription.status,
+    stripeCustomerId: subscription.customer,
+    stripeSubscriptionId: subscription.id,
+    currentPeriodEnd: new Date(subscription.current_period_end * 1000)
+  };
+
+  if (orgId) {
+    await prisma.subscription.upsert({
+      where: { orgId },
+      update: data,
+      create: { ...data, orgId }
+    });
+    return;
+  }
+
+  // Legacy per-user checkout (no orgId in metadata) — kept working until
+  // the org-mandatory pivot's cutover phase removes this path entirely.
+  const existing = await prisma.subscription.findFirst({
+    where: { managedByUserId }
   });
+
+  if (existing) {
+    await prisma.subscription.update({ where: { id: existing.id }, data });
+  } else {
+    await prisma.subscription.create({ data });
+  }
 }
 
   

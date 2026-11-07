@@ -4,16 +4,27 @@ import { Upload, X, FileText, AlertCircle, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { cn, formatFileSize } from '@/lib/utils';
+import { MAX_UPLOAD_TEXT, SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS_TEXT, checkFileFormat, checkFileSize } from '@/lib/fileFormats';
 
-const FileUpload = ({ 
-  onUpload, 
+const CATEGORIES = [
+  "Policies",
+  "SOPs",
+  "Reports",
+  "Meeting Knowledge",
+  "Product Knowledge",
+  "Historical Documents",
+  "Other",
+];
+
+const FileUpload = ({
+  onUpload,
   onClose,
-  acceptedTypes = ['.txt', '.pdf', '.docx', '.csv', '.xlsx', '.xls'],
-  maxFileSize = 10 * 1024 * 1024, // 10MB
-  className 
+  acceptedTypes = SUPPORTED_EXTENSIONS, // E11.4: shared allow-list
+  className
 }) => {
   const [dragActive, setDragActive] = useState(false);
   const [files, setFiles] = useState([]);
+  const [category, setCategory] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({});
   const [finalizing, setFinalizing] = useState({});
@@ -52,15 +63,16 @@ const FileUpload = ({
     const errors = [];
     
     // Check file type
-    const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
-    if (!acceptedTypes.includes(fileExtension)) {
-      errors.push(`File type ${fileExtension} is not supported`);
+    const format = checkFileFormat(file.name);
+    if (!format.ok) {
+      errors.push(format.reason);
+    } else if (!acceptedTypes.includes(format.ext)) {
+      errors.push(`KMS can't read ${format.ext} files here.`);
     }
     
-    // Check file size
-    if (file.size > maxFileSize) {
-      errors.push(`File size exceeds ${formatFileSize(maxFileSize)} limit`);
-    }
+    // Check file size (EQ-5: one limit, shared with the upload APIs)
+    const size = checkFileSize(file.size);
+    if (!size.ok) errors.push(size.reason);
     
     return errors;
   };
@@ -80,7 +92,7 @@ const FileUpload = ({
     });
     
     setFiles(prev => [...prev, ...newFiles]);
-  }, [acceptedTypes, maxFileSize]);
+  }, [acceptedTypes]);
 
   const handleDrag = useCallback((e) => {
     e.preventDefault();
@@ -131,22 +143,33 @@ const FileUpload = ({
       );
       return;
     }
-  
+
+    if (!category) {
+      setFiles(prev =>
+        prev.map(f =>
+          f.status === 'pending'
+            ? { ...f, errors: ['Document type is required'] }
+            : f
+        )
+      );
+      return;
+    }
+
     setUploading(true);
-  
+
     for (const fileItem of validFiles) {
       try {
         // Start progress
         setUploadProgress(prev => ({ ...prev, [fileItem.id]: 0 }));
-  
+
         // Simulated progress up to 90%
         for (let progress = 0; progress <= 90; progress += 10) {
           setUploadProgress(prev => ({ ...prev, [fileItem.id]: progress }));
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-  
+
         // Actual upload (network / backend)
-        await onUpload(fileItem.file, fileItem.visibility);
+        await onUpload(fileItem.file, fileItem.visibility, category);
   
         // Mark as fully complete only AFTER upload finishes
         setUploadProgress(prev => ({ ...prev, [fileItem.id]: 100 }));
@@ -235,7 +258,7 @@ const FileUpload = ({
                 Drop files here or click to browse
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                Supports {acceptedTypes.join(', ')} files up to {formatFileSize(maxFileSize)}
+                Supports {acceptedTypes === SUPPORTED_EXTENSIONS ? SUPPORTED_FORMATS_TEXT : acceptedTypes.join(', ')} files up to {MAX_UPLOAD_TEXT} each
               </p>
             </div>
             
@@ -261,6 +284,28 @@ const FileUpload = ({
               <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100">
                 Selected Files ({files.length})
               </h4>
+
+              {/* Document type */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Document type <span className="text-error-600">*</span>
+                </label>
+                <select
+                  required
+                  className="w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                >
+                  <option value="" disabled>
+                    Select a document type
+                  </option>
+                  {CATEGORIES.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               {/* Batch Visibility Controls */}
               <div className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
