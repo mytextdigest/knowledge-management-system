@@ -373,7 +373,14 @@ async function processChunkJob(job) {
   }
 
   // A stored deck also gets its slides rendered (in parallel with embedding).
-  if (isSlideDeck(filename) && (s3Key || existingDoc.filePath)) await queueSlidePreview(docId);
+  // The chunk job runs whenever a deck's content is (re)read: a new upload, a
+  // replaced file or new version, a changed file from SharePoint. So the
+  // previous slides are dropped first; until the new ones are ready the page
+  // shows the text view rather than old slides.
+  if (isSlideDeck(filename) && (s3Key || existingDoc.filePath)) {
+    await deleteSlidePreview(docId);
+    await queueSlidePreview(docId);
+  }
 
   // -----------------------------
   // 8. Enqueue embedding job
@@ -856,7 +863,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
     if (!subscription || !["active", "trialing"].includes(subscription.status)) {
       throw new Error("No active subscription for org");
     }
-    const freedBytes = await removeStoredCopy(existing?.filePath, change.name);
+    const freedBytes = await removeStoredCopy(existing?.filePath, change.name, existing?.id);
     const data = {
       filePath: null,
       status: "queued",
@@ -945,9 +952,10 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
   return { skipped: false, docId: doc.id };
 }
 
-// Deletes a document's stored copy from S3. Returns the bytes freed (0 if
-// there was none or it couldn't be removed).
-async function removeStoredCopy(filePath, name) {
+// Deletes a document's stored copy from S3, and its rendered slides (a copy
+// too). Returns the bytes freed (0 if there was none or it couldn't be removed).
+async function removeStoredCopy(filePath, name, docId = null) {
+  if (docId && isSlideDeck(name)) await deleteSlidePreview(docId);
   if (!filePath) return 0n;
   try {
     const head = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: filePath }));
@@ -1003,7 +1011,7 @@ async function recordTooLargeFile({ change, existing, integration, site, connect
   if (!subscription || !["active", "trialing"].includes(subscription.status)) {
     throw new Error("No active subscription for org");
   }
-  const freedBytes = await removeStoredCopy(existing?.filePath, change.name);
+  const freedBytes = await removeStoredCopy(existing?.filePath, change.name, existing?.id);
   const written = await prisma.$transaction(
     tooLargeFileWrites(prisma, {
       existing,
@@ -1478,6 +1486,14 @@ async function queueSlidePreview(docId) {
     await sqs.send(new SendMessageCommand({ QueueUrl: QUEUE_URL, MessageBody: JSON.stringify({ type: "slide_preview", docId }) }));
   } catch (err) {
     console.error(`⚠️ Couldn't queue the slide preview for ${docId}:`, err.message);
+  }
+}
+
+async function deleteSlidePreview(docId) {
+  try {
+    await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: slidePreviewKey(docId) }));
+  } catch (err) {
+    console.error(`⚠️ Couldn't remove the old slide preview of ${docId}:`, err.message);
   }
 }
 
