@@ -203,6 +203,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
           { label: "Summary Reviews", href: `/org/${orgId}/summary-reviews`, icon: FileCheck2 },
           { label: "Recently Deleted", href: `/org/${orgId}/deleted`, icon: Trash2 },
         ] : []),
+        ...(isOrgAdmin ? [{ label: "Search Analytics", href: `/org/${orgId}/analytics`, icon: BarChart3 }] : []),
         ...(isSuperAdmin ? [
           { label: "Approval Workflows", href: `/org/${orgId}/workflows`, icon: Workflow },
           { label: "Review Policies", href: `/org/${orgId}/review-policies`, icon: CalendarClock },

@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-import { orgSearch } from "@/lib/vectorSearch";
+import { search } from "@/lib/search/searchService";
 import { repositoryAccessWhere, getUserPrincipals } from "@/lib/access/documentAccess";
 import { resolveOpenAIKey } from "@/utils/key_helper";
 
@@ -36,7 +36,7 @@ export async function GET(req, { params }) {
   const fileType    = searchParams.get("fileType")  || null;
   const dateFrom    = searchParams.get("dateFrom")  || null;
   const dateTo      = searchParams.get("dateTo")    || null;
-  const search      = searchParams.get("search")    || null;
+  const searchTerm = searchParams.get("search") || null;
   const page        = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
 
   // Resolve user's department memberships for RBAC
@@ -103,7 +103,8 @@ export async function GET(req, { params }) {
   // configured or the embedding call fails, fall back to a plain substring
   // match so search still returns something rather than erroring out.
   let rankMap = null;
-  const trimmedSearch = search?.trim() || null;
+  let searchEventId = null;
+  const trimmedSearch = searchTerm?.trim() || null;
 
   if (trimmedSearch) {
     let candidateIds = null;
@@ -118,7 +119,10 @@ export async function GET(req, { params }) {
         });
         const queryEmbedding = embRes.data[0].embedding;
 
-        const rows = await orgSearch(queryEmbedding, {
+        const { results: rows, searchEventId: eventId } = await search({
+          kind: "repository",
+          query: trimmedSearch,
+          queryEmbedding,
           userId: user.id,
           orgId,
           limit: 200,
@@ -127,6 +131,7 @@ export async function GET(req, { params }) {
           departmentId: deptFilter,
         });
 
+        searchEventId = eventId;
         const seen = new Set();
         candidateIds = [];
         for (const row of rows) {
@@ -225,7 +230,21 @@ export async function GET(req, { params }) {
     ]);
   }
 
+  // Count the final access-filtered documents, not raw semantic chunks.
+  // A telemetry write failure must never fail repository browsing.
+  if (searchEventId) {
+    try {
+      await prisma.searchEvent.updateMany({
+        where: { id: searchEventId, orgId, userId: user.id },
+        data: { resultCount: total },
+      });
+    } catch (error) {
+      console.warn("Repository search metrics unavailable:", error?.message);
+    }
+  }
+
   return NextResponse.json({
+    searchEventId,
     documents: docs.map((d) => ({
       ...d,
       relatedDocumentCount: (d._count?.relationshipsFrom || 0) + (d._count?.relationshipsTo || 0),
