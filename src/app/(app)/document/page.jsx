@@ -1043,17 +1043,19 @@ function DocumentContent() {
           type="button"
           onClick={() => router.push(backHref)}
           title={doc?.projectId ? 'Back to project' : 'Back to repository'}
+          aria-label={doc?.projectId ? 'Back to project' : 'Back to repository'}
           className="shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          <span>Back</span>
+          {/* Words only when the column has room; the viewer's controls come first. */}
+          <span className="hidden @3xl:inline">Back</span>
         </button>
         <h1 className="flex-1 min-w-0 truncate text-sm font-semibold text-gray-900 dark:text-gray-100" title={doc.filename}>
           {doc.filename}
         </h1>
         {doc.externalUrl && (
           <div className="shrink-0">
-            <OpenInSourceLink url={doc.externalUrl} sourceProvider={doc.sourceProvider} />
+            <OpenInSourceLink url={doc.externalUrl} sourceProvider={doc.sourceProvider} className="h-8" labelClassName="hidden @5xl:inline" />
           </div>
         )}
         <div ref={setToolbarHost} className="shrink-0 flex items-center" />

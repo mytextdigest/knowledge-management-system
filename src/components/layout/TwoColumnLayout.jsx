@@ -10,6 +10,9 @@ import { cn } from '@/lib/utils';
 const MIN_SPLIT = 30;
 const MAX_SPLIT = 70;
 const clampSplit = (v) => Math.min(MAX_SPLIT, Math.max(MIN_SPLIT, v));
+// KMS: neither column gets narrower than this, whatever the split, so its
+// header controls (viewer toolbar, tabs) keep room.
+const MIN_COLUMN_PX = 420;
 
 // Mount only the layout that matches the screen. Rendering both and hiding one
 // with CSS mounted every column twice (two PDF loads, two chat panels).
@@ -152,7 +155,7 @@ const TwoColumnLayout = ({
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.5 }}
           className="flex-1 min-w-0" // min-w-0 prevents flex item from overflowing
-          style={resizable ? { flex: `0 0 ${split}%` } : { flexBasis: '50%' }}
+          style={resizable ? { flex: `0 0 ${split}%`, minWidth: MIN_COLUMN_PX } : { flexBasis: '50%' }}
         >
           <div className="h-full">
             {leftColumn}
@@ -199,7 +202,7 @@ const TwoColumnLayout = ({
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.5, delay: 0.1 }}
           className="flex-1 min-w-0"
-          style={{ flexBasis: resizable ? 0 : '50%' }}
+          style={resizable ? { flexBasis: 0, minWidth: MIN_COLUMN_PX } : { flexBasis: '50%' }}
         >
           <div className="h-full">
             {rightColumn}
