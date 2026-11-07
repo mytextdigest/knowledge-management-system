@@ -8,7 +8,7 @@
 | **Foundations used**  | F1 document access, F2 audit, F3 scheduled jobs, F5 org settings, F6 workflow engine (E14) |
 | **Phase 2 window**    | Mon 2 Nov – Thu 26 Nov 2026 (code-complete), integration to Mon 30 Nov                 |
 | **Branch**            | `feature/ekp-ws-e` (one branch for the phase, one PR per milestone; see [PHASE2_OVERVIEW.md](PHASE2_OVERVIEW.md) §3) |
-| **Status**            | Draft for review. Shared design + E-M1 ready for review; E-M2 to E-M4 outlined, detail each before it starts. |
+| **Status**            | E-M1 merged to `dev` (PR #36, 2026-11-07). E-M2 to E-M4 outlined, detail each before it starts. |
 
 **Source documents (don't copy from them, link to them):**
 
@@ -157,10 +157,10 @@ Each milestone ends with a PR from `feature/ekp-ws-e` into `dev`, opened one wor
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `E-1` | Finalize this document (shared design + E-M1), reviewed by Sandeep or Simran | `DONE` | Johurul | — | | 2026-10-29 | 2026-11-04 |
 | `E-2` | E-M1 · Schema: `DocumentSourceTag`, `MediaJob`, part 1 `Document` media fields, `SyncRun.filesSkipped` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
-| `E-3` | E-M1 · **`A-23`**: store SharePoint managed-metadata values on synced documents (PRS E16.5) | `DONE` | Johurul | `E-2` | | 2026-11-04 | 2026-11-07 |
-| `E-4` | E-M1 · E11.4: shared format allow-list (upload, API, SharePoint filter); clear rejection messages | `DONE` | Johurul | `E-1` | | 2026-11-04 | 2026-11-07 |
-| `E-5` | E-M1 · E11.1: PPTX slides + notes, one chunk per slide, "slide N" citations, viewer opens at slide | `DONE` | Johurul | `E-4` | | 2026-11-04 | 2026-11-07 |
-| `E-M1` | **Milestone PR + demo: PowerPoint searchable + SharePoint tags kept** (due Fri 6 Nov) | `DONE` | Johurul | `E-3`–`E-5` | | 2026-11-04 | 2026-11-07 |
+| `E-3` | E-M1 · **`A-23`**: store SharePoint managed-metadata values on synced documents (PRS E16.5) | `DONE` | Johurul | `E-2` | #36 | 2026-11-04 | 2026-11-07 |
+| `E-4` | E-M1 · E11.4: shared format allow-list (upload, API, SharePoint filter); clear rejection messages | `DONE` | Johurul | `E-1` | #36 | 2026-11-04 | 2026-11-07 |
+| `E-5` | E-M1 · E11.1: PPTX slides + notes, one chunk per slide, "slide N" citations, viewer opens at slide | `DONE` | Johurul | `E-4` | #36 | 2026-11-04 | 2026-11-07 |
+| `E-M1` | **Milestone PR + demo: PowerPoint searchable + SharePoint tags kept** (due Fri 6 Nov) | `DONE` | Johurul | `E-3`–`E-5` | #36 | 2026-11-04 | 2026-11-07 |
 | `E-6` | E-M2 · E11.6: stream S3/Graph to temp file; media bypass the `A-24` skip; re-queue skipped media; `ffmpeg` in worker image | `TODO` | Johurul | `E-M1` | | | |
 | `E-7` | E-M2 · E11.5: VTT + Word transcript parsers, time-window chunks | `TODO` | Johurul | `E-M1` | | | |
 | `E-8` | E-M2 · Transcript ↔ recording linking; use the transcript, no transcription call | `TODO` | Johurul | `E-6`, `E-7` | | | |

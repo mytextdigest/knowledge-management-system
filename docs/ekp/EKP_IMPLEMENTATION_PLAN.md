@@ -320,12 +320,12 @@ The single status board. **Update it in the same PR that completes a requirement
 | E8 | Cited, permission-aware answers | — | — | — | ✅ |
 | E9 | Follow-up questions | — | — | — | ✅ |
 | E10 | Confidence & explainability | F | TBD | TBD | 🟡 |
-| E11 | PPT, images, video | E | Johurul | 2 (part 1: PPTX, video, VTT · part 2: images) | 🟡 |
+| E11 | PPT, images, video | E | Johurul | 2 (part 1: PPTX, video, VTT · part 2: images) | 🟡 PPTX (E11.1) + format allow-list (E11.4) ✅ in E-M1; video, transcripts, images to come |
 | E12 | Site pages, wikis, KB articles | A | Johurul | 1 | ✅ |
 | E13 | Previews & thumbnails | E | Johurul | 2 | 🟡 |
 | E14 | Asset templates | E | Johurul | 2 | ❌ |
 | E15 | Managed metadata (hierarchy, synonyms) | C | Sandeep | 2 | ❌ |
-| E16 | NYPA taxonomy-tool integration | C | Sandeep (E16.5 capture: Johurul, `A-23`) | 2 | ❌ |
+| E16 | NYPA taxonomy-tool integration | C | Sandeep (E16.5 capture: Johurul, `A-23`) | 2 | ❌ SharePoint tags captured (`A-23`, E-M1); term mapping is C-M2 |
 | E17 | Graph-enriched search/navigation/chat | — | — | — | ✅ |
 | E18 | Drag-and-drop upload | — | — | — | ✅ |
 | E19 | Summary with human review | B | Sandeep & Simran | 1 | ✅ |
