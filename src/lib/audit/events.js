@@ -29,4 +29,5 @@ export const AUDIT_EVENTS = Object.freeze({
   REVIEW_POLICY_CHANGED: "review.policy_changed",
   AUTH_SSO_LOGIN: "auth.sso_login",
   AUTH_SSO_USER_CREATED: "auth.sso_user_created",
+  SYNC_FILES_SKIPPED: "sync.files_skipped", // E11.4 / A-24: files a sync run didn't index, with reasons
 });

@@ -8,6 +8,7 @@ import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { prisma } from "@/lib/prisma";
 import { AUDIT_EVENTS } from "@/lib/audit/events";
 import { snapshotVersion } from "@/lib/lifecycle/versioning.mjs";
+import { checkFileFormat, checkFileSize } from "@/lib/fileFormats";
 
 // Replace the binary behind the same logical document. The normal worker pipeline
 // deletes/rebuilds chunks, embeddings, classifications, and pending duplicate flags.
@@ -21,6 +22,8 @@ export async function POST(req, { params }) {
   const body = await req.json();
   const s3Key = String(body?.s3Key || "").trim();
   if (!s3Key) return NextResponse.json({ error: "s3Key is required" }, { status: 400 });
+  const format = checkFileFormat(s3Key.split("/").pop()); // E11.4
+  if (!format.ok) return NextResponse.json({ error: format.reason, code: "UNSUPPORTED_FORMAT" }, { status: 415 });
 
   const doc = await prisma.document.findFirst({
     where: { id, user: { email: session.user.email } },
@@ -29,7 +32,9 @@ export async function POST(req, { params }) {
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const s3 = new S3Client({ region: process.env.AWS_REGION });
-  await s3.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: s3Key }));
+  const head = await s3.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: s3Key }));
+  const size = checkFileSize(head.ContentLength); // EQ-5
+  if (!size.ok) return NextResponse.json({ error: size.reason, code: "FILE_TOO_LARGE" }, { status: 413 });
   const filename = s3Key.split("/").pop() || doc.filename;
 
   // Lock the document row so concurrent replacements cannot allocate the same version.
