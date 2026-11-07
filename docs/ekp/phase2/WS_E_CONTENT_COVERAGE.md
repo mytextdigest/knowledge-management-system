@@ -157,10 +157,10 @@ Each milestone ends with a PR from `feature/ekp-ws-e` into `dev`, opened one wor
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `E-1` | Finalize this document (shared design + E-M1), reviewed by Sandeep or Simran | `DONE` | Johurul | — | | 2026-10-29 | 2026-11-04 |
 | `E-2` | E-M1 · Schema: `DocumentSourceTag`, `MediaJob`, part 1 `Document` media fields, `SyncRun.filesSkipped` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
-| `E-3` | E-M1 · **`A-23`**: store SharePoint managed-metadata values on synced documents (PRS E16.5) | `IN_PROGRESS` | Johurul | `E-2` | | 2026-11-04 | |
-| `E-4` | E-M1 · E11.4: shared format allow-list (upload, API, SharePoint filter); clear rejection messages | `IN_PROGRESS` | Johurul | `E-1` | | 2026-11-04 | |
-| `E-5` | E-M1 · E11.1: PPTX slides + notes, one chunk per slide, "slide N" citations, viewer opens at slide | `IN_PROGRESS` | Johurul | `E-4` | | 2026-11-04 | |
-| `E-M1` | **Milestone PR + demo: PowerPoint searchable + SharePoint tags kept** (due Fri 6 Nov) | `TODO` | Johurul | `E-3`–`E-5` | | | |
+| `E-3` | E-M1 · **`A-23`**: store SharePoint managed-metadata values on synced documents (PRS E16.5) | `DONE` | Johurul | `E-2` | | 2026-11-04 | 2026-11-07 |
+| `E-4` | E-M1 · E11.4: shared format allow-list (upload, API, SharePoint filter); clear rejection messages | `DONE` | Johurul | `E-1` | | 2026-11-04 | 2026-11-07 |
+| `E-5` | E-M1 · E11.1: PPTX slides + notes, one chunk per slide, "slide N" citations, viewer opens at slide | `DONE` | Johurul | `E-4` | | 2026-11-04 | 2026-11-07 |
+| `E-M1` | **Milestone PR + demo: PowerPoint searchable + SharePoint tags kept** (due Fri 6 Nov) | `DONE` | Johurul | `E-3`–`E-5` | | 2026-11-04 | 2026-11-07 |
 | `E-6` | E-M2 · E11.6: stream S3/Graph to temp file; media bypass the `A-24` skip; re-queue skipped media; `ffmpeg` in worker image | `TODO` | Johurul | `E-M1` | | | |
 | `E-7` | E-M2 · E11.5: VTT + Word transcript parsers, time-window chunks | `TODO` | Johurul | `E-M1` | | | |
 | `E-8` | E-M2 · Transcript ↔ recording linking; use the transcript, no transcription call | `TODO` | Johurul | `E-6`, `E-7` | | | |
