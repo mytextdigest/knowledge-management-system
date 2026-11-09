@@ -200,6 +200,7 @@ export async function getRecommendations({
       isSuperAdmin,
       diversify: !departmentId,
     });
+    rows = retrievedRows;
   }
 
   rows = [...rows, ...relationshipRows];
