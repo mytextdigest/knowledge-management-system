@@ -9,7 +9,7 @@
 | **Foundations used**  | F1 document access, F2 audit, F3 scheduled jobs, F5 org settings                      |
 | **Phase 2 window**    | Mon 2 Nov – Thu 26 Nov 2026 (code-complete), integration to Mon 30 Nov                 |
 | **Branch**            | `feature/ekp-ws-d` (one branch for the phase, one PR per milestone; see [PHASE2_OVERVIEW.md](PHASE2_OVERVIEW.md) §3) |
-| **Status**            | Draft for review. Shared design + D-M1 ready for review; D-M2 to D-M4 outlined, detail each before it starts. |
+| **Status**            | D-M1 merged to `dev` (PR #34, 2026-11-10). D-M2 to D-M4 outlined, detail each before it starts. |
 
 **Source documents (don't copy from them, link to them):**
 
@@ -144,12 +144,12 @@ Each milestone ends with a PR from `feature/ekp-ws-d` into `dev`, opened one wor
 
 | Task ID | Milestone · Title | Status | Assignee | Depends On | PR | Started | Completed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `D-1` | Finalize this document (shared design + D-M1), reviewed by Johurul | `TODO` | Simran | — | | | |
+| `D-1` | Finalize this document (shared design + D-M1), reviewed by Johurul | `DONE` | Simran | — | #34 | 2026-11-02 | 2026-11-10 |
 | `D-2` | D-M1 · Schema: `SearchEvent`, `SearchClick`, `AnalyticsDaily`, `DocumentLink`, `ReportingApiKey`, `Document.contentUpdatedAt`, `KnowledgeGap.queryIds` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
-| `D-3` | D-M1 · F7 `searchService` used by search, repository, chat and recommendations; parity test | `TODO` | Simran | `D-1` | | | |
-| `D-4` | D-M1 · Search/question/click/dwell logging with latency and reformulation link | `TODO` | Simran | `D-2`, `D-3` | | | |
-| `D-5` | D-M1 · Analytics section shell; Search activity tab (no-results, top queries); Governance tab moved in | `TODO` | Simran | `D-4` | | | |
-| `D-M1` | **Milestone PR + demo: Searches are measured** (due Fri 6 Nov) | `TODO` | Simran | `D-3`–`D-5` | | | |
+| `D-3` | D-M1 · F7 `searchService` used by search, repository, chat and recommendations; parity test | `DONE` | Simran | `D-1` | #34 | 2026-11-02 | 2026-11-10 |
+| `D-4` | D-M1 · Search/question/click/dwell logging with latency and reformulation link | `DONE` | Simran | `D-2`, `D-3` | #34 | 2026-11-02 | 2026-11-10 |
+| `D-5` | D-M1 · Analytics section shell; Search activity tab (no-results, top queries); Governance tab moved in | `DONE` | Simran | `D-4` | #34 | 2026-11-02 | 2026-11-10 |
+| `D-M1` | **Milestone PR + demo: Searches are measured** (due Fri 6 Nov) | `DONE` | Simran | `D-3`–`D-5` | #34 | 2026-11-02 | 2026-11-10 |
 | `D-6` | D-M2 · F3 job `analytics.rollup` into `AnalyticsDaily` (idempotent) | `TODO` | Simran | `D-M1` | | | |
 | `D-7` | D-M2 · Usage tab: five E29 metrics, by department/role, Performance card, CSV | `TODO` | Simran | `D-6` | | | |
 | `D-M2` | **Milestone PR + demo: Usage & adoption dashboard** (due Fri 13 Nov) | `TODO` | Simran | `D-6`, `D-7` | | | |
@@ -166,3 +166,8 @@ Each milestone ends with a PR from `feature/ekp-ws-d` into `dev`, opened one wor
 ## 8. Implementation notes
 
 Add a dated note when a task changes the design (e.g. `2026-11-04 · D-3: chat retrieval now goes through searchService`).
+
+- `2026-11-10 · D-M1 review (Johurul):` Fixed in PR #34 before merge. Recommendations call `searchService` but had dropped its results (E6 regression). `SearchEvent.departmentId` and `role` were never written, so department admins and the department filter saw nothing; they are now the searcher's org role and primary department (the department they last worked in if they still belong to it, otherwise their oldest membership). Recommendation seed queries are no longer logged (DS-1: only `search`, `repository`, `chat`).
+- `2026-11-10 · D-5:` The analytics section is a tab bar (`src/components/analytics/AnalyticsTabs.jsx`) shared by `/analytics` (Search activity) and `/governance-metrics` (Governance, super admins only). The Governance page keeps its URL as a tab, so no redirect is needed. The department filter lists only departments the viewer may report on (`filters.permittedDepartmentIds`).
+- `2026-11-10 · D-4 (moved):` Clicks are recorded from repository search results (Preview and View). There is no separate search page in the UI; `POST /api/org/[orgId]/search` returns `searchEventId` for API callers. **Moved to D-M2:** clicks on chat citations, dwell time (`SearchClick.dwellSeconds`), and making event logging fire-and-forget (today it awaits two parallel lookups and one insert). **Moved to D-M4 (E30.2):** linking chat events to `orgMessageId`.
+- `2026-11-10 · D-3:` The parity test is static (it checks that every caller delegates to the unchanged retrieval functions with the same parameters). A runtime parity run on the NGI org is still to do before D-M2.
