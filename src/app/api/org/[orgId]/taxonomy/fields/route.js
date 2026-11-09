@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
+import { logAudit } from "@/lib/auditLog";
 const fail = (error, status = 400) => NextResponse.json({ error }, { status });
 async function guard(orgId) {
   const session = await getServerSession();
@@ -28,11 +29,8 @@ export async function POST(req, { params }) {
   const set = await prisma.termSet.findFirst({ where: { id: body.termSetId, orgId } });
   if (!set || set.readOnly) return fail("Local term set not found", 404);
   try {
-    const field = await prisma.$transaction(async tx => {
-      const created = await tx.metadataField.create({ data: { orgId, key, name, termSetId: set.id, multi: body.multi === true, required: body.required === true, facet: body.facet === true } });
-      await tx.auditLog.create({ data: { orgId, actorUserId: actor.user.id, action: "taxonomy.metadata_field.created", entityType: "MetadataField", entityId: created.id, after: { key, name, termSetId: set.id } } });
-      return created;
-    });
+    const field = await prisma.metadataField.create({ data: { orgId, key, name, termSetId: set.id, multi: body.multi === true, required: body.required === true, facet: body.facet === true } });
+    await logAudit({ orgId, actorUserId: actor.user.id, action: "taxonomy.metadata_field.created", entityType: "MetadataField", entityId: field.id, after: { key, name, termSetId: set.id } });
     return NextResponse.json({ field }, { status: 201 });
   } catch (e) { if (e.code === "P2002") return fail("Field key already exists", 409); throw e; }
 }
@@ -52,10 +50,7 @@ export async function PATCH(req, { params }) {
   const facet = body.facet === undefined ? old.facet : body.facet;
   if ([multi, required, facet].some(v => typeof v !== "boolean")) return fail("Invalid boolean flags");
   if (old._count.documentTerms && old.multi && !multi) return fail("Cannot change populated multi-value field to single-value", 409);
-  const field = await prisma.$transaction(async tx => {
-    const updated = await tx.metadataField.update({ where: { id: old.id }, data: { name, multi, required, facet } });
-    await tx.auditLog.create({ data: { orgId, actorUserId: actor.user.id, action: "taxonomy.metadata_field.updated", entityType: "MetadataField", entityId: old.id, before: { name: old.name, multi: old.multi, required: old.required, facet: old.facet }, after: { name, multi, required, facet } } });
-    return updated;
-  });
+  const field = await prisma.metadataField.update({ where: { id: old.id }, data: { name, multi, required, facet } });
+  await logAudit({ orgId, actorUserId: actor.user.id, action: "taxonomy.metadata_field.updated", entityType: "MetadataField", entityId: old.id, before: { name: old.name, multi: old.multi, required: old.required, facet: old.facet }, after: { name, multi, required, facet } });
   return NextResponse.json({ field });
 }
