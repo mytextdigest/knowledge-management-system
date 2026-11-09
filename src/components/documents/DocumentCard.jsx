@@ -72,6 +72,10 @@ const DocumentCard = ({
         return { label: 'Matching topic…', icon: Loader2, spin: true, className: 'text-purple-600 dark:text-purple-400' };
       case 'ocr_failed':
         return { label: 'OCR failed', icon: AlertCircle, spin: false, className: 'text-red-600 dark:text-red-400' };
+      case 'password_protected':
+        return { label: 'Password-protected: remove the password and upload again', icon: AlertCircle, spin: false, className: 'text-red-600 dark:text-red-400' };
+      case 'unreadable_file':
+        return { label: 'Not a valid PowerPoint file', icon: AlertCircle, spin: false, className: 'text-red-600 dark:text-red-400' };
       case 'chunk_failed':
       case 'error':
         return { label: 'Processing failed', icon: AlertCircle, spin: false, className: 'text-red-600 dark:text-red-400' };

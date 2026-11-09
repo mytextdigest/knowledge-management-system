@@ -3,6 +3,7 @@ import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, SendMessageComm
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { extractPdfText } from "./extractPdf.js";
 import { extractSpreadsheetChunks } from "./extractSpreadsheet.js";
+import { extractPptxChunks } from "./extractPptx.js";
 import { runOCR } from "./runOcr.js";
 import mammoth from "mammoth";
 import { PrismaClient } from "@prisma/client";
@@ -33,9 +34,15 @@ import { createAclResolver, aclWriteData } from "../src/lib/connectors/sharepoin
 import { refreshSiteAcls, siteGroupFingerprint } from "../src/lib/connectors/sharepointAclRefresh.js";
 import { syncServiceNow } from "../src/lib/connectors/servicenowSync.js";
 import { tooLargeFileWrites, isTooLargeToIndex, TOO_LARGE } from "../src/lib/connectors/sharepointLargeFiles.js";
+import { pipelineState, firstMissingStage, STAGE_LABELS } from "../src/lib/documentPipeline.js";
+import { slidePreviewKey, isSlideDeck } from "../src/lib/slidePreview.js";
+import { renderPptxToPdf, SlideRenderUnavailable } from "./renderSlides.js";
+import { createSourceTagReader } from "../src/lib/connectors/sharepointSourceTags.js";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
+import { checkFileFormat, fileExtension } from "../src/lib/fileFormats.js";
+import { AUDIT_EVENTS } from "../src/lib/audit/events.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
 const S3_BUCKET = process.env.S3_BUCKET;
@@ -110,6 +117,9 @@ function startTimer(label, meta = {}) {
   };
 }
 
+// E11.1: PowerPoint files the worker can never read, and the status they get.
+const UNREADABLE_PPTX = { PPTX_PROTECTED: "password_protected", PPTX_INVALID: "unreadable_file" };
+
 async function processChunkJob(job) {
   const { docId, s3Key, filename, visibility = "private", projectId } = job;
   console.log(`🟦 CHUNK JOB: ${docId} (${visibility})`);
@@ -152,16 +162,14 @@ async function processChunkJob(job) {
   // 3. Extract + sanitize text
   // -----------------------------
   let rawText = "";
-  let sheetChunks = null; // set for spreadsheet docs — bypasses generic chunkText()
+  let sheetChunks = null; // set for spreadsheet and PowerPoint docs — bypasses generic chunkText()
 
   const endExtract = startTimer("TEXT EXTRACTION", { docId, filename });
 
   // SharePoint pages (A-15) and ServiceNow articles (A-17) arrive as text.
   const isPage = existingDoc.contentType === "page" || existingDoc.contentType === "article";
-  const isSpreadsheet =
-    filename.endsWith(".xlsx") ||
-    filename.endsWith(".xls") ||
-    filename.endsWith(".csv");
+  const ext = fileExtension(filename); // lower-case: "Deck.PDF" is a PDF too
+  const isSpreadsheet = [".xlsx", ".xls", ".csv"].includes(ext);
 
   if (isPage) {
     rawText = buffer.toString("utf8");
@@ -175,7 +183,7 @@ async function processChunkJob(job) {
     sheetChunks = extractedChunks;
     rawText = fullText;
     endExtract();
-  } else if (filename.endsWith(".pdf")) {
+  } else if (ext === ".pdf") {
     rawText = await extractPdfText(buffer);
 
     // Detect scanned PDF: text layer is absent or too short to be useful
@@ -206,10 +214,25 @@ async function processChunkJob(job) {
     } else {
       endExtract();
     }
-  } else if (filename.endsWith(".txt")) {
+  } else if (ext === ".pptx") {
+    // E11.1: one chunk per slide (title + body + notes), metadata.slide for citations.
+    try {
+      const { chunks: slideChunks, fullText } = await extractPptxChunks(buffer);
+      sheetChunks = slideChunks;
+      rawText = fullText;
+    } catch (err) {
+      endExtract();
+      if (!UNREADABLE_PPTX[err.errorCode]) throw err;
+      // Retrying can't help: stop with a status the document cards explain.
+      console.warn(`⚠️ ${filename}: ${err.message}`);
+      await prisma.document.update({ where: { id: docId }, data: { status: UNREADABLE_PPTX[err.errorCode] } });
+      return;
+    }
+    endExtract();
+  } else if (ext === ".txt") {
     rawText = buffer.toString("utf8");
     endExtract();
-  } else if (filename.endsWith(".docx")) {
+  } else if (ext === ".docx") {
     const result = await mammoth.extractRawText({ buffer });
     rawText = result.value;
     endExtract();
@@ -347,6 +370,16 @@ async function processChunkJob(job) {
     } catch (mailError) {
       console.error("Non-fatal chunk notification failure:", mailError.message);
     }
+  }
+
+  // A stored deck also gets its slides rendered (in parallel with embedding).
+  // The chunk job runs whenever a deck's content is (re)read: a new upload, a
+  // replaced file or new version, a changed file from SharePoint. So the
+  // previous slides are dropped first; until the new ones are ready the page
+  // shows the text view rather than old slides.
+  if (isSlideDeck(filename) && (s3Key || existingDoc.filePath)) {
+    await deleteSlidePreview(docId);
+    await queueSlidePreview(docId);
   }
 
   // -----------------------------
@@ -811,7 +844,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
         data: { ...sourceFields, ...(refreshAcl ? aclWriteData(await readAcl()) : {}) },
       });
     }
-    return { skipped: true, aclRefreshed: refreshAcl };
+    return { skipped: true, aclRefreshed: refreshAcl, docId: existing.id };
   }
 
   const aclRows = aclResolver ? await readAcl() : null;
@@ -830,7 +863,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
     if (!subscription || !["active", "trialing"].includes(subscription.status)) {
       throw new Error("No active subscription for org");
     }
-    const freedBytes = await removeStoredCopy(existing?.filePath, change.name);
+    const freedBytes = await removeStoredCopy(existing?.filePath, change.name, existing?.id);
     const data = {
       filePath: null,
       status: "queued",
@@ -850,7 +883,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
       prisma.user.update({ where: { id: connectedByUserId }, data: { storageUsedBytes: { decrement: freedBytes } } }),
     ]);
     await enqueueChunk({ doc, s3Key: null, filename: change.name, connectedByUserId, orgId });
-    return { skipped: false };
+    return { skipped: false, docId: doc.id };
   }
 
   const dbUser = await prisma.user.findUnique({ where: { id: connectedByUserId } });
@@ -916,12 +949,13 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
   ]);
 
   await enqueueChunk({ doc, s3Key, filename: change.name, connectedByUserId, orgId });
-  return { skipped: false };
+  return { skipped: false, docId: doc.id };
 }
 
-// Deletes a document's stored copy from S3. Returns the bytes freed (0 if
-// there was none or it couldn't be removed).
-async function removeStoredCopy(filePath, name) {
+// Deletes a document's stored copy from S3, and its rendered slides (a copy
+// too). Returns the bytes freed (0 if there was none or it couldn't be removed).
+async function removeStoredCopy(filePath, name, docId = null) {
+  if (docId && isSlideDeck(name)) await deleteSlidePreview(docId);
   if (!filePath) return 0n;
   try {
     const head = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: filePath }));
@@ -933,14 +967,52 @@ async function removeStoredCopy(filePath, name) {
   }
 }
 
+// EKP A-23: read the tags of a site's files synced before tags were kept
+// (every synced file of the site's document library not read this run).
+// A site's URL can prefix another connected site's (the root site and
+// /sites/Engineering): files under a more specific site are that site's.
+async function backfillSourceTags({ orgId, site, allSites = [], driveId, tagReader, skip }) {
+  const stats = { checked: 0, tagged: 0, failed: 0 };
+  if (!site.siteUrl) return stats;
+  const prefixOf = (url) => `${String(url).replace(/\/$/, "")}/`.toLowerCase();
+  const prefix = prefixOf(site.siteUrl);
+  const deeper = allSites
+    .map((s) => s.siteUrl && prefixOf(s.siteUrl))
+    .filter((p) => p && p !== prefix && p.startsWith(prefix));
+  const docs = await prisma.document.findMany({
+    where: {
+      orgId,
+      sourceProvider: "sharepoint",
+      contentType: { not: "page" },
+      externalId: { not: null },
+      externalUrl: { startsWith: prefix, mode: "insensitive" },
+    },
+    select: { id: true, externalId: true, externalUrl: true },
+  });
+  for (const doc of docs) {
+    if (skip.has(doc.id)) continue;
+    const url = doc.externalUrl.toLowerCase();
+    if (deeper.some((p) => url.startsWith(p))) continue;
+    stats.checked++;
+    try {
+      const count = await tagReader.sync({ documentId: doc.id, driveId, itemId: doc.externalId });
+      if (count) stats.tagged++;
+    } catch (err) {
+      stats.failed++;
+      console.error(`⚠️ Couldn't read the SharePoint tags of document ${doc.id}:`, err.message);
+    }
+  }
+  return stats;
+}
+
 // EKP A-24: a file above the size limit: name, permissions and link only.
 async function recordTooLargeFile({ change, existing, integration, site, connectedByUserId, aclRows, sourceFields }) {
   const subscription = await prisma.subscription.findUnique({ where: { orgId: integration.orgId } });
   if (!subscription || !["active", "trialing"].includes(subscription.status)) {
     throw new Error("No active subscription for org");
   }
-  const freedBytes = await removeStoredCopy(existing?.filePath, change.name);
-  await prisma.$transaction(
+  const freedBytes = await removeStoredCopy(existing?.filePath, change.name, existing?.id);
+  const written = await prisma.$transaction(
     tooLargeFileWrites(prisma, {
       existing,
       modifiedAt: change.modifiedAt,
@@ -952,7 +1024,8 @@ async function recordTooLargeFile({ change, existing, integration, site, connect
     })
   );
   console.log(`📦 "${change.name}" is ${Math.round(Number(change.size) / 1048576)} MB, above the size limit: link and permissions only`);
-  return { skipped: false, tooLarge: true };
+  const docId = existing?.id ?? written.find((row) => row?.externalId === change.externalId)?.id ?? null;
+  return { skipped: false, tooLarge: true, docId };
 }
 
 const MIN_PAGE_TEXT = 50; // same floor as processChunkJob
@@ -1121,6 +1194,7 @@ async function processSharePointSyncJob(job) {
   let filesFailed = 0;
   let aclRefreshed = 0;
   let filesTooLarge = 0; // A-24: counted in filesFound too (they still need review)
+  const skipped = []; // E11.4 / A-24: [{ name, reason }], files this run didn't index
   let runError = null;
   let scopeConfig = integration.scopeConfig;
 
@@ -1131,6 +1205,7 @@ async function processSharePointSyncJob(job) {
     const sites = scopeConfig.sites || [];
     const aclResolver = createAclResolver({ graphToken: accessToken, tenantId: scopeConfig.tenantId });
     if (!aclResolver) console.warn("⚠️ SharePoint certificate not configured: per-file permissions aren't captured");
+    const tagReader = createSourceTagReader(prisma, { accessToken }); // A-23
 
     for (const site of sites) {
       const connector = getConnector("sharepoint", { accessToken, siteId: site.siteId });
@@ -1166,16 +1241,50 @@ async function processSharePointSyncJob(job) {
         }
       }
 
+      const taggedDocIds = new Set(); // A-23: documents whose tags this run already read
+      let tagsFailed = 0;
       for (const change of changes) {
         if (change.deleted) continue; // FR-2 MVP: no orphan/archive handling yet (Open Question #4)
+        // E11.4: a format KMS can't read is never downloaded; it's listed with the reason.
+        const format = checkFileFormat(change.name);
+        if (!format.ok) {
+          skipped.push({ name: change.name, reason: format.reason, webUrl: change.webUrl || null });
+          continue;
+        }
         try {
           const result = await syncOneFile({ change, integration, site, connectedByUserId, accessToken, aclResolver, siteDriveId });
           if (!result.skipped) filesFound++;
-          if (result.tooLarge) filesTooLarge++;
+          if (result.tooLarge) {
+            filesTooLarge++;
+            skipped.push({ name: change.name, reason: "Above the size limit: only its name, link and permissions are kept.", webUrl: change.webUrl || null });
+          }
           if (result.aclRefreshed) aclRefreshed++;
+          // A-23: the file's managed-metadata values (non-fatal: the file itself is in).
+          if (!result.skipped && result.docId) {
+            try {
+              await tagReader.sync({ documentId: result.docId, driveId: change.driveId || siteDriveId, itemId: change.externalId });
+              taggedDocIds.add(result.docId);
+            } catch (err) {
+              tagsFailed++;
+              console.error(`⚠️ Couldn't read the SharePoint tags of "${change.name}":`, err.message);
+            }
+          }
         } catch (err) {
           console.error(`❌ Failed to sync file "${change.name}" (${change.externalId}):`, err.message);
           filesFailed++;
+        }
+      }
+
+      // A-23: files synced before tags were kept are unchanged, so delta won't
+      // bring them back. Read their tags once per site.
+      let sourceTagsReadAt = site.sourceTagsReadAt ?? null;
+      if (!sourceTagsReadAt && siteDriveId) {
+        try {
+          const backfill = await backfillSourceTags({ orgId: integration.orgId, site, allSites: sites, driveId: siteDriveId, tagReader, skip: taggedDocIds });
+          console.log(`🏷️ SharePoint tags backfilled for ${site.siteUrl}:`, backfill);
+          if (!backfill.failed && !tagsFailed) sourceTagsReadAt = new Date().toISOString();
+        } catch (err) {
+          console.error(`⚠️ SharePoint tag backfill failed for ${site.siteUrl} (retried next sync):`, err.message);
         }
       }
 
@@ -1224,6 +1333,7 @@ async function processSharePointSyncJob(job) {
                 ...s,
                 lastSyncCursor: cursor,
                 aclFingerprint,
+                sourceTagsReadAt,
                 driveId: siteDriveId || s.driveId || null,
                 pageLibraries,
                 pagesDriveId: undefined, // replaced by pageLibraries
@@ -1247,13 +1357,35 @@ async function processSharePointSyncJob(job) {
       finishedAt: new Date(),
       filesFound,
       filesFailed,
+      filesSkipped: skipped.length,
       error: runError,
     },
   });
+  await recordSkippedFiles({ orgId: integration.orgId, syncRunId, skipped });
 
-  console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed} aclRefreshed=${aclRefreshed} tooLarge=${filesTooLarge}`);
+  console.log(`✅ SharePoint sync complete: run=${syncRunId} found=${filesFound} failed=${filesFailed} skipped=${skipped.length} aclRefreshed=${aclRefreshed} tooLarge=${filesTooLarge}`);
 
   await sendDigest({ orgId: integration.orgId, source: "SharePoint", filesFound });
+}
+
+// E11.4 / A-24: the files a sync run didn't index, with the reason, in one
+// audit entry per run (the sync history shows them). Non-fatal.
+const MAX_SKIPPED_LISTED = 500;
+async function recordSkippedFiles({ orgId, syncRunId, skipped }) {
+  if (!skipped.length) return;
+  try {
+    await prisma.auditLog.create({
+      data: {
+        orgId,
+        action: AUDIT_EVENTS.SYNC_FILES_SKIPPED,
+        entityType: "SyncRun",
+        entityId: syncRunId,
+        metadata: { count: skipped.length, files: skipped.slice(0, MAX_SKIPPED_LISTED) },
+      },
+    });
+  } catch (err) {
+    console.error("⚠️ Couldn't record the skipped files of the sync run:", err.message);
+  }
 }
 
 // FR-7 — one digest email per sync run (not one per file), only when
@@ -1317,10 +1449,81 @@ async function processServiceNowSyncJob(job) {
   await sendDigest({ orgId: integration.orgId, source: "ServiceNow", filesFound: stats.found });
 }
 
+// Repair (document page: Regenerate, or a chat on a half-processed
+// document). Checks what the pipeline left behind *now* and runs the first
+// missing stage; that stage queues the next one exactly as in normal
+// processing (chunk → embed → summarize → cluster → ready), so everything
+// after it is redone too. With nothing missing it regenerates the summary
+// when asked to (the old Regenerate behaviour), else just settles the status.
+async function processRepairJob(job) {
+  const doc = await prisma.document.findUnique({ where: { id: job.docId } });
+  if (!doc) return;
+  const state = await pipelineState(prisma, doc);
+  const stage = firstMissingStage(doc, state);
+  console.log(`🛠️ REPAIR JOB: ${doc.id} — ${stage ? `missing ${STAGE_LABELS[stage] || stage}` : "nothing missing"}`, state);
+
+  if (isSlideDeck(doc.filename) && doc.filePath) await queueSlidePreview(doc.id);
+
+  const base = { docId: doc.id, filename: doc.filename, projectId: doc.projectId, userId: doc.userId, orgId: doc.orgId };
+  if (stage === "chunk") return processChunkJob({ ...base, s3Key: doc.filePath, visibility: doc.visibility });
+  if (stage === "embed") return processEmbeddingJob(base);
+  if (stage === "summarize") return processSummarizationJob({ ...base, regenerate: false });
+  if (stage === "cluster") return processJob({ type: "cluster", ...base });
+  if (stage === "unrepairable") {
+    console.warn(`⚠️ Can't repair ${doc.id}: no text and no file or source to read it from`);
+    await prisma.document.update({ where: { id: doc.id }, data: { status: "error" } });
+    return;
+  }
+  if (job.regenerateSummary) return processSummarizationJob({ ...base, regenerate: true });
+  await prisma.document.update({ where: { id: doc.id }, data: { status: "ready" } });
+}
+
+// Slide previews: a stored PowerPoint rendered to PDF (src/lib/slidePreview.js),
+// so the document page shows slides as designed. Never retried: a deck that
+// can't be rendered falls back to the text view.
+async function queueSlidePreview(docId) {
+  try {
+    await sqs.send(new SendMessageCommand({ QueueUrl: QUEUE_URL, MessageBody: JSON.stringify({ type: "slide_preview", docId }) }));
+  } catch (err) {
+    console.error(`⚠️ Couldn't queue the slide preview for ${docId}:`, err.message);
+  }
+}
+
+async function deleteSlidePreview(docId) {
+  try {
+    await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: slidePreviewKey(docId) }));
+  } catch (err) {
+    console.error(`⚠️ Couldn't remove the old slide preview of ${docId}:`, err.message);
+  }
+}
+
+async function processSlidePreviewJob(job) {
+  const doc = await prisma.document.findUnique({ where: { id: job.docId }, select: { id: true, filename: true, filePath: true } });
+  if (!doc?.filePath || !isSlideDeck(doc.filename)) return;
+  const Key = slidePreviewKey(doc.id);
+  if (!job.force) {
+    const exists = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key })).then(() => true, () => false);
+    if (exists) return;
+  }
+  try {
+    const end = startTimer("SLIDE PREVIEW", { docId: doc.id });
+    const deck = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: doc.filePath }));
+    const pdf = await renderPptxToPdf(await streamToBuffer(deck.Body));
+    await s3.send(new PutObjectCommand({ Bucket: S3_BUCKET, Key, Body: pdf, ContentType: "application/pdf" }));
+    end();
+    console.log(`🖼️ Slide preview stored for ${doc.id} (${pdf.length} bytes)`);
+  } catch (err) {
+    if (err instanceof SlideRenderUnavailable) console.warn(`⚠️ Slide previews are off on this worker: ${err.message}`);
+    else console.error(`⚠️ Slide preview failed for ${doc.id}:`, err.message);
+  }
+}
+
 async function processJob(job) {
   if (job.type === "chunk")    return processChunkJob(job);
   if (job.type === "embed")    return processEmbeddingJob(job);
   if (job.type === "summarize") return processSummarizationJob(job);
+  if (job.type === "repair") return processRepairJob(job);
+  if (job.type === "slide_preview") return processSlidePreviewJob(job);
   if (job.type === "cluster") {
     const result = await processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
     try { await processKnowledgeContext(job.docId); } catch (error) { console.error("Knowledge context job failed", error); }
@@ -1379,11 +1582,14 @@ async function mainLoop() {
         console.error("Worker job failed (SQS will retry):", err);
         // Only mark an in-flight document as failed. Never regress a ready,
         // completed, or otherwise advanced document due to a late retry.
-        if (["embed", "summarize"].includes(body.type) && body.docId) {
+        if (["embed", "summarize", "repair"].includes(body.type) && body.docId) {
           try {
+            // A repair runs whichever stage was missing, so any in-flight status can be its own.
             const allowedStatuses = body.type === "embed"
               ? ["chunked", "embedding"]
-              : ["embedded", "summarizing"];
+              : body.type === "summarize"
+                ? ["embedded", "summarizing"]
+                : ["queued", "chunked", "embedding", "embedded", "summarizing", "clustering"];
             await prisma.document.updateMany({
               where: { id: body.docId, status: { in: allowedStatuses } },
               data: { status: "error" },

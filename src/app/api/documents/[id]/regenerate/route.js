@@ -6,9 +6,10 @@ export const maxDuration = 60;
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
-import { canStreamFromSource } from "@/lib/documentSource";
+import { FILE_PROBLEM_STATUSES, isProcessingStatus } from "@/lib/documentStatus";
+import { firstMissingStage, pipelineState, STAGE_LABELS } from "@/lib/documentPipeline";
+import { queueRepair } from "@/lib/documentReprocess";
 
 export async function POST(req, { params }) {
   try {
@@ -28,65 +29,47 @@ export async function POST(req, { params }) {
     if (!access.document) return NextResponse.json({ error: "Document not found" }, { status: 404 });
     if (!access.canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const doc = await prisma.document.findUnique({
-      where: { id: documentId },
-      include: { project: true, user: true },
-    });
+    const doc = await prisma.document.findUnique({ where: { id: documentId } });
+    if (!doc) return NextResponse.json({ error: "Document not found" }, { status: 404 });
 
-    const BLOCKING_STATUSES = new Set([
-      'queued', 'extracting', 'running_ocr', 'chunked',
-      'embedding', 'embedded', 'summarizing', 'clustering',
-    ]);
-    if (BLOCKING_STATUSES.has(doc.status)) {
+    if (isProcessingStatus(doc.status)) {
       return NextResponse.json(
         { error: "Document is currently being processed. Wait until processing completes before regenerating the summary." },
         { status: 409 }
       );
     }
 
-    // A-14: a no-copy SharePoint document has no filePath; the summary is
-    // rebuilt from its stored chunks, so it can still be regenerated.
-    if (!doc.filePath && !canStreamFromSource(doc))
+    if (FILE_PROBLEM_STATUSES.has(doc.status)) {
       return NextResponse.json(
-        { error: "Document filePath missing (cannot regenerate)" },
+        { error: "KMS can't read this file. Fix the file (see the document's status) and upload it again." },
         { status: 400 }
       );
+    }
 
-    const filename = doc.filename || doc.filePath.split("/").pop();
+    // The worker's repair job finishes whatever processing is missing (text,
+    // search index, summary, topic) from the first missing stage on, or, when
+    // nothing is missing, regenerates the summary as before.
+    const missing = firstMissingStage(doc, await pipelineState(prisma, doc));
+    if (missing === "unrepairable") {
+      return NextResponse.json(
+        { error: "This document has no extracted text and its original file isn't available, so it can't be reprocessed. Upload it again." },
+        { status: 400 }
+      );
+    }
 
-    // Update status → regenerating (treated like summarizing)
-    await prisma.document.update({
-      where: { id: documentId },
-      data: { status: "summarizing" },
-    });
-
-    // SQS
-    const sqs = new SQSClient({ region: process.env.AWS_REGION });
-
-    // 🔥 NEW: For regeneration, we explicitly send type: "summarize"
-    const messageBody = JSON.stringify({
-      type: "summarize",      // 🟢 Worker stage 3
-      docId: documentId,
-      s3Key: doc.filePath,
-      filename,
-      projectId: doc.projectId || null,
-      userId: doc.userId || null,
-      regenerate: true        // 🟢 Worker takes special regenerate path
-    });
-
-    await sqs.send(
-      new SendMessageCommand({
-        QueueUrl: process.env.SQS_QUEUE_URL,
-        MessageBody: messageBody,
-      })
-    );
-
-    console.log(`📄 Queued summary regeneration for document ${documentId}`);
+    if (!(await queueRepair(prisma, doc, { regenerateSummary: true }))) {
+      return NextResponse.json(
+        { error: "Document is currently being processed. Wait until processing completes before regenerating the summary." },
+        { status: 409 }
+      );
+    }
+    console.log(`📄 Queued repair for document ${documentId}: ${missing ? `from ${missing}` : "summary only"}`);
 
     return NextResponse.json({
       success: true,
       id: documentId,
-      status: "summarizing"
+      status: "queued",
+      repairing: missing ? STAGE_LABELS[missing] : null,
     });
 
   } catch (err) {

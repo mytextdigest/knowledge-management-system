@@ -211,6 +211,7 @@ function ProjectPageInner() {
       body: JSON.stringify({
         fileName: file.name,
         fileType: file.type,
+        fileSize: file.size,
         userId,
         projectId,
       }),
@@ -223,7 +224,8 @@ function ProjectPageInner() {
         throw new Error(presignData.message || "Duplicate filename");
       }
 
-      throw new Error("Failed to prepare upload");
+      // E11.4 / EQ-5: unsupported format or too large, said as-is.
+      throw new Error(presignData?.error || "Failed to prepare upload");
     }
 
     const { url, fields, key } = presignData;

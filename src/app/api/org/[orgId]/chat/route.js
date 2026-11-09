@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-import { hybridOrgSearch } from "@/lib/hybridSearch";
+import { search } from "@/lib/search/searchService";
 import { expandQuery } from "@/lib/queryExpansion";
 import { extractQuestionEntities } from "@/lib/entityExtraction";
 import { getRecentMemory, recordMemoryTopics } from "@/lib/orgMemberMemory";
@@ -14,6 +14,7 @@ import { searchAccessWhere, getUserPrincipals } from "@/lib/access/documentAcces
 import { isDecisionQuestion, getDecisionEvidence, formatDecisionContext, DECISION_INSTRUCTION } from "@/lib/decisionIntelligence";
 import { isLessonQuestion, getLessonEvidence, formatLessonContext, LESSON_INSTRUCTION } from "@/lib/lessonsIntelligence";
 import { sourcePreviewUrl } from "@/lib/documentSource";
+import { slideOf, slideCitation } from "@/lib/slideCitations";
 import { isDocumentListingQuestion } from "@/lib/keywordSearch";
 import { LISTING_INSTRUCTION, buildListing, sourceLabel, ACCESS_NOTE, needsAccessNote } from "@/lib/documentListing";
 
@@ -30,6 +31,8 @@ answers the question, say:
 Each document in the context is labelled with its kind and source, e.g.
 "(SharePoint page)", "(SharePoint file)" or "(uploaded file)"; use that
 when the user asks about pages, files or where something comes from.
+Text from a PowerPoint slide starts with "[slide N]"; when you use it, say
+which slide it is on (e.g. "slide 7 of Outage Review.pptx").
 
 Response format:
 - For direct factual questions, answer concisely in a short paragraph or a couple of sentences. Do not force structure onto a simple answer.
@@ -342,7 +345,9 @@ export async function POST(req, { params }) {
   }
 
   if (chunks.length === 0 && workflowRequest.action !== "stop") {
-    chunks = await hybridOrgSearch({
+    const { results: retrievedChunks } = await search({
+        kind: "chat",
+        query: question,
       queries: [...expandedQueries, ...extraKeywordQueries],
       embeddings: queryEmbeddings,
       userId: user.id,
@@ -355,6 +360,7 @@ export async function POST(req, { params }) {
       feedbackQuestion: question,
       exactTermQuestion: question,
     });
+    chunks = retrievedChunks;
 
     if (workflowRequest.action === "start") {
       const candidateIds = [...new Set(chunks.map((chunk) => chunk.document_id).filter(Boolean))];
@@ -427,8 +433,11 @@ export async function POST(req, { params }) {
       department: c.department_name,
       project: c.project_name,
       texts: [],
+      slides: new Set(), // E11.1: slide numbers of the cited chunks
     };
-    acc[key].texts.push(String(c.text || "").slice(0, 600).replace(/\n+/g, " "));
+    const slide = slideOf(c);
+    if (slide) acc[key].slides.add(slide);
+    acc[key].texts.push(`${slide ? `[slide ${slide}] ` : ""}${String(c.text || "").slice(0, 600).replace(/\n+/g, " ")}`);
     return acc;
   }, {});
 
@@ -459,6 +468,7 @@ export async function POST(req, { params }) {
       sourceProvider: g.sourceProvider,
       label: g.label,
       mayBeOutdated: g.mayBeOutdated,
+      ...slideCitation(g.documentId, g.slides),
     }))
   );
 

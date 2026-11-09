@@ -205,6 +205,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
           { label: "Recently Deleted", href: `/org/${orgId}/deleted`, icon: Trash2 },
           { label: "Taxonomy", href: `/org/${orgId}/taxonomy`, icon: Tags },
         ] : []),
+        ...(isOrgAdmin ? [{ label: "Analytics", href: `/org/${orgId}/analytics`, icon: BarChart3 }] : []),
         ...(isSuperAdmin ? [
           { label: "Approval Workflows", href: `/org/${orgId}/workflows`, icon: Workflow },
           { label: "Review Policies", href: `/org/${orgId}/review-policies`, icon: CalendarClock },

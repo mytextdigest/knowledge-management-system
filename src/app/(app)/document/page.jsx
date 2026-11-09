@@ -11,32 +11,51 @@ import DocumentReviewPrompt from "@/components/governance/DocumentReviewPrompt";
 import DocumentLifecycleActions from "@/components/governance/DocumentLifecycleActions";
 import Layout from '@/components/layout/Layout';
 import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Send, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Square, Trash2, CheckCircle2, Copy, Check, Printer, Bot, User, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network } from 'lucide-react';
+import { FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Trash2, CheckCircle2, Copy, Check, Printer, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network, Info, ArrowLeft } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
 import PdfViewer from "@/components/documents/PdfViewer";
+import SlideDeckViewer from "@/components/documents/SlideDeckViewer";
+import FileViewerFrame from "@/components/documents/viewer/FileViewerFrame";
+import { ViewerToolbarHost } from "@/components/documents/viewer/ViewerToolbar";
+import { slidesFromChunks } from "@/lib/slideCitations";
+import { printHtml } from "@/lib/printDocument";
+import { cn } from "@/lib/utils";
+import { isProcessingStatus } from "@/lib/documentStatus";
+import SourceTagsPanel from "@/components/documents/SourceTagsPanel";
 import DocumentFullscreenModal from "@/components/documents/DocumentFullscreenModal";
-import { cn } from '@/lib/utils';
 import { copySummary, printSummary } from '@/lib/summaryActions';
 import DocViewer, { DocViewerRenderers } from "react-doc-viewer";
-import MessageActions from "@/components/chat/MessageActions";
+import ChatMessage, { AssistantPendingRow, TypingDots } from "@/components/chat/ChatMessage";
+import ChatComposer from "@/components/chat/ChatComposer";
 import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
 import { useToast, ToastProvider } from "@/components/ui/Toast";
+import DocumentTabs from "@/components/documents/document/DocumentTabs";
 import OpenInSourceLink from '@/components/documents/OpenInSourceLink';
 
 
 
 const WORDS_PER_PAGE = 400;
 
+const escapeHtml = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Wraps a document body for the system print dialog (from My Text Digest).
+const printableHtml = (title, body) => `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(title)}</title>
+<style>body{font-family:Georgia,serif;max-width:760px;margin:32px auto;color:#111;line-height:1.6}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px}h2{font-size:16px;margin:24px 0 6px}</style>
+</head><body>${body}</body></html>`;
+
+// Signed file links from the document API last an hour; refresh them before that.
+const FILE_LINK_TTL_MS = 50 * 60 * 1000;
+
 function DocumentContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
   const id = searchParams.get('id');
+  // E11.1: a "slide 7" citation links here with &slide=7.
+  const activeSlide = Number.parseInt(searchParams.get('slide') || '', 10) || null;
 
 
   const [doc, setDoc] = useState(null);
@@ -44,7 +63,7 @@ function DocumentContent() {
   const [chat, setChat] = useState([]);
   const [question, setQuestion] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'summary' | 'guide' | 'insights'
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'summary' | 'guide' | 'insights' | 'details' | 'versions' | 'history' | 'workflow'
   const [summary, setSummary] = useState(null);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [summaryCopied, setSummaryCopied] = useState(false);
@@ -62,6 +81,15 @@ function DocumentContent() {
 
   const [expandedMessage, setExpandedMessage] = useState(null);
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+  // The left header row's slot that viewer toolbars render into.
+  const [toolbarHost, setToolbarHost] = useState(null);
+  const toolbarSlot = useMemo(() => ({ host: toolbarHost }), [toolbarHost]);
+  // PowerPoint: the deck as designed (a PDF, one page per slide) when there is
+  // one; "text" shows what KMS read from each slide, with speaker notes.
+  const [slidePreview, setSlidePreview] = useState(null); // { status, url? }
+  const [slideView, setSlideView] = useState("slides");
+  // Stable, so the viewer jumps to a cited slide once rather than on every render.
+  const slideJump = useMemo(() => (activeSlide ? { page: activeSlide, nonce: activeSlide } : null), [activeSlide]);
 
   // Reading Guide state
   const [pagesRead, setPagesRead] = useState(0);
@@ -276,6 +304,69 @@ function DocumentContent() {
     return data;
   }, []);
 
+  // Re-fetches (summary polling, workflow and lifecycle changes) return newly
+  // signed file links. Keep the ones the viewer already has while they point at
+  // the same file, so the viewer doesn't reload the document on every fetch.
+  // getFileLinks below refreshes them for Download / Open in new tab.
+  const applyFreshDoc = useCallback((fresh) => {
+    if (!fresh) return;
+    const base = (url) => String(url || "").split("?")[0];
+    setDoc((prev) =>
+      prev && prev.id === fresh.id && prev.fileUrl && base(prev.fileUrl) === base(fresh.fileUrl)
+        ? { ...fresh, fileUrl: prev.fileUrl, fileDownloadUrl: prev.fileDownloadUrl }
+        : fresh
+    );
+  }, []);
+
+  // Download / Open in new tab for the viewers (viewer/ViewerToolbar.jsx).
+  // Reuses the links from the last load and fetches fresh ones (same access
+  // check) once they're near expiry, without reloading the viewer.
+  const fileLinksRef = useRef(null);
+  useEffect(() => {
+    fileLinksRef.current = doc?.fileUrl
+      ? { fileUrl: doc.fileUrl, downloadUrl: doc.fileDownloadUrl, at: Date.now() }
+      : null;
+  }, [doc?.fileUrl, doc?.fileDownloadUrl]);
+  const getFileLinks = useCallback(async () => {
+    const cached = fileLinksRef.current;
+    if (cached && Date.now() - cached.at < FILE_LINK_TTL_MS) return cached;
+    const fresh = await fetchDocument(id);
+    if (!fresh?.fileUrl) return cached;
+    fileLinksRef.current = { fileUrl: fresh.fileUrl, downloadUrl: fresh.fileDownloadUrl, at: Date.now() };
+    return fileLinksRef.current;
+  }, [fetchDocument, id]);
+
+  // Slide preview for a deck: use it if it's there, otherwise ask the worker
+  // to render it and check back for a few minutes (text view meanwhile).
+  const isDeck = /\.pptx$/i.test(doc?.filename || "");
+  useEffect(() => {
+    if (!id || !isDeck) return;
+    let cancelled = false;
+    let timer = null;
+    const check = () => fetch(`/api/documents/${id}/slides`, { credentials: "include" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    (async () => {
+      let res = await check();
+      if (cancelled || !res) return;
+      setSlidePreview(res);
+      if (res.status !== "missing") return;
+      await fetch(`/api/documents/${id}/slides`, { method: "POST", credentials: "include" }).catch(() => {});
+      setSlidePreview({ status: "rendering" });
+      const started = Date.now();
+      const poll = async () => {
+        res = await check();
+        if (cancelled) return;
+        if (res?.status === "ready") return setSlidePreview(res);
+        if (Date.now() - started < 3 * 60 * 1000) timer = setTimeout(poll, 4000);
+        else setSlidePreview({ status: "missing" });
+      };
+      timer = setTimeout(poll, 4000);
+    })();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [id, isDeck]);
+
   // Load document
   useEffect(() => {
     if (!id) return;
@@ -289,7 +380,7 @@ function DocumentContent() {
           return;
         }
 
-        setDoc(data);
+        applyFreshDoc(data);
         void fetch(`/api/documents/${id}/interactions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -404,27 +495,24 @@ function DocumentContent() {
 
   }, [doc]);
 
+  // Poll while the worker is on the document (status queued … clustering);
+  // stop once it settles, with or without a summary. A ready document with no
+  // summary shows "Regenerate" on the Summary tab instead of waiting forever.
+  const isProcessing = isProcessingStatus(doc?.status);
   useEffect(() => {
-    let interval = null;
-  
-    const pollSummary = async () => {
+    if (!id || !isProcessing) return;
+    const interval = setInterval(async () => {
       try {
         const data = await fetchDocument(id);
-        if (!data) {
-          clearInterval(interval);
-          return;
-        }
-
-        setDoc(data);
-
-        if (data?.summary) {
+        if (!data) return clearInterval(interval);
+        applyFreshDoc(data);
+        if (data.summary) {
           let parsed;
           try {
             parsed = JSON.parse(data.summary);
           } catch {
             parsed = { overview: data.summary, keyPoints: [] };
           }
-  
           setSummary({
             title: data.filename,
             overview: parsed.overview,
@@ -434,20 +522,13 @@ function DocumentContent() {
             documentType: data.filename.split(".").pop().toUpperCase(),
             lastModified: new Date(data.created_at).toLocaleDateString(),
           });
-  
-          clearInterval(interval);
         }
       } catch (err) {
-        console.error("Error polling summary:", err);
+        console.error("Error polling document:", err);
       }
-    };
-  
-    if (doc && !doc.summary) {
-      interval = setInterval(pollSummary, 3000);
-    }
-  
+    }, 3000);
     return () => clearInterval(interval);
-  }, [id, doc, fetchDocument]);
+  }, [id, isProcessing, fetchDocument, applyFreshDoc]);
 
 
   useEffect(() => {
@@ -493,7 +574,10 @@ function DocumentContent() {
         console.error("Failed to start/load conversation:", e);
       }
     })();
-  }, [doc]);
+    // Once per document: re-fetches of `doc` (e.g. summary polling every 3s)
+    // must not start a new conversation each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id]);
 
   // regenerate document summary
   // Generate summary when user clicks "Regenerate summary"
@@ -531,7 +615,7 @@ function DocumentContent() {
         return;
       }
 
-      setDoc(fresh);
+      applyFreshDoc(fresh);
 
       // If summary already present (rare), update UI immediately
       if (fresh?.summary) {
@@ -568,7 +652,7 @@ function DocumentContent() {
         const polled = await fetchDocument(doc.id);
         if (!polled) continue;
 
-        setDoc(polled);
+        applyFreshDoc(polled);
 
         if (polled?.summary) {
           let parsedSummary;
@@ -623,20 +707,6 @@ function DocumentContent() {
   };
 
 
-  // Generate summary when switching to summary tab
-  useEffect(() => {
-    if (
-      activeTab === "summary" &&
-      doc &&
-      !summary &&
-      doc.status === "ready" &&
-      !isGeneratingSummary
-    ) {
-      fetchDocument(id).then((data) => {
-        if (data) setDoc(data);
-      });
-    }
-  }, [activeTab, doc, summary, isGeneratingSummary, id, fetchDocument]);
 
 
   //  --- Asking document queries ----
@@ -688,6 +758,13 @@ function DocumentContent() {
       if (res?.success) {
         setChat(prev => [
           ...prev,
+          // The document was half-processed and the server queued reprocessing.
+          ...(res.notice ? [{
+            id: `notice-${Date.now()}`,
+            role: "system",
+            content: res.notice,
+            timestamp: new Date()
+          }] : []),
           {
             id: `assistant-${Date.now()}-${Math.random()}`,
             role: "assistant",
@@ -695,6 +772,8 @@ function DocumentContent() {
             timestamp: new Date()
           }
         ]);
+        // Pick up the new status so the page polls until reprocessing finishes.
+        if (res.reprocessing) fetchDocument(id).then(applyFreshDoc);
   
         if (res.conversationId && res.conversationId !== conversationId) {
           setConversationId(res.conversationId);
@@ -805,44 +884,104 @@ function DocumentContent() {
 
 
 
-  const renderDocument = () => {
+  // The viewers render frameless; their toolbars portal into the left header row.
+  // inModal: the fullscreen view's copy, which must not take over the page's
+  // scroll tracking (docScrollRef drives the Pagewise Summary).
+  const renderDocument = ({ inModal = false } = {}) => {
     if (!doc) return null;
+    const scrollProps = inModal ? {} : { ref: docScrollRef, onScroll: handleDocScroll };
 
     const ext = doc.filename.split(".").pop().toLowerCase();
+    const fileLinks = doc.fileUrl ? getFileLinks : undefined;
+    // The original file is gone (no stored copy, no source to stream from);
+    // slides and spreadsheets render from chunks, everything else from its text.
+    const fileMissing = !doc.fileUrl && !["pptx", "xlsx", "xls", "csv"].includes(ext);
 
     // A SharePoint page (A-15) or ServiceNow article (A-17) has no file; show its text.
-    if (ext === "txt" || doc.contentType === "page" || doc.contentType === "article") {
+    if (ext === "txt" || doc.contentType === "page" || doc.contentType === "article" || fileMissing) {
       return (
-        <div ref={docScrollRef} onScroll={handleDocScroll} className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
-          <pre className="whitespace-pre-wrap text-gray-900 dark:text-gray-100 p-6 font-mono text-sm leading-relaxed max-w-5xl mx-auto">
-            {doc.content}
+        <FileViewerFrame
+          {...scrollProps}
+          getFileLinks={fileLinks}
+          onPrint={() => printHtml(printableHtml(doc.filename, `<pre style="white-space:pre-wrap;font:13px/1.6 ui-monospace,monospace">${escapeHtml(doc.content)}</pre>`))}
+        >
+          {fileMissing && ext !== "txt" && (
+            <p role="status" className="mx-6 mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+              The original file isn&apos;t available, so this is the text KMS extracted from it.
+            </p>
+          )}
+          <pre className="whitespace-pre-wrap text-gray-900 dark:text-gray-100 p-6 font-mono text-sm leading-relaxed">
+            {doc.content || "No text was extracted from this document."}
           </pre>
-        </div>
+        </FileViewerFrame>
       );
     }
 
     if (ext === "pdf") {
       return (
-        <div className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <PdfViewer fileUrl={doc.fileUrl} onPageChange={handleDocPageChange} onTotalPages={setPdfTotalPages} />
-        </div>
-      );
-    }
-
-    if (ext === "docx") {
-      return (
-        <div ref={docScrollRef} onScroll={handleDocScroll} className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto">
-          <div
-            className="prose prose-gray dark:prose-invert max-w-none p-6"
-            dangerouslySetInnerHTML={{ __html: docxHtml || "<p>Loading...</p>" }}
+        <div className="w-full h-full overflow-hidden">
+          <PdfViewer
+            fileUrl={doc.fileUrl}
+            getFileLinks={fileLinks}
+            filename={doc.filename}
+            onPageChange={handleDocPageChange}
+            onTotalPages={setPdfTotalPages}
           />
         </div>
       );
     }
 
+    if (ext === "pptx") {
+      if (slideView === "slides" && slidePreview?.status === "ready") {
+        return (
+          <div className="w-full h-full overflow-hidden">
+            <PdfViewer
+              fileUrl={slidePreview.url}
+              getFileLinks={fileLinks}
+              filename={doc.filename}
+              jumpTo={slideJump}
+            />
+          </div>
+        );
+      }
+      const { slides } = slidesFromChunks(doc.chunks);
+      return (
+        <FileViewerFrame
+          getFileLinks={fileLinks}
+          onPrint={slides.length ? () => printHtml(printableHtml(doc.filename, slides.map((sl) =>
+            `<h2>Slide ${sl.slide}${sl.title ? `: ${escapeHtml(sl.title)}` : ""}</h2>` +
+            (sl.body ? `<p style="white-space:pre-wrap">${escapeHtml(sl.body)}</p>` : "") +
+            (sl.notes ? `<p style="white-space:pre-wrap;color:#555"><em>Speaker notes:</em> ${escapeHtml(sl.notes)}</p>` : "")
+          ).join(""))) : undefined}
+        >
+          {slidePreview?.status === "rendering" && (
+            <p role="status" className="mx-4 mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-200">
+              Preparing the slides as designed; they&apos;ll appear here in a moment. Meanwhile, this is the text of each slide.
+            </p>
+          )}
+          <SlideDeckViewer chunks={doc.chunks} activeSlide={activeSlide} />
+        </FileViewerFrame>
+      );
+    }
+
+    if (ext === "docx") {
+      return (
+        <FileViewerFrame
+          {...scrollProps}
+          getFileLinks={fileLinks}
+          onPrint={docxHtml ? () => printHtml(printableHtml(doc.filename, docxHtml)) : undefined}
+        >
+          <div
+            className="prose prose-gray dark:prose-invert max-w-none p-6"
+            dangerouslySetInnerHTML={{ __html: docxHtml || "<p>Loading...</p>" }}
+          />
+        </FileViewerFrame>
+      );
+    }
+
     if (["xlsx", "xls", "csv"].includes(ext)) {
       return (
-        <div className="w-full h-full overflow-auto bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-5">
+        <FileViewerFrame getFileLinks={fileLinks} contentClassName="p-4 space-y-5">
           {sheets.length === 0 ? (
             <div className="text-sm text-gray-500 dark:text-gray-400">Spreadsheet data is still being processed. You can download the original file in the meantime.</div>
           ) : sheets.map((sheet) => (
@@ -868,12 +1007,12 @@ function DocumentContent() {
               {(sheet.previewRows || []).length === 0 ? <p className="p-3 text-xs text-gray-500">No data rows extracted for this sheet.</p> : null}
             </div>
           ))}
-        </div>
+        </FileViewerFrame>
       );
     }
 
     return (
-      <div className="w-full h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center">
+      <div className="w-full h-full flex items-center justify-center">
         <p className="text-gray-500 dark:text-gray-400">Unsupported file type: {ext}</p>
       </div>
     );
@@ -910,204 +1049,176 @@ function DocumentContent() {
     );
   }
 
-  // Document Preview Panel (Left Column)
-  const documentPanel = (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="h-full flex flex-col space-y-4 pt-2.5"
-    >
-      {/* Header with Back Button */}
-      <div className="flex items-center justify-between">
-        <BackButton
-          href={
-            doc?.projectId
-              ? `/project?id=${doc.projectId}`
-              : doc?.orgId
-                ? `/org/${doc.orgId}/repository`
-                : '/welcome-back'
-          }
-          label={doc?.projectId ? 'Back to Project' : 'Back to Repository'}
-        />
-      </div>
+  const isRepositoryDoc = doc?.scope === "repository" && Boolean(doc?.orgId);
+  const hasDetails = isRepositoryDoc || (doc?.sourceTags?.length ?? 0) > 0;
+  const refreshDoc = () => fetchDocument(id).then((fresh) => fresh && applyFreshDoc(fresh));
+  const backHref = doc?.projectId
+    ? `/project?id=${doc.projectId}`
+    : doc?.orgId
+      ? `/org/${doc.orgId}/repository`
+      : '/welcome-back';
+  const notices = [
+    doc?.lifecycleSuggestion === 'archived' && {
+      key: 'outdated',
+      body: 'May be outdated: this document has been flagged for review.',
+    },
+    // Processing stopped part-way (e.g. no search index); Regenerate finishes it.
+    doc?.processing?.missing && !isProcessing && {
+      key: 'incomplete',
+      body: (
+        <>
+          Processing didn&apos;t finish: the {doc.processing.missing} is missing.{' '}
+          {doc.processing.repairable === false
+            ? 'Upload the document again to process it.'
+            : canRegenerateSummary
+              ? <button type="button" onClick={generateSummary} disabled={isGeneratingSummary} className="font-medium underline disabled:opacity-50">Finish processing</button>
+              : 'Ask an owner or department admin of this document to regenerate it.'}
+        </>
+      ),
+    },
+    doc?.supersededById && {
+      key: 'superseded',
+      body: (
+        <>
+          This document has been superseded.{' '}
+          <a className="font-medium underline" href={`/document?id=${encodeURIComponent(doc.supersededById)}`}>Open the replacement document</a>.
+        </>
+      ),
+    },
+  ].filter(Boolean);
 
-      {/* Document Info */}
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+  // Document Preview Panel (Left Column): a header row (Back, filename, source
+  // link, viewer controls) over notices and the frameless viewer. Ported from
+  // My Text Digest's workspace layout; ownership, metadata and tags are in the
+  // right panel's Details tab.
+  const documentPanel = (
+    <div className="h-full flex flex-col bg-white dark:bg-gray-900">
+      <div className="@container shrink-0 h-12 flex items-center gap-2 pl-3 pr-2 border-b border-gray-200 dark:border-gray-700">
+        <button
+          type="button"
+          onClick={() => router.push(backHref)}
+          title={doc?.projectId ? 'Back to project' : 'Back to repository'}
+          aria-label={doc?.projectId ? 'Back to project' : 'Back to repository'}
+          className="shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {/* Words only when the column has room; the viewer's controls come first. */}
+          <span className="hidden @3xl:inline">Back</span>
+        </button>
+        <h1 className="flex-1 min-w-0 truncate text-sm font-semibold text-gray-900 dark:text-gray-100" title={doc.filename}>
           {doc.filename}
         </h1>
-        <p className="text-gray-600 dark:text-gray-400">
-          Document Preview
-        </p>
         {doc.externalUrl && (
-          <div className="mt-2 flex justify-center">
-            <OpenInSourceLink url={doc.externalUrl} sourceProvider={doc.sourceProvider} />
+          <div className="shrink-0">
+            <OpenInSourceLink url={doc.externalUrl} sourceProvider={doc.sourceProvider} className="h-8" labelClassName="hidden @5xl:inline" />
           </div>
         )}
+        {ext === 'pptx' && slidePreview?.status === 'ready' && (
+          <div role="group" aria-label="Slide view" className="shrink-0 inline-flex h-8 items-center rounded-md border border-gray-200 p-0.5 dark:border-gray-700">
+            {[['slides', 'Slides'], ['text', 'Text']].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={slideView === value}
+                onClick={() => setSlideView(value)}
+                title={value === 'slides' ? 'The slides as designed' : 'The text KMS read from each slide, with speaker notes'}
+                className={cn(
+                  'h-full rounded px-2.5 text-xs font-medium transition-colors',
+                  slideView === value ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div ref={setToolbarHost} className="shrink-0 flex items-center" />
+        <button
+          type="button"
+          onClick={() => setIsFullscreenOpen(true)}
+          title="Fullscreen"
+          aria-label="Open document in fullscreen"
+          className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
+        >
+          <Maximize2 className="h-4 w-4" />
+        </button>
       </div>
 
-      {doc?.scope === "repository" && doc?.orgId && (
-        <DocumentLifecycleActions doc={doc} onChanged={() => fetchDocument(id).then((fresh) => fresh && setDoc(fresh))} />
-      )}
-
-      {doc?.scope === "repository" && doc?.orgId && (
-        <DocumentOwnershipPanel documentId={doc.id} orgId={doc.orgId} />
-      )}
-
-      {doc?.scope === "repository" && doc?.orgId && (
-        <DocumentCompletenessBadge documentId={doc.id} />
-      )}
-
-      {doc?.scope === "repository" && doc?.orgId && (
-        <DocumentReviewPrompt orgId={doc.orgId} documentId={doc.id} />
-      )}
-
-      {doc?.lifecycleSuggestion === 'archived' && <div role="status" className="mb-3 rounded border border-amber-400 bg-amber-50 p-3 text-amber-900">May be outdated — this document has been flagged for review.</div>}
-      {doc?.supersededById && (
-        <div role="status" className="rounded border border-amber-400 bg-amber-50 p-3 text-amber-900">
-          This document has been superseded. <a className="underline" href={`/document?id=${encodeURIComponent(doc.supersededById)}`}>Open the replacement document</a>.
+      {isRepositoryDoc && (
+        <div className="shrink-0 px-3 pt-3 empty:hidden">
+          <DocumentReviewPrompt orgId={doc.orgId} documentId={doc.id} />
         </div>
       )}
+      {notices.map((n) => (
+        <div key={n.key} role="status" className="shrink-0 flex items-center gap-2 px-3 py-2 text-sm border-b border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="min-w-0">{n.body}</span>
+        </div>
+      ))}
 
-      {/* Document Content */}
-      <div className="flex-1 min-h-0">
-        <Card className="h-full relative">
-          <button
-            type="button"
-            onClick={() => setIsFullscreenOpen(true)}
-            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-900/80 hover:bg-gray-900 text-white text-xs font-medium shadow-md backdrop-blur transition"
-            aria-label="Open document in fullscreen"
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-            <span>Fullscreen</span>
-          </button>
-          <CardContent className="p-0 h-full">
-            <div className="h-full overflow-hidden">
-              {renderDocument()}
-            </div>
-          </CardContent>
-        </Card>
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <ViewerToolbarHost.Provider value={toolbarSlot}>
+          {renderDocument()}
+        </ViewerToolbarHost.Provider>
       </div>
-    </motion.div>
+    </div>
+  );
+
+
+  // Details tab (right column): document actions, ownership, metadata, source tags
+  const detailsPanel = (
+    <div className="h-full overflow-y-auto p-4 space-y-4">
+      {isRepositoryDoc && <DocumentLifecycleActions doc={doc} onChanged={refreshDoc} />}
+      {isRepositoryDoc && <DocumentOwnershipPanel documentId={doc.id} orgId={doc.orgId} />}
+      {isRepositoryDoc && <DocumentCompletenessBadge documentId={doc.id} />}
+      <SourceTagsPanel tags={doc?.sourceTags} />
+    </div>
   );
 
   const insightsCount = (doc?.experts?.length || 0) + (doc?.relatedDocuments?.length || 0) + (doc?.projectLinks?.length || 0);
 
-  // Chat Interface Panel (Right Column)
+  const hasChatHistory = chat.some(msg => msg.role !== "system");
+  const tabs = [
+    { id: 'chat', label: 'Chat', icon: MessageCircle },
+    { id: 'summary', label: 'Summary', icon: BarChart3 },
+    { id: 'guide', label: 'Pagewise Summary', icon: BookOpen },
+    hasDetails && { id: 'details', label: 'Details', icon: Info },
+    { id: 'versions', label: 'Versions', icon: Clock },
+    { id: 'history', label: 'History', icon: Clock },
+    isRepositoryDoc && { id: 'workflow', label: 'Workflow', icon: CheckCircle2 },
+    { id: 'insights', label: 'Insights', icon: Network, count: insightsCount },
+  ].filter(Boolean);
+
+  // Analysis Panel (Right Column): tabs (+ clear chat on the Chat tab) in a
+  // header row that lines up with the document's, over the active tab; no card.
   const chatPanel = (
-    <div className="chat-container">
-      <Card className="chat-container">
-        <CardHeader className="flex-shrink-0 pb-2">
-        <div className="flex items-center justify-between w-full mb-4">
-            <CardTitle className="flex items-center space-x-2">
-              <MessageCircle className="h-5 w-5 text-primary-600" />
-              <span>Document Analysis</span>
-            </CardTitle>
-            
-            {/* Clear Chat Button - Only show when chat has messages */}
-            {canClearDocumentChat && chat.some(msg => msg.role !== "system") && (
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleClearChat}
-                  className="hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-600 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </motion.div>
-            )}
-          </div>
+    <div className="h-full flex flex-col bg-white dark:bg-gray-900">
+      <div className="shrink-0 h-12 flex items-center gap-2 pl-3 pr-2 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex-1 min-w-0">
+          <DocumentTabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
+        </div>
+        {activeTab === 'chat' && canClearDocumentChat && (
+          <button
+            type="button"
+            onClick={handleClearChat}
+            disabled={!hasChatHistory}
+            title={hasChatHistory ? "Clear chat" : "No chat to clear"}
+            aria-label="Clear chat"
+            className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50 dark:text-gray-400 dark:hover:text-red-400 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
+      </div>
 
-          {/* Tab Navigation */}
-          <div className="flex space-x-1 mt-4">
-            <Button variant={activeTab === 'versions' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('versions')}>
-              <Clock className="w-4 h-4 mr-1" /> Versions
-            </Button>
-            <Button variant={activeTab === 'history' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('history')}>
-              <Clock className="w-4 h-4 mr-1" /> History
-            </Button>
-            {doc?.scope === 'repository' && doc?.orgId && (
-              <Button variant={activeTab === 'workflow' ? 'default' : 'ghost'} size="sm" onClick={() => setActiveTab('workflow')}>
-                <CheckCircle2 className="w-4 h-4 mr-1" /> Workflow
-              </Button>
-            )}
-            <Button
-              variant={activeTab === 'chat' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setActiveTab('chat')}
-              className={cn(
-                "flex items-center space-x-2",
-                activeTab === 'chat'
-                  ? "text-white dark:text-gray-200"
-                  : "text-gray-600 dark:text-gray-400"
-              )}
-            >
-              <MessageCircle className="h-4 w-4" />
-              <span>Chat</span>
-            </Button>
-            <Button
-              variant={activeTab === 'summary' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setActiveTab('summary')}
-              className={cn(
-                "flex items-center space-x-2",
-                activeTab === 'summary'
-                  ? "text-white dark:text-gray-200"
-                  : "text-gray-600 dark:text-gray-400"
-              )}
-            >
-              <BarChart3 className="h-4 w-4" />
-              <span>Summary</span>
-            </Button>
-            <Button
-              variant={activeTab === 'guide' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setActiveTab('guide')}
-              className={cn(
-                "flex items-center space-x-2",
-                activeTab === 'guide'
-                  ? "text-white dark:text-gray-200"
-                  : "text-gray-600 dark:text-gray-400"
-              )}
-            >
-              <BookOpen className="h-4 w-4" />
-              <span>Pagewise Summary</span>
-            </Button>
-            <Button
-              variant={activeTab === 'insights' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setActiveTab('insights')}
-              className={cn(
-                "flex items-center space-x-2",
-                activeTab === 'insights'
-                  ? "text-white dark:text-gray-200"
-                  : "text-gray-600 dark:text-gray-400"
-              )}
-            >
-              <Network className="h-4 w-4" />
-              <span>Insights</span>
-              {insightsCount > 0 && (
-                <span className={cn(
-                  "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
-                  activeTab === 'insights'
-                    ? "bg-white/25 text-white"
-                    : "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
-                )}>
-                  {insightsCount}
-                </span>
-              )}
-            </Button>
-          </div>
-        </CardHeader>
-
-        <CardContent className="chat-card-content p-0">
+      <div className="chat-card-content">
           {/* Content Area - Chat, Summary, or Reading Guide */}
-          {activeTab === 'versions' ? (
+          {activeTab === 'details' && hasDetails ? (
+            detailsPanel
+          ) : activeTab === 'versions' ? (
             <div className="overflow-y-auto h-full"><DocumentVersionsPanel documentId={id} /></div>
           ) : activeTab === 'workflow' && doc?.orgId ? (
-            <div className="overflow-y-auto h-full"><DocumentWorkflowPanel documentId={id} orgId={doc.orgId} onLifecycleChange={() => fetchDocument(id).then((fresh) => fresh && setDoc(fresh))} /></div>
+            <div className="overflow-y-auto h-full"><DocumentWorkflowPanel documentId={id} orgId={doc.orgId} onLifecycleChange={() => fetchDocument(id).then((fresh) => fresh && applyFreshDoc(fresh))} /></div>
           ) : activeTab === 'history' ? (
              <div className="p-4 overflow-y-auto h-full"><AuditEventList url={id ? `/api/documents/${encodeURIComponent(id)}/history` : null} title="Document history" documentMode /></div>
            ) : activeTab === 'guide' ? (
@@ -1241,147 +1352,35 @@ function DocumentContent() {
             </div>
           ) : activeTab === 'chat' ? (
             <div className="chat-container">
-              <div className="chat-messages-area p-4 space-y-4 bg-gray-50 dark:bg-gray-900/50 chat-scrollbar">
+              <div className="chat-messages-area px-5 py-5 space-y-6 bg-white dark:bg-gray-900 chat-scrollbar">
                 {chat.map((message) => (
-                  <motion.div
+                  <ChatMessage
                     key={message.id}
-                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                    transition={{ duration: 0.4, ease: "easeOut" }}
-                    className={cn(
-                      "flex items-start space-x-3",
-                      message.role === 'user' ? 'flex-row-reverse space-x-reverse' : 'flex-row'
-                    )}
-                  >
-                    {/* Avatar */}
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ delay: 0.1 }}
-                      className={cn(
-                        "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-md",
-                        message.role === 'user'
-                          ? 'bg-gradient-to-br from-blue-500 to-blue-600'
-                          : 'bg-gradient-to-br from-purple-500 to-purple-600'
-                      )}
-                    >
-                      {message.role === 'user' ? (
-                        <User className="w-4 h-4 text-white" />
-                      ) : (
-                        <Bot className="w-4 h-4 text-white" />
-                      )}
-                    </motion.div>
-
-                    {/* Message Bubble */}
-                    <div
-                      className={cn(
-                        "flex flex-col max-w-[85%]",
-                        message.role === 'user' ? 'items-end' : 'items-start'
-                      )}
-                    >
-
-                      {/* MESSAGE BUBBLE */}
-                      <div
-                        className={cn(
-                          "rounded-2xl px-4 py-3 overflow-hidden",
-                          message.role === 'user'
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700'
-                        )}
-                      >
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed break-words overflow-wrap-anywhere">
-                          {message.content}
-                        </p>
-                      </div>
-
-                      {/* ACTION BUTTONS BELOW */}
-                      <MessageActions
-                        content={message.content}
-                        onExpand={() => openExpanded(message)}
-                        align={message.role === 'user' ? "right" : "left"}
-                      />
-
-                    </div>
-
-
-                  </motion.div>
+                    message={message}
+                    onExpand={() => openExpanded(message)}
+                  />
                 ))}
 
                 {isTyping && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex justify-start"
-                  >
-                    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-3 rounded-lg">
-                      <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                        <div
-                          className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                          style={{ animationDelay: "0.1s" }}
-                        ></div>
-                        <div
-                          className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                          style={{ animationDelay: "0.2s" }}
-                        ></div>
-                      </div>
-                    </div>
-                  </motion.div>
+                  <AssistantPendingRow>
+                    <TypingDots />
+                  </AssistantPendingRow>
                 )}
 
                 <div ref={chatEndRef} />
               </div>
 
-              {/* Chat-specific footer - Fixed at bottom */}
-              {/* {chat.some(msg => msg.role !== "system") && (
-                <div className="flex-shrink-0 p-4 border-t border-gray-200 dark:border-gray-700 bg-yellow-50 dark:bg-yellow-950/30 flex justify-between items-center">
-                  <div className="flex items-center space-x-2 text-yellow-700 dark:text-yellow-300">
-                    <AlertCircle className="h-4 w-4" />
-                    <p className="text-sm font-medium">You can clear this chat to start fresh.</p>
-                  </div>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={handleClearChat}
-                  >
-                    Clear Chat
-                  </Button>
-                </div>
-              )} */}
-
-              {/* Input Area - Fixed at bottom */}
-              <form onSubmit={handleAsk} className="flex-shrink-0 p-4 border-t border-gray-200 dark:border-gray-700">
-                <div className="flex space-x-2">
-                  <Input
-                    ref={inputRef}
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    placeholder="Ask about this document..."
-                    className="flex-1"
-                    disabled={isTyping || !canAskDocument}
-                  />
-                  {isTyping ? (
-                    <Button
-                      type="button"
-                      size="icon"
-                      onClick={handleCancelRequest}
-                      className="flex-shrink-0 bg-gray-600 hover:bg-gray-700 text-white"
-                    >
-                      <Square className="h-4 w-4 fill-current" />
-                    </Button>
-                  ) : (
-                    <Button
-                      type="submit"
-                      size="icon"
-                      disabled={!question.trim() || !canAskDocument}
-                      className="flex-shrink-0"
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </form>
+              <ChatComposer
+                ref={inputRef}
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onSubmit={handleAsk}
+                onCancel={handleCancelRequest}
+                isTyping={isTyping}
+                canSend={Boolean(question.trim()) && canAskDocument}
+                disabled={!canAskDocument}
+                placeholder="Ask about this document..."
+              />
             </div>
           ) : activeTab === 'insights' ? (
             /* Insights Area - people who know this, related documents, suggested project links */
@@ -1702,35 +1701,45 @@ function DocumentContent() {
                 <div className="flex items-center justify-center h-full">
                   <div className="text-center">
                     <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600 dark:text-gray-400 mb-4">
-                      No summary available
+                    <p className="text-gray-900 dark:text-gray-100 font-medium mb-1">
+                      {isProcessing ? "The summary will appear when processing finishes" : "This document has no summary"}
                     </p>
-                    <Button
-                      onClick={generateSummary}
-                      disabled={!canRegenerateSummary || isGeneratingSummary}
-                      className="flex items-center space-x-2"
-                    >
-                      <BarChart3 className="h-4 w-4" />
-                      <span>Generate Summary</span>
-                    </Button>
+                    {!isProcessing && (
+                      <p className="max-w-sm mx-auto text-sm text-gray-500 dark:text-gray-400 mb-4">
+                        {canRegenerateSummary
+                          ? "Processing finished without one. Regenerate it from the document's text."
+                          : "Processing finished without one. Ask an owner or department admin of this document to regenerate it."}
+                      </p>
+                    )}
+                    {!isProcessing && canRegenerateSummary && (
+                      <Button
+                        onClick={generateSummary}
+                        disabled={isGeneratingSummary}
+                        className="inline-flex items-center space-x-2"
+                      >
+                        <BarChart3 className="h-4 w-4" />
+                        <span>Regenerate summary</span>
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 
   return (
-    <Layout orgId={doc?.orgId} fixedHeight>
-      <div className="h-full">
+    <Layout orgId={doc?.orgId} fixedHeight fullBleed>
+      <div className="flex-1 min-h-0">
         <TwoColumnLayout
           leftColumn={documentPanel}
           rightColumn={chatPanel}
-          leftTitle="Document Preview"
+          leftTitle="Document"
           rightTitle="Chat"
+          resizable="document"
+          minDesktopWidth={1280}
         />
       </div>
       {showClearDialog && (
@@ -1755,7 +1764,9 @@ function DocumentContent() {
         doc={doc}
         ext={ext}
         docxHtml={docxHtml}
-      />
+      >
+        {isFullscreenOpen && !['pdf', 'txt', 'docx'].includes(ext) ? renderDocument({ inModal: true }) : null}
+      </DocumentFullscreenModal>
     </Layout>
   );
 }

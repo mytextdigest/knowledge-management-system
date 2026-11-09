@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { S3Client } from "@aws-sdk/client-s3";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { prisma } from "@/lib/prisma";
+import { MAX_UPLOAD_BYTES, checkFileFormat, checkFileSize } from "@/lib/fileFormats";
 
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
@@ -13,13 +14,26 @@ const s3 = new S3Client({
 
 export async function POST(req) {
   try {
-    const { fileName, fileType, userId, projectId, orgId } = await req.json();
+    const { fileName, fileType, fileSize, userId, projectId, orgId } = await req.json();
 
     if (!fileName || !fileType || !userId || (!projectId && !orgId)) {
       return NextResponse.json(
         { error: "Missing parameters" },
         { status: 400 }
       );
+    }
+
+    // E11.4: refuse before anything reaches S3.
+    const format = checkFileFormat(fileName);
+    if (!format.ok) {
+      return NextResponse.json({ error: format.reason, code: "UNSUPPORTED_FORMAT" }, { status: 415 });
+    }
+
+    // EQ-5: refuse an oversized file here with a clear message; the policy's
+    // content-length-range below enforces the same limit at S3.
+    const size = checkFileSize(fileSize);
+    if (!size.ok) {
+      return NextResponse.json({ error: size.reason, code: "FILE_TOO_LARGE" }, { status: 413 });
     }
 
     // ✅ Exact match (case + extension sensitive) — only enforced for
@@ -57,7 +71,7 @@ export async function POST(req) {
       },
       Conditions: [
         ["starts-with", "$Content-Type", ""],
-        ["content-length-range", 0, 10 * 1024 * 1024],
+        ["content-length-range", 0, MAX_UPLOAD_BYTES],
       ],
       Expires: 60,
     });

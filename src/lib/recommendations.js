@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 import { getRecentMemory } from "@/lib/orgMemberMemory";
-import { hybridOrgSearch } from "@/lib/hybridSearch";
+import { search } from "@/lib/search/searchService";
 import { expandWithRelatedDocuments } from "@/lib/knowledgeContext";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
 import { accumulateFeedbackWeight, scoreRecommendation } from "@/lib/recommendationRankingPolicy.mjs";
@@ -187,7 +187,9 @@ export async function getRecommendations({
     const openai = new OpenAI({ apiKey });
     const embeddingResponse = await openai.embeddings.create({ model: "text-embedding-3-small", input: seedQueries });
     const embeddings = embeddingResponse.data.map((item) => item.embedding);
-    rows = await hybridOrgSearch({
+    const { results: retrievedRows } = await search({
+      kind: "recommendation",
+      query: requestedQuery || seedQueries[0],
       queries: seedQueries,
       embeddings,
       userId,
@@ -198,6 +200,7 @@ export async function getRecommendations({
       isSuperAdmin,
       diversify: !departmentId,
     });
+    rows = retrievedRows;
   }
 
   rows = [...rows, ...relationshipRows];
