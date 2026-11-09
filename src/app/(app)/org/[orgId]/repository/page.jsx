@@ -40,6 +40,7 @@ export default function RepositoryPage({ params }) {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
+  const [searchEventId, setSearchEventId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -87,12 +88,14 @@ export default function RepositoryPage({ params }) {
       if (requestId !== latestRequestId.current) return;
 
       setDocuments(data.documents || data || []);
+      setSearchEventId(data.searchEventId || null);
       setTotalPages(data.totalPages || 1);
       setTotal(data.total ?? (Array.isArray(data) ? data.length : 0));
     } catch (err) {
       if (requestId !== latestRequestId.current) return;
       setError(err.message || "Failed to load repository.");
       setDocuments([]);
+      setSearchEventId(null);
     } finally {
       if (requestId === latestRequestId.current) setLoading(false);
     }
@@ -200,11 +203,19 @@ export default function RepositoryPage({ params }) {
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {documents.map((document) => (
+          {documents.map((document, index) => (
             <RepositoryDocumentCard
               key={document.id}
               document={document}
+              orgId={orgId}
               orgRole={orgRole}
+              onSearchResultOpen={searchEventId ? () => {
+                fetch(`/api/org/${orgId}/search/click`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ searchEventId, documentId: document.id, rank: (page - 1) * 20 + index + 1 }),
+                }).catch(() => {});
+              } : undefined}
               departments={departments}
               onDocumentSignalChange={(docId, patch) =>
                 setDocuments((prev) =>
