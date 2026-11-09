@@ -8,7 +8,7 @@
 | **Foundations used**  | F1 document access, F2 audit, F3 scheduled jobs, F5 org settings, F7 search service (built by D) |
 | **Phase 2 window**    | Mon 2 Nov – Tue 24 Nov 2026 (code-complete), integration to Mon 30 Nov                 |
 | **Branch**            | `feature/ekp-ws-c` (one branch for the phase, one PR per milestone; see [PHASE2_OVERVIEW.md](PHASE2_OVERVIEW.md) §3) |
-| **Status**            | Draft for review. Shared design + C-M1 ready for review; C-M2 to C-M4 outlined, detail each before it starts. |
+| **Status**            | C-M1 merged to `dev` (PR #35, 2026-11-10). C-M2 to C-M4 outlined, detail each before it starts. |
 
 **Source documents (don't copy from them, link to them):**
 
@@ -162,12 +162,12 @@ Each milestone ends with a PR from `feature/ekp-ws-c` into `dev`, opened one wor
 
 | Task ID | Milestone · Title | Status | Assignee | Depends On | PR | Started | Completed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `C-1` | Finalize this document (shared design + C-M1), reviewed by Johurul | `TODO` | Sandeep | — | | | |
+| `C-1` | Finalize this document (shared design + C-M1), reviewed by Johurul | `DONE` | Sandeep | — | #35 | 2026-11-02 | 2026-11-10 |
 | `C-2` | C-M1 · Schema: `TermSet`, `Term`, `TermSynonym`, `TermRelation`, `MetadataField`, `DocumentTerm`, `TermCandidate`, `TaxonomyImport` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
-| `C-3` | C-M1 · Default Category term set, backfill `DocumentTerm` from `Document.category`, dual-write in `classify.js` | `TODO` | Sandeep | `C-2` | | | |
-| `C-4` | C-M1 · Taxonomy admin: lazy tree editor, synonyms, deprecate/merge, search, audit | `TODO` | Sandeep | `C-2` | | | |
-| `C-5` | C-M1 · Metadata fields + manual tagging on the document page | `TODO` | Sandeep | `C-2` | | | |
-| `C-M1` | **Milestone PR + demo: Taxonomy exists** (due Fri 6 Nov) | `TODO` | Sandeep | `C-3`–`C-5` | | | |
+| `C-3` | C-M1 · Default Category term set, backfill `DocumentTerm` from `Document.category`, dual-write in `classify.js` | `DONE` | Sandeep | `C-2` | #35 | 2026-11-02 | 2026-11-10 |
+| `C-4` | C-M1 · Taxonomy admin: lazy tree editor, synonyms, deprecate/merge, search, audit | `DONE` | Sandeep | `C-2` | #35 | 2026-11-02 | 2026-11-10 |
+| `C-5` | C-M1 · Metadata fields + manual tagging on the document page | `DONE` | Sandeep | `C-2` | #35 | 2026-11-02 | 2026-11-10 |
+| `C-M1` | **Milestone PR + demo: Taxonomy exists** (due Fri 6 Nov) | `DONE` | Sandeep | `C-3`–`C-5` | #35 | 2026-11-02 | 2026-11-10 |
 | `C-6` | C-M2 · SKOS (RDF/XML, TTL) + CSV importers behind `TaxonomySource`; read-only external sets | `TODO` | Sandeep | `C-M1` | | | |
 | `C-7` | C-M2 · Re-sync diff by `externalId` with dry run; deprecate removed terms without losing tags | `TODO` | Sandeep | `C-6` | | | |
 | `C-8` | C-M2 · Map `A-23` SharePoint tags (`DocumentSourceTag`) to terms, on import and after each sync | `TODO` | Sandeep | `C-6`, `E-3` | | | |
@@ -185,3 +185,9 @@ Each milestone ends with a PR from `feature/ekp-ws-c` into `dev`, opened one wor
 ## 8. Implementation notes
 
 Add a dated note when a task changes the design (e.g. `2026-11-05 · C-4: tree loads children lazily, 200 per page`).
+
+- `2026-11-10 · C-M1 review (Johurul):` Fixed in PR #35 before merge: the taxonomy page now uses the app layout and has a sidebar entry (Admin → Taxonomy); terms are drawn as a tree under their parents (they were grouped by depth); synonyms, rename and merge were added to the API and UI; document tagging checks `canManageDocument` (it had its own owner/department check, which missed project-inherited departments and file ACLs); audit entries go through `logAudit()`; one label normalisation (`src/lib/taxonomy/labels.mjs`: NFKC, trimmed, single spaces, lower case).
+- `2026-11-10 · C-3 / C-5 (manual vs automatic tags):` On a single-value field a person's choice wins. Saving a manual tag replaces the classifier's (`auto`) or back-fill (`import`) tag, and later classification runs skip a document that has a manual tag. A SharePoint tag (`source_system`) is never replaced; a conflicting manual choice is refused with 409 and the message to change it in SharePoint. The Category field and `Document.category` stay in step both ways: a Category tag updates `Document.category`, and a reviewer's category correction in classification review is written as the manual Category tag.
+- `2026-11-10 · C-4 merge:` `POST /api/org/[orgId]/taxonomy/terms/merge` re-tags documents (dropping duplicates), moves the source's child terms and their subtrees under the target, adds the source's label and synonyms as synonyms of the target, and deprecates the source with `mergedIntoId`. Refused when the target is inside the source's subtree, or when both have a child with the same name. Audit action `taxonomy.term.merged`.
+- `2026-11-10 · C-3:` The Category term set is seeded per org by the opt-in script (`node scripts/ekp/p2/c3-default-category-termset.mjs --org <id> [--apply]`, dry run without `--apply`). Until an org is seeded, classification writes no tags there. Run it for NGI before the C-M1 demo step 3.
+- `2026-11-10 · C-4 / C-5 (moved to C-M2):` reorder and move (re-parent) in the tree editor, lazy loading of children (needed for the 2,600-term import), deleting a term set, and tagging from the document page (today tags are edited from the repository card's **Tags** button).
