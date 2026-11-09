@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Eye, Download, Info, Loader2, Check, X, AlertTriangle } from "lucide-react";
+import { Eye, Download, Info, Loader2, Check, X, AlertTriangle, Tag } from "lucide-react";
 import { Modal, ModalHeader, ModalTitle, ModalContent } from "@/components/ui/Modal";
 import DocumentTaggingPanel from "@/components/taxonomy/DocumentTaggingPanel";
 import OpenInSourceLink, { sourceLabel } from "@/components/documents/OpenInSourceLink";
@@ -383,7 +383,7 @@ export default function RepositoryDocumentCard({
           </>
         ) : null}
         <button type="button" onClick={() => router.push(`/document?id=${document.id}`)} title="Open the full document viewer to read, chat with, and summarize this document" className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"><Info className="h-3.5 w-3.5" /> View</button>
-        <button type="button" onClick={() => setTaggingOpen(v => !v)} className="rounded-md border border-indigo-300 px-2.5 py-1.5 text-xs font-medium text-indigo-700 dark:text-indigo-300">{taggingOpen ? "Close tags" : "Manage tags"}</button>
+        <button type="button" onClick={() => setTaggingOpen((v) => !v)} aria-expanded={taggingOpen} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"><Tag className="h-3.5 w-3.5" /> Tags</button>
         <OpenInSourceLink url={document?.externalUrl} sourceProvider={document?.sourceProvider} />
       </div>
       {taggingOpen && orgId ? <div className="mt-3"><DocumentTaggingPanel orgId={orgId} documentId={document.id}/></div> : null}

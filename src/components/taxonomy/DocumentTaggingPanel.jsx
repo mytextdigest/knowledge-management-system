@@ -1,16 +1,112 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
+
+const control = "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100";
+const SOURCE_LABELS = { auto: "classifier", import: "back-fill", source_system: "SharePoint" };
+
+// Manual taxonomy tags for one document (C-5). People who can manage the
+// document edit them; everyone else who can see it reads them.
 export default function DocumentTaggingPanel({ orgId, documentId }) {
- const [fields,setFields]=useState([]),[selected,setSelected]=useState({}),[loading,setLoading]=useState(true),[busy,setBusy]=useState(""),[error,setError]=useState(""),[message,setMessage]=useState("");
- const requestSequence=useRef(0);
- const endpoint=useMemo(()=>`/api/org/${encodeURIComponent(orgId)}/documents/${encodeURIComponent(documentId)}/taxonomy`,[orgId,documentId]);
- const load=useCallback(async()=>{const sequence=++requestSequence.current;setLoading(true);try{const r=await fetch(endpoint,{cache:"no-store"});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||"Unable to load tags");if(sequence!==requestSequence.current)return null;setFields(j.fields||[]);setSelected(Object.fromEntries((j.fields||[]).map(f=>[f.id,f.documentTerms.filter(t=>t.status==="accepted").map(t=>t.termId)])));setError("");return j.fields||[]}catch(e){if(sequence===requestSequence.current)setError(e.message);return null}finally{if(sequence===requestSequence.current)setLoading(false)}},[endpoint]);
- useEffect(()=>{load()},[load]);
- async function save(field){setBusy(field.id);setError("");setMessage("");try{const r=await fetch(endpoint,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({fieldId:field.id,termIds:selected[field.id]||[]})});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||"Save failed");const reloaded=await load();if(!reloaded)throw Error("Saved, but could not verify the reloaded tags");const actual=(reloaded.find(f=>f.id===field.id)?.documentTerms||[]).filter(t=>t.status==="accepted").map(t=>t.termId);const expected=selected[field.id]||[];if(expected.some(id=>!actual.includes(id)))throw Error("Saved, but the selected tag was not returned by the API");setMessage(`${field.name} saved and confirmed from database.`)}catch(e){setError(e.message)}finally{setBusy("")}}
- return <div className="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700"><h3 className="font-semibold">Document taxonomy tags</h3>{loading?<p className="text-sm">Loading tags…</p>:null}{error?<p role="alert" className="text-sm text-red-600">{error}</p>:null}{message?<p role="status" className="text-sm text-green-600">{message}</p>:null}{!loading&&!fields.length?<p className="text-sm text-gray-500">No metadata fields configured. Create fields in Taxonomy administration.</p>:null}
- {fields.map(field=>{const terms=field.termSet?.terms||[];const manual=selected[field.id]||[];const nonmanual=field.documentTerms.filter(t=>t.source!=="manual");return <div key={field.id} className="space-y-2 border-t pt-3"><label className="block text-sm font-medium">{field.name} {field.required?"*":""}</label><p className="text-xs text-gray-500">{field.multi?"Select multiple terms":"Select one term"} · {field.termSet?.name}</p>
- {field.multi?<div className="max-h-40 space-y-1 overflow-auto">{terms.filter(t=>t.status==="active").map(t=><label key={t.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={manual.includes(t.id)} onChange={e=>setSelected(prev=>({...prev,[field.id]:e.target.checked?[...manual,t.id]:manual.filter(id=>id!==t.id)}))}/>{t.label}</label>)}</div>:<select aria-label={field.name} className="w-full rounded border p-2 text-sm dark:bg-gray-900" value={manual[0]||""} onChange={e=>setSelected(prev=>({...prev,[field.id]:e.target.value?[e.target.value]:[]}))}><option value="">None</option>{terms.filter(t=>t.status==="active"||manual.includes(t.id)).map(t=><option key={t.id} value={t.id}>{t.label}{t.status!=="active"?" (deprecated)":""}</option>)}</select>}
- {field.documentTerms?.some(t=>t.status==="accepted")?<p className="text-xs text-green-700 dark:text-green-400">Saved tags: {field.documentTerms.filter(t=>t.status==="accepted").map(t=>t.term?.label||t.termId).join(", ")}</p>:null}
- {nonmanual.length?<p className="text-xs text-gray-500">Automatic / source tags (preserved): {nonmanual.map(t=>t.term?.label).filter(Boolean).join(", ")}</p>:null}
- <button type="button" disabled={!!busy} onClick={()=>save(field)} className="rounded bg-indigo-600 px-3 py-1.5 text-sm text-white disabled:opacity-50">{busy===field.id?"Saving…":"Save tags"}</button></div>})}</div>;
+  const endpoint = useMemo(
+    () => `/api/org/${encodeURIComponent(orgId)}/documents/${encodeURIComponent(documentId)}/taxonomy`,
+    [orgId, documentId],
+  );
+  const [fields, setFields] = useState([]);
+  const [canEdit, setCanEdit] = useState(false);
+  const [selected, setSelected] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(async () => {
+    const res = await fetch(endpoint, { cache: "no-store" });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Unable to load tags");
+    const list = body.fields || [];
+    setFields(list);
+    setCanEdit(!!body.canEdit);
+    setSelected(Object.fromEntries(list.map((f) => [f.id, f.documentTerms.map((t) => t.termId)])));
+  }, [endpoint]);
+
+  useEffect(() => {
+    load().catch((e) => setError(e.message)).finally(() => setLoading(false));
+  }, [load]);
+
+  async function save(field) {
+    setBusy(field.id); setError(""); setMessage("");
+    try {
+      const res = await fetch(endpoint, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fieldId: field.id, termIds: selected[field.id] || [] }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Save failed");
+      await load();
+      setMessage(`${field.name} saved.`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  if (loading) {
+    return <p className="flex items-center gap-2 text-xs text-gray-500"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading tags…</p>;
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+      {error ? <p role="alert" className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+      {message ? <p role="status" className="text-xs text-green-700 dark:text-green-400">{message}</p> : null}
+      {!fields.length ? <p className="text-xs text-gray-500">No metadata fields yet. An admin can add them under Taxonomy.</p> : null}
+      {fields.map((field) => {
+        const terms = (field.termSet?.terms || []).filter((t) => t.status === "active" || (selected[field.id] || []).includes(t.id));
+        const chosen = selected[field.id] || [];
+        const other = field.documentTerms.filter((t) => t.source !== "manual");
+        const editable = canEdit && !field.termSet?.readOnly;
+        return (
+          <div key={field.id} className="space-y-1.5">
+            <p className="text-xs font-medium text-gray-700 dark:text-gray-200">
+              {field.name}{field.required ? <span className="text-red-600"> *</span> : null}
+              <span className="ml-1 font-normal text-gray-500">· {field.termSet?.name}</span>
+            </p>
+            {editable ? (
+              <div className="flex items-start gap-2">
+                {field.multi ? (
+                  <div className="max-h-36 flex-1 space-y-1 overflow-auto rounded-md border border-gray-200 p-2 dark:border-gray-700">
+                    {terms.map((t) => (
+                      <label key={t.id} className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200" style={{ paddingLeft: `${(t.depth || 0) * 12}px` }}>
+                        <input type="checkbox" checked={chosen.includes(t.id)} onChange={(e) => setSelected((prev) => ({ ...prev, [field.id]: e.target.checked ? [...chosen, t.id] : chosen.filter((id) => id !== t.id) }))} />
+                        {t.label}
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <select aria-label={field.name} className={control} value={chosen[0] || ""} onChange={(e) => setSelected((prev) => ({ ...prev, [field.id]: e.target.value ? [e.target.value] : [] }))}>
+                    <option value="">None</option>
+                    {terms.map((t) => <option key={t.id} value={t.id}>{" ".repeat((t.depth || 0) * 2)}{t.label}{t.status !== "active" ? " (deprecated)" : ""}</option>)}
+                  </select>
+                )}
+                <button type="button" disabled={!!busy} onClick={() => save(field)} className="shrink-0 rounded-md bg-blue-700 px-3 py-2 text-xs font-medium text-white hover:bg-blue-800 disabled:opacity-50">
+                  {busy === field.id ? "Saving…" : "Save"}
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-700 dark:text-gray-300">{field.documentTerms.map((t) => t.term?.label).filter(Boolean).join(", ") || "—"}</p>
+            )}
+            {editable && other.length ? (
+              <p className="text-xs text-gray-500">
+                {other.map((t) => `${t.term?.label} (from ${SOURCE_LABELS[t.source] || t.source})`).join(", ")}
+                {!field.multi && other.some((t) => t.source !== "source_system") ? " · saving a choice replaces the classifier's tag" : ""}
+              </p>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
