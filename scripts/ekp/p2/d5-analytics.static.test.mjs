@@ -20,9 +20,10 @@ test('analytics aggregates search events and click counts without loading unboun
   assert.match(source, /searchClick\.count/);
   assert.match(source, /take: 30/);
 });
-test('dashboard renders search activity, no-results and governance link', () => {
+test('dashboard renders search activity, no-results and the governance tab', () => {
   const source = read('src/app/(app)/org/[orgId]/analytics/page.jsx');
   assert.match(source, /No-result queries/);
   assert.match(source, /Recent search activity/);
-  assert.match(source, /governance-metrics/);
+  assert.match(source, /AnalyticsTabs/);
+  assert.match(read('src/components/analytics/AnalyticsTabs.jsx'), /governance-metrics/);
 });

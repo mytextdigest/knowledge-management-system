@@ -12,7 +12,7 @@ test("repository result actions record clicks and sidebar exposes admin analytic
  assert.match(read("src/app/(app)/org/[orgId]/repository/page.jsx"), /onSearchResultOpen=/);
  const card = read("src/components/repository/RepositoryDocumentCard.jsx");
  assert.match(card, /onSearchResultOpen\?\.\(\)/);
- assert.match(read("src/components/layout/AppSidebar.jsx"), /isOrgAdmin \? \[\{ label: "Search Analytics"/);
+ assert.match(read("src/components/layout/AppSidebar.jsx"), /isOrgAdmin \? \[\{ label: "Analytics"/);
 });
 test("click API checks event owner and result rank", () => {
  const route = read("src/app/api/org/[orgId]/search/click/route.js");

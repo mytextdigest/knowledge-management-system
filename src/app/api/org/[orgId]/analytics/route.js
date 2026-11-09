@@ -54,7 +54,7 @@ export async function GET(request, { params }) {
       _count: { _all: true }, orderBy: { _count: { normalizedQuery: 'desc' } }, take: 10,
     });
     return NextResponse.json({
-      filters: { days, departmentId: requestedDepartment, scope: role === 'super_admin' ? 'organization' : 'managed_departments' },
+      filters: { days, departmentId: requestedDepartment, scope: role === 'super_admin' ? 'organization' : 'managed_departments', permittedDepartmentIds: permittedDepartments },
       summary: { total, noResults, noResultRate: total ? round(100 * noResults / total) : 0, averageLatencyMs: latencies._avg.latencyMs === null ? null : round(latencies._avg.latencyMs), clicks, reformulations },
       topQueries,
       noResultQueries: noResultQueries.map((r) => ({ query: r.normalizedQuery, count: r._count._all })),
