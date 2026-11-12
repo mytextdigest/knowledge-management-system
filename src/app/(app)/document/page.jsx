@@ -12,7 +12,7 @@ import DocumentLifecycleActions from "@/components/governance/DocumentLifecycleA
 import Layout from '@/components/layout/Layout';
 import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Button } from '@/components/ui/Button';
-import { FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Trash2, CheckCircle2, Copy, Check, Printer, BookOpen, ChevronDown, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network, Info, ArrowLeft } from 'lucide-react';
+import { FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Trash2, CheckCircle2, Copy, Check, Printer, BookOpen, ChevronDown, Captions, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network, Info, ArrowLeft } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
@@ -21,6 +21,7 @@ import SlideDeckViewer from "@/components/documents/SlideDeckViewer";
 import FileViewerFrame from "@/components/documents/viewer/FileViewerFrame";
 import { ViewerToolbarHost } from "@/components/documents/viewer/ViewerToolbar";
 import { slidesFromChunks } from "@/lib/slideCitations";
+import { formatTimestamp } from "@/lib/transcripts";
 import { printHtml } from "@/lib/printDocument";
 import { cn } from "@/lib/utils";
 import { isProcessingStatus } from "@/lib/documentStatus";
@@ -34,6 +35,9 @@ import ExpandedMessageModal from "@/components/chat/ExpandedMessageModal";
 import { useToast, ToastProvider } from "@/components/ui/Toast";
 import DocumentTabs from "@/components/documents/document/DocumentTabs";
 import OpenInSourceLink from '@/components/documents/OpenInSourceLink';
+import MediaPlayer from '@/components/documents/MediaPlayer';
+import TranscriptView from '@/components/documents/TranscriptView';
+import TranscriptLinkPanel from '@/components/documents/TranscriptLinkPanel';
 
 
 
@@ -56,6 +60,8 @@ function DocumentContent() {
   const id = searchParams.get('id');
   // E11.1: a "slide 7" citation links here with &slide=7.
   const activeSlide = Number.parseInt(searchParams.get('slide') || '', 10) || null;
+  // E11.5: a "12:34" citation links here with &t=754 (seconds).
+  const startTime = (() => { const t = Number(searchParams.get('t')); return searchParams.get('t') !== null && Number.isFinite(t) && t >= 0 ? t : null; })();
 
 
   const [doc, setDoc] = useState(null);
@@ -90,6 +96,9 @@ function DocumentContent() {
   const [slideView, setSlideView] = useState("slides");
   // Stable, so the viewer jumps to a cited slide once rather than on every render.
   const slideJump = useMemo(() => (activeSlide ? { page: activeSlide, nonce: activeSlide } : null), [activeSlide]);
+  // Recordings (E-9): the player, and where it is (for the transcript's highlight).
+  const playerRef = useRef(null);
+  const [playTime, setPlayTime] = useState(null);
 
   // Reading Guide state
   const [pagesRead, setPagesRead] = useState(0);
@@ -107,6 +116,18 @@ function DocumentContent() {
 
   const ext = doc?.filename?.split('.').pop().toLowerCase() ?? '';
   const isSpreadsheet = ['csv', 'xlsx', 'xls'].includes(ext);
+  // E11.5: a recording (video/audio) or a transcript (doc.media from the document API).
+  const isRecording = doc?.media?.kind === 'video' || doc?.media?.kind === 'audio';
+  const isTranscriptDoc = doc?.media?.kind === 'transcript';
+  const recordingTranscripts = isRecording ? doc.media.transcripts : [];
+  const linkedRecording = isTranscriptDoc ? doc.media.recording : null;
+  const seekRecording = useCallback((seconds) => playerRef.current?.seek(seconds), []);
+  // Times in chat answers: play them here on a recording; on a linked transcript, open the recording there.
+  const onTimestampClick = isRecording
+    ? seekRecording
+    : linkedRecording
+      ? (seconds) => router.push(`/document?id=${encodeURIComponent(linkedRecording.id)}&t=${Math.floor(seconds)}`)
+      : undefined;
   const canRegenerateSummary = doc?.permissions?.canRegenerate !== false;
   const canAskDocument = doc?.permissions?.canAsk !== false;
   const canClearDocumentChat = doc?.permissions?.canClearChat !== false;
@@ -474,12 +495,14 @@ function DocumentContent() {
       ]);
     }
 
-    if (doc && doc.summary) {
+    // E11.5: a recording's summary is its transcript's.
+    const summarySourceDoc = doc?.summary ? doc : doc?.media?.transcripts?.find((t) => t.summary);
+    if (doc && summarySourceDoc) {
       let parsedSummary;
       try {
-        parsedSummary = JSON.parse(doc.summary);
+        parsedSummary = JSON.parse(summarySourceDoc.summary);
       } catch {
-        parsedSummary = { overview: doc.summary, keyPoints: [] };
+        parsedSummary = { overview: summarySourceDoc.summary, keyPoints: [] };
       }
 
       setSummary({
@@ -490,6 +513,7 @@ function DocumentContent() {
         estimatedReadTime: doc.content ? Math.ceil(doc.content.split(" ").length / 200) : "N/A",
         documentType: doc.filename.split(".").pop().toUpperCase(),
         lastModified: new Date().toLocaleDateString(),
+        fromTranscript: summarySourceDoc === doc ? null : summarySourceDoc.filename,
       });
     }
 
@@ -897,6 +921,56 @@ function DocumentContent() {
     // slides and spreadsheets render from chunks, everything else from its text.
     const fileMissing = !doc.fileUrl && !["pptx", "xlsx", "xls", "csv"].includes(ext);
 
+    // E11.6: a recording plays in the page (from S3, or streamed from SharePoint).
+    if (isRecording) {
+      if (!doc.fileUrl) {
+        return (
+          <div className="w-full h-full flex items-center justify-center p-6 text-center text-sm text-gray-500 dark:text-gray-400">
+            The recording isn&apos;t available to play here. Open it in its source instead.
+          </div>
+        );
+      }
+      return (
+        <MediaPlayer
+          ref={inModal ? undefined : playerRef}
+          src={doc.fileUrl}
+          kind={doc.media.kind}
+          startAt={inModal ? null : startTime}
+          durationSeconds={doc.media.durationSeconds}
+          filename={doc.filename}
+          onTime={inModal ? undefined : setPlayTime}
+          getFreshSrc={async () => {
+            fileLinksRef.current = null; // the cached link is the one that failed
+            return (await getFileLinks())?.fileUrl;
+          }}
+        />
+      );
+    }
+
+    // E11.5: a VTT transcript as timed lines; with a linked recording, a time plays it from there.
+    if (ext === "vtt") {
+      return (
+        <FileViewerFrame
+          {...scrollProps}
+          getFileLinks={fileLinks}
+          onPrint={() => printHtml(printableHtml(doc.filename, `<pre style="white-space:pre-wrap;font:13px/1.6 ui-monospace,monospace">${escapeHtml(doc.content)}</pre>`))}
+        >
+          {linkedRecording && (
+            <p role="status" className="mx-4 mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-900/20 dark:text-blue-200">
+              Transcript of <a className="font-medium underline" href={`/document?id=${encodeURIComponent(linkedRecording.id)}`}>{linkedRecording.filename}</a>. Click a time to play the recording from there.
+            </p>
+          )}
+          {doc.media?.chunks?.length ? (
+            <TranscriptView chunks={doc.media.chunks} onSeek={onTimestampClick} />
+          ) : (
+            <pre className="whitespace-pre-wrap text-gray-900 dark:text-gray-100 p-6 font-mono text-sm leading-relaxed">
+              {doc.content || "No transcript lines were read from this file yet."}
+            </pre>
+          )}
+        </FileViewerFrame>
+      );
+    }
+
     // A SharePoint page (A-15) or ServiceNow article (A-17) has no file; show its text.
     if (ext === "txt" || doc.contentType === "page" || doc.contentType === "article" || fileMissing) {
       return (
@@ -1050,7 +1124,7 @@ function DocumentContent() {
   }
 
   const isRepositoryDoc = doc?.scope === "repository" && Boolean(doc?.orgId);
-  const hasDetails = isRepositoryDoc || (doc?.sourceTags?.length ?? 0) > 0;
+  const hasDetails = isRepositoryDoc || (doc?.sourceTags?.length ?? 0) > 0 || Boolean(doc?.media);
   const refreshDoc = () => fetchDocument(id).then((fresh) => fresh && applyFreshDoc(fresh));
   const backHref = doc?.projectId
     ? `/project?id=${doc.projectId}`
@@ -1073,6 +1147,16 @@ function DocumentContent() {
             : canRegenerateSummary
               ? <button type="button" onClick={generateSummary} disabled={isGeneratingSummary} className="font-medium underline disabled:opacity-50">Finish processing</button>
               : 'Ask an owner or department admin of this document to regenerate it.'}
+        </>
+      ),
+    },
+    // E11.5: until a transcript is linked, nothing that was said is searchable.
+    isRecording && !isProcessing && recordingTranscripts.length === 0 && {
+      key: 'no-transcript',
+      body: (
+        <>
+          No transcript yet, so chat and search can&apos;t use what was said. Put its .vtt or Teams transcript next to it (same folder and name){' '}
+          {doc?.permissions?.canLinkTranscript ? <>or <button type="button" onClick={() => setActiveTab('details')} className="font-medium underline">link one under Details</button></> : 'or ask an owner to link one'}.
         </>
       ),
     },
@@ -1132,8 +1216,13 @@ function DocumentContent() {
             ))}
           </div>
         )}
+        {isRecording && doc.media.durationSeconds ? (
+          <span className="shrink-0 hidden @xl:inline text-xs tabular-nums text-gray-500 dark:text-gray-400" title="Length">
+            {formatTimestamp(doc.media.durationSeconds)}
+          </span>
+        ) : null}
         <div ref={setToolbarHost} className="shrink-0 flex items-center" />
-        <button
+        {!isRecording && <button
           type="button"
           onClick={() => setIsFullscreenOpen(true)}
           title="Fullscreen"
@@ -1141,7 +1230,7 @@ function DocumentContent() {
           className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
         >
           <Maximize2 className="h-4 w-4" />
-        </button>
+        </button>}
       </div>
 
       {isRepositoryDoc && (
@@ -1171,6 +1260,7 @@ function DocumentContent() {
       {isRepositoryDoc && <DocumentLifecycleActions doc={doc} onChanged={refreshDoc} />}
       {isRepositoryDoc && <DocumentOwnershipPanel documentId={doc.id} orgId={doc.orgId} />}
       {isRepositoryDoc && <DocumentCompletenessBadge documentId={doc.id} />}
+      <TranscriptLinkPanel doc={doc} onChanged={refreshDoc} />
       <SourceTagsPanel tags={doc?.sourceTags} />
     </div>
   );
@@ -1180,8 +1270,10 @@ function DocumentContent() {
   const hasChatHistory = chat.some(msg => msg.role !== "system");
   const tabs = [
     { id: 'chat', label: 'Chat', icon: MessageCircle },
+    isRecording && { id: 'transcript', label: 'Transcript', icon: Captions },
     { id: 'summary', label: 'Summary', icon: BarChart3 },
-    { id: 'guide', label: 'Pagewise Summary', icon: BookOpen },
+    // Recordings and transcripts have no pages; their Transcript is the walk-through.
+    !isRecording && !isTranscriptDoc && { id: 'guide', label: 'Pagewise Summary', icon: BookOpen },
     hasDetails && { id: 'details', label: 'Details', icon: Info },
     { id: 'versions', label: 'Versions', icon: Clock },
     { id: 'history', label: 'History', icon: Clock },
@@ -1215,6 +1307,17 @@ function DocumentContent() {
           {/* Content Area - Chat, Summary, or Reading Guide */}
           {activeTab === 'details' && hasDetails ? (
             detailsPanel
+          ) : activeTab === 'transcript' && isRecording ? (
+            <div className="h-full overflow-y-auto">
+              {recordingTranscripts.length ? recordingTranscripts.map((t) => (
+                <section key={t.id}>
+                  {recordingTranscripts.length > 1 && <h3 className="px-4 pt-3 text-xs font-semibold text-gray-500 dark:text-gray-400">{t.filename}</h3>}
+                  <TranscriptView chunks={t.chunks} currentTime={playTime} onSeek={seekRecording} />
+                </section>
+              )) : (
+                <p className="p-4 text-sm text-gray-500 dark:text-gray-400">No transcript is linked to this recording yet.</p>
+              )}
+            </div>
           ) : activeTab === 'versions' ? (
             <div className="overflow-y-auto h-full"><DocumentVersionsPanel documentId={id} /></div>
           ) : activeTab === 'workflow' && doc?.orgId ? (
@@ -1358,6 +1461,8 @@ function DocumentContent() {
                     key={message.id}
                     message={message}
                     onExpand={() => openExpanded(message)}
+                    onTimestampClick={onTimestampClick}
+                    maxSeconds={isRecording ? doc.media.durationSeconds ?? undefined : undefined}
                   />
                 ))}
 
@@ -1379,7 +1484,7 @@ function DocumentContent() {
                 isTyping={isTyping}
                 canSend={Boolean(question.trim()) && canAskDocument}
                 disabled={!canAskDocument}
-                placeholder="Ask about this document..."
+                placeholder={isRecording ? "Ask about what was said..." : "Ask about this document..."}
               />
             </div>
           ) : activeTab === 'insights' ? (
@@ -1467,6 +1572,11 @@ function DocumentContent() {
                     <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">
                       Document Information
                     </h3>
+                    {summary.fromTranscript && (
+                      <p className="-mt-2 mb-3 text-xs text-gray-500 dark:text-gray-400">
+                        Summarised from the transcript {summary.fromTranscript}.
+                      </p>
+                    )}
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div className="flex items-center space-x-2">
                         <FileType className="h-4 w-4 text-gray-500" />
@@ -1706,7 +1816,9 @@ function DocumentContent() {
                     </p>
                     {!isProcessing && (
                       <p className="max-w-sm mx-auto text-sm text-gray-500 dark:text-gray-400 mb-4">
-                        {canRegenerateSummary
+                        {isRecording
+                          ? "A recording's summary comes from its transcript. Link one under Details, or put its .vtt or Teams transcript next to it."
+                          : canRegenerateSummary
                           ? "Processing finished without one. Regenerate it from the document's text."
                           : "Processing finished without one. Ask an owner or department admin of this document to regenerate it."}
                       </p>

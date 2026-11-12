@@ -43,7 +43,7 @@ import { createSourceTagReader } from "../src/lib/connectors/sharepointSourceTag
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
-import { checkFileFormat, fileExtension, isMediaFile } from "../src/lib/fileFormats.js";
+import { checkFileFormat, fileExtension, isMediaFile, playableContentType } from "../src/lib/fileFormats.js";
 import { parseVtt, parseWordTranscript, chunkTranscript, transcriptText } from "../src/lib/transcripts.js";
 import { refreshAutoLinks, mayBeTranscript } from "../src/lib/transcriptLinking.js";
 import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable, MediaToolsUnavailable } from "./media.js";
@@ -1033,7 +1033,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
     const res = await fetchDriveItemContent({ accessToken, driveId, itemId: change.externalId });
     await new Upload({
       client: s3,
-      params: { Bucket: S3_BUCKET, Key: s3Key, Body: toNodeReadable(res.body) },
+      params: { Bucket: S3_BUCKET, Key: s3Key, Body: toNodeReadable(res.body), ContentType: playableContentType(change.name) },
       queueSize: 2,
       partSize: 16 * 1024 * 1024,
     }).done();

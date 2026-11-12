@@ -69,6 +69,14 @@ export function mediaKind(name) {
 }
 
 export const isMediaFile = (name) => Boolean(mediaKind(name));
+
+// Content types for files the browser plays or shows itself (S3 copies made by the sync).
+const CONTENT_TYPES = {
+  ".mp4": "video/mp4", ".mov": "video/quicktime", ".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".vtt": "text/vtt",
+};
+
+/** The Content-Type to store a recording or transcript with, or undefined. */
+export const playableContentType = (name) => CONTENT_TYPES[fileExtension(name)];
 export const isVttFile = (name) => fileExtension(name) === ".vtt";
 
 // EQ-5: the largest file a person can upload (dialogs, presign policy, ingest

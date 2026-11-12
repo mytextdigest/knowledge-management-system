@@ -7,6 +7,7 @@ import { activeRequests } from "@/lib/requestCancellation";
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 import { firstMissingStage, pipelineState } from "@/lib/documentPipeline";
 import { queueRepair } from "@/lib/documentReprocess";
+import { isMediaFile } from "@/lib/fileFormats";
 
 // const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -127,10 +128,23 @@ export async function POST(req, { params }) {
     // ----------------------------
     // 5) LOAD CHUNKS
     // ----------------------------
+    // E11.5: a recording has no text of its own; its linked transcripts are what was said.
+    const isRecording = isMediaFile(doc.filename);
     const chunks = await prisma.chunk.findMany({
-      where: { documentId },
-      orderBy: { chunkIndex: "asc" }
+      where: isRecording
+        ? { document: { transcriptOfId: documentId, deletedAt: null } }
+        : { documentId },
+      orderBy: [{ documentId: "asc" }, { chunkIndex: "asc" }]
     });
+
+    if (isRecording && chunks.length === 0) {
+      // Nothing was said that KMS can read yet: say so instead of asking the model.
+      const answer = "This recording has no transcript yet, so I can't tell what was said in it. Put its .vtt or Teams transcript next to it in SharePoint (same folder and name), or link a transcript under Details.";
+      await prisma.message.update({ where: { id: userMsg.id }, data: { status: "done" } });
+      await prisma.message.create({ data: { conversationId, role: "assistant", content: answer, status: "done" } });
+      activeRequests.delete(requestId);
+      return NextResponse.json({ success: true, conversationId, answer });
+    }
 
     const allChunks = chunks.map(c => ({
       id: c.id,
@@ -260,7 +274,10 @@ export async function POST(req, { params }) {
         - You may use light markdown formatting where it aids clarity — **bold** for key terms or
           figures, short bullet lists for multiple items. Keep it natural and sparing; this is a
           chat reply, not a report.
-        - Be concise, factual, and avoid assumptions.
+        - Be concise, factual, and avoid assumptions.${isRecording ? `
+        - The document is a recording; the context is its transcript. Each line starts with the
+          time it was said, e.g. "[12:34] Jane Smith: …". When you use a line, give its time as
+          m:ss or h:mm:ss (e.g. "at 12:34") and who said it, so the user can play it from there.` : ""}
       `.trim()
     };
 

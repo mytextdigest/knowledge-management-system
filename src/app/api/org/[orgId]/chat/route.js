@@ -15,6 +15,8 @@ import { isDecisionQuestion, getDecisionEvidence, formatDecisionContext, DECISIO
 import { isLessonQuestion, getLessonEvidence, formatLessonContext, LESSON_INSTRUCTION } from "@/lib/lessonsIntelligence";
 import { sourcePreviewUrl } from "@/lib/documentSource";
 import { slideOf, slideCitation } from "@/lib/slideCitations";
+import { timeOf, timeCitation } from "@/lib/transcripts";
+import { linkedRecordings } from "@/lib/recordingCitations";
 import { isDocumentListingQuestion } from "@/lib/keywordSearch";
 import { LISTING_INSTRUCTION, buildListing, sourceLabel, ACCESS_NOTE, needsAccessNote } from "@/lib/documentListing";
 
@@ -33,6 +35,10 @@ Each document in the context is labelled with its kind and source, e.g.
 when the user asks about pages, files or where something comes from.
 Text from a PowerPoint slide starts with "[slide N]"; when you use it, say
 which slide it is on (e.g. "slide 7 of Outage Review.pptx").
+Lines of a meeting transcript start with the time they were said, e.g.
+"[12:34] Jane Smith: …"; when you use one, say when and by whom (e.g. "at
+12:34 in Weekly sync.mp4, Jane Smith said …"), naming the recording when
+the document is the transcript of one.
 
 Response format:
 - For direct factual questions, answer concisely in a short paragraph or a couple of sentences. Do not force structure onto a simple answer.
@@ -434,12 +440,23 @@ export async function POST(req, { params }) {
       project: c.project_name,
       texts: [],
       slides: new Set(), // E11.1: slide numbers of the cited chunks
+      times: [], // E11.5: start times of the cited transcript chunks
+      recording: null,
     };
     const slide = slideOf(c);
     if (slide) acc[key].slides.add(slide);
+    const time = timeOf(c);
+    if (time) acc[key].times.push(time.start);
     acc[key].texts.push(`${slide ? `[slide ${slide}] ` : ""}${String(c.text || "").slice(0, 600).replace(/\n+/g, " ")}`);
     return acc;
   }, {});
+
+  // E11.5: a linked transcript is cited as its recording, at the cited time.
+  const recordings = await linkedRecordings(
+    Object.values(grouped).filter((g) => g.times.length).map((g) => g.documentId),
+    { userId: user.id, role }
+  );
+  for (const g of Object.values(grouped)) g.recording = recordings.get(g.documentId) || null;
 
   const groupedDocIds = Object.keys(grouped);
   let nextActiveTopic = activeTopic;
@@ -469,6 +486,7 @@ export async function POST(req, { params }) {
       label: g.label,
       mayBeOutdated: g.mayBeOutdated,
       ...slideCitation(g.documentId, g.slides),
+      ...timeCitation(g.documentId, g.times, g.recording),
     }))
   );
 
@@ -503,7 +521,7 @@ export async function POST(req, { params }) {
   const sources = [...decisionSources, ...lessonSources, ...documentSources];
 
   const contextBlocks = Object.values(grouped).map(
-    (g) => `Document: ${g.filename}${g.label ? ` (${g.label})` : ""}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
+    (g) => `Document: ${g.filename}${g.recording ? ` (transcript of the recording ${g.recording.filename})` : ""}${g.label ? ` (${g.label})` : ""}${g.department ? ` (Department: ${g.department})` : ""}${g.project ? ` (Project: ${g.project})` : ""}\n${g.texts.map((t) => `- ${t}`).join("\n")}`
   );
   const context = [
     ...(keywordMatches ? [keywordMatches] : []),

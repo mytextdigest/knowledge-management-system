@@ -151,3 +151,49 @@ export function timeOf(chunk) {
   const meta = chunk?.metadata;
   return meta?.kind === "time" && Number.isFinite(meta.start) ? { start: meta.start, end: meta.end ?? meta.start } : null;
 }
+
+/**
+ * documentId + cited start times → { times, locator: "12:34", viewerUrl }
+ * ({} without times). A linked transcript's citation opens its recording at
+ * the first cited time (`recording` = { documentId, filename }).
+ */
+export function timeCitation(documentId, starts, recording = null) {
+  const times = [...new Set([...(starts || [])].filter(Number.isFinite).map((t) => Math.floor(t)))].sort((a, b) => a - b);
+  if (!times.length) return {};
+  const target = recording?.documentId || documentId;
+  return {
+    times,
+    locator: `${times.slice(0, 4).map(formatTimestamp).join(", ")}${times.length > 4 ? "…" : ""}`,
+    viewerUrl: `/document?id=${encodeURIComponent(target)}&t=${times[0]}`,
+    ...(recording ? { recording } : {}),
+  };
+}
+
+/**
+ * Timed chunks ({ start, text, speakers? }) → one entry per transcript line:
+ * [{ start, speaker, text }], in order, for the Transcript view. A line is
+ * "[m:ss] Speaker: words" (chunkTranscript); the speaker is only split off
+ * when it's one of the chunk's speakers.
+ */
+export function transcriptLines(chunks) {
+  const lines = [];
+  for (const chunk of chunks || []) {
+    const speakers = new Set(chunk.speakers || []);
+    for (const raw of String(chunk.text || "").split("\n")) {
+      const m = raw.match(/^\[((?:\d+:)?\d{1,2}:\d{2})\]\s*(.*)$/);
+      if (!m) {
+        if (raw.trim() && lines.length) lines[lines.length - 1].text += ` ${raw.trim()}`;
+        continue;
+      }
+      let speaker = null;
+      let text = m[2];
+      const colon = text.indexOf(": ");
+      if (colon > 0 && speakers.has(text.slice(0, colon))) {
+        speaker = text.slice(0, colon);
+        text = text.slice(colon + 2);
+      }
+      lines.push({ start: parseTimestamp(m[1]) ?? chunk.start ?? 0, speaker, text });
+    }
+  }
+  return lines;
+}

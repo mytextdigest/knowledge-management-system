@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import OpenAI from "openai";
+import { chunkLocation } from "@/lib/chunkLocation";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { search } from "@/lib/search/searchService";
 import { expandQuery } from "@/lib/queryExpansion";
@@ -74,6 +75,7 @@ export async function POST(req, { params }) {
       summary: r.summary,
       chunkIndex: r.chunk_index,
       metadata: r.metadata,
+      ...chunkLocation(r), // E-9: locator "slide 7" / "12:34" and viewerUrl
       filename: r.filename,
       category: r.category,
       department: r.department_name,
