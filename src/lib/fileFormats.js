@@ -22,6 +22,7 @@ export const SUPPORTED_FORMATS = [
   { ext: ".m4a", label: "Audio", media: "audio" },
   { ext: ".mp3", label: "Audio", media: "audio" },
   { ext: ".wav", label: "Audio", media: "audio" },
+  { ext: ".vtt", label: "Transcript" },
 ];
 
 export const SUPPORTED_EXTENSIONS = SUPPORTED_FORMATS.map((f) => f.ext);
@@ -31,7 +32,7 @@ export const ACCEPT_ATTRIBUTE = SUPPORTED_EXTENSIONS.join(",");
 
 // For the upload dialogs' help line.
 export const SUPPORTED_FORMATS_TEXT =
-  "PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .xls), CSV, TXT, video (.mp4, .mov) and audio (.mp3, .m4a, .wav)";
+  "PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .xls), CSV, TXT, video (.mp4, .mov), audio (.mp3, .m4a, .wav) and transcripts (.vtt)";
 
 export const MEDIA_EXTENSIONS = SUPPORTED_FORMATS.filter((f) => f.media).map((f) => f.ext);
 

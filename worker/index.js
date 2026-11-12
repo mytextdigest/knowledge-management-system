@@ -44,6 +44,7 @@ import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
 import { checkFileFormat, fileExtension, isMediaFile } from "../src/lib/fileFormats.js";
+import { parseVtt, parseWordTranscript, chunkTranscript, transcriptText } from "../src/lib/transcripts.js";
 import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable, MediaToolsUnavailable } from "./media.js";
 import { AUDIT_EVENTS } from "../src/lib/audit/events.js";
 
@@ -238,9 +239,20 @@ async function processChunkJob(job) {
   } else if (ext === ".txt") {
     rawText = buffer.toString("utf8");
     endExtract();
+  } else if (ext === ".vtt") {
+    // E11.5: a meeting transcript, chunked by time ("12:34" citations).
+    sheetChunks = chunkTranscript(parseVtt(buffer.toString("utf8")));
+    rawText = transcriptText(sheetChunks);
+    endExtract();
   } else if (ext === ".docx") {
     const result = await mammoth.extractRawText({ buffer });
     rawText = result.value;
+    // E11.5: a Teams Word transcript ("Jane Smith   0:03" turns) is chunked by time too.
+    const cues = parseWordTranscript(rawText);
+    if (cues) {
+      sheetChunks = chunkTranscript(cues);
+      rawText = transcriptText(sheetChunks);
+    }
     endExtract();
   } else {
     endExtract();
