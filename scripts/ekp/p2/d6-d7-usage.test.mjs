@@ -1,0 +1,9 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {summarizeUsage,dailyUsage,usageCsv,percentile} from '../../../src/lib/analytics/usageMetrics.mjs';
+import {rollupUsageDay} from '../../../src/lib/analytics/rollup.mjs';
+const date='2026-11-10T12:00:00Z';
+const events=[{id:'a',userId:'u1',kind:'search',query:'alpha',normalizedQuery:'alpha',createdAt:date,latencyMs:100,firstTokenMs:null},{id:'b',userId:'u1',kind:'chat',query:'beta',normalizedQuery:'beta',createdAt:date,latencyMs:200,firstTokenMs:60},{id:'c',userId:'u2',kind:'search',query:'alpha',normalizedQuery:'alpha',createdAt:date,latencyMs:300,firstTokenMs:80}];
+const clicks=[{id:'1',searchEventId:'a'},{id:'2',searchEventId:'a'}];
+test('hand-computed E29 metrics, unique clicked events and active users',()=>{const x=summarizeUsage(events,clicks);assert.equal(x.searches,2);assert.equal(x.questions,1);assert.equal(x.activeUsers,2);assert.equal(x.clicks,1);assert.equal(x.ctr,1/3);assert.equal(x.bounceRate,2/3);assert.equal(x.p50LatencyMs,200);assert.equal(x.p95LatencyMs,290);assert.equal(x.topQueries[0].count,2);});
+test('daily UTC grouping, empty handling and CSV injection-safe quoting',()=>{assert.equal(dailyUsage(events,clicks).length,1);assert.equal(percentile([],0.5),null);assert.match(usageCsv([{date:'2026-11-10',searches:'1,"two"'}]),/"1,""two"""/);});
+test('D-6 idempotent upsert contract and day window',async()=>{const writes=[];const db={searchEvent:{findMany:async()=>events},searchClick:{findMany:async()=>clicks},$transaction:async fn=>fn({analyticsDaily:{upsert:async x=>writes.push(x)}})};await rollupUsageDay(db,{orgId:'org',date:'2026-11-10'});assert.equal(writes.length,11);assert.equal(writes.find(x=>x.create.metric==='activeUsers').create.value,2);assert.equal(writes[0].where.orgId_date_metric_departmentKey_sourceSystem.sourceSystem,'all');});
