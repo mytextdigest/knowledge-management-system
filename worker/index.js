@@ -45,6 +45,7 @@ import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
 import { checkFileFormat, fileExtension, isMediaFile } from "../src/lib/fileFormats.js";
 import { parseVtt, parseWordTranscript, chunkTranscript, transcriptText } from "../src/lib/transcripts.js";
+import { refreshAutoLinks, mayBeTranscript } from "../src/lib/transcriptLinking.js";
 import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable, MediaToolsUnavailable } from "./media.js";
 import { AUDIT_EVENTS } from "../src/lib/audit/events.js";
 
@@ -365,6 +366,9 @@ async function processChunkJob(job) {
     where: { id: docId },
     data: { status: "chunked" },
   });
+
+  // E11.5: a transcript is linked to the recording next to it.
+  if (mayBeTranscript(filename)) await linkTranscripts(docId);
 
   // -----------------------------
   // 7. Notify user (optional)
@@ -889,7 +893,26 @@ async function processRecording(doc, s3Key, filename) {
     where: { id: docId },
     data: { durationSeconds: probe.durationSeconds, status: "ready" },
   });
+  await linkTranscripts(docId); // E11.5: the transcripts next to it
+  const transcripts = await prisma.document.count({ where: { transcriptOfId: docId, deletedAt: null } });
+  console.log(transcripts
+    ? `📝 ${filename}: uses its transcript (${transcripts}), no transcription call`
+    : `📝 ${filename}: no transcript next to it yet; it can be linked on the document page`);
   endTotal();
+}
+
+// E-8: re-check a document's automatic transcript links (src/lib/transcriptLinking.js).
+// Non-fatal: a missing link can be set by hand on the document page.
+async function linkTranscripts(docId) {
+  try {
+    for (const { transcriptId, recordingId } of await refreshAutoLinks(prisma, docId)) {
+      console.log(recordingId
+        ? `🔗 Transcript ${transcriptId} linked to recording ${recordingId}: the recording uses it, no transcription call`
+        : `🔗 Transcript ${transcriptId} unlinked`);
+    }
+  } catch (err) {
+    console.error(`⚠️ Couldn't check the transcript links of ${docId}:`, err.message);
+  }
 }
 
 // Pulls one changed file into the existing pipeline exactly as a manual
