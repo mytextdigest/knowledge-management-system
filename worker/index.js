@@ -38,6 +38,7 @@ import { pipelineState, firstMissingStage, STAGE_LABELS } from "../src/lib/docum
 import { slidePreviewKey, isSlideDeck } from "../src/lib/slidePreview.js";
 import { renderPptxToPdf, SlideRenderUnavailable } from "./renderSlides.js";
 import { createSourceTagReader } from "../src/lib/connectors/sharepointSourceTags.js";
+import { createTaxonomyAwareSourceTagReader } from "../src/lib/taxonomy/import/sharepointWorkerBridge.mjs";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
@@ -1205,7 +1206,16 @@ async function processSharePointSyncJob(job) {
     const sites = scopeConfig.sites || [];
     const aclResolver = createAclResolver({ graphToken: accessToken, tenantId: scopeConfig.tenantId });
     if (!aclResolver) console.warn("⚠️ SharePoint certificate not configured: per-file permissions aren't captured");
-    const tagReader = createSourceTagReader(prisma, { accessToken }); // A-23
+    const rawTagReader = createSourceTagReader(prisma, { accessToken }); // A-23
+    // C-8 opt-in: scopeConfig.taxonomyFieldBySourceName is an approved map
+    // of SharePoint internal column names to KMS MetadataField IDs.
+    // With no mapping configured, raw tag behavior remains unchanged.
+    const tagReader = createTaxonomyAwareSourceTagReader({
+      reader: rawTagReader,
+      db: prisma,
+      orgId: integration.orgId,
+      fieldBySourceName: scopeConfig?.taxonomyFieldBySourceName || {},
+    });
 
     for (const site of sites) {
       const connector = getConnector("sharepoint", { accessToken, siteId: site.siteId });
