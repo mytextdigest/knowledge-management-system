@@ -135,7 +135,7 @@ export async function POST(req) {
     }
 
     // EQ-5: the presign policy already caps uploads; this covers keys put in S3 another way.
-    const size = checkFileSize(fileSizeBytes);
+    const size = checkFileSize(fileSizeBytes, filename);
     if (!size.ok) {
       return NextResponse.json({ error: size.reason, code: "FILE_TOO_LARGE" }, { status: 413 });
     }

@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
+import { join as joinPath } from "node:path";
 import { extractPdfText } from "./extractPdf.js";
 import { extractSpreadsheetChunks } from "./extractSpreadsheet.js";
 import { extractPptxChunks } from "./extractPptx.js";
@@ -18,7 +20,7 @@ import { processClusterJobWorker } from "./cluster.js";
 import { classifyDocument, computeContentHash, detectDocumentDuplicates } from "./classify.js";
 import { processKnowledgeContext } from "./knowledgeContext.js";
 import { decrypt, encrypt } from "../src/lib/crypto.js";
-import { getAppOnlyToken, downloadDriveItemContent, getDriveDelta, getDriveItemFields, getSitePage, listSitePages } from "../src/lib/msGraph.js";
+import { getAppOnlyToken, downloadDriveItemContent, fetchDriveItemContent, getDriveDelta, getDriveItemFields, getSitePage, listSitePages } from "../src/lib/msGraph.js";
 import {
   WIKI_LIBRARY,
   classicPageText,
@@ -41,7 +43,8 @@ import { createSourceTagReader } from "../src/lib/connectors/sharepointSourceTag
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
-import { checkFileFormat, fileExtension } from "../src/lib/fileFormats.js";
+import { checkFileFormat, fileExtension, isMediaFile } from "../src/lib/fileFormats.js";
+import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable, MediaToolsUnavailable } from "./media.js";
 import { AUDIT_EVENTS } from "../src/lib/audit/events.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
@@ -140,6 +143,9 @@ async function processChunkJob(job) {
   if (!existingDoc) {
     throw new Error(`Document ${docId} not found (aborting chunk job)`);
   }
+  // E11.6: a recording is streamed to disk, never read into memory.
+  if (isMediaFile(filename)) return processRecording(existingDoc, s3Key, filename);
+
   // A-24: a file above the size limit is never downloaded, even on a reprocess.
   if (isTooLargeToIndex(existingDoc)) {
     console.log(`⏭️ CHUNK JOB skipped: ${docId} is above the size limit`);
@@ -807,6 +813,73 @@ async function getDocumentBytes(doc, s3Key = doc.filePath) {
   throw new Error(`Document ${doc.id} has no stored file and no source to read it from`);
 }
 
+// E11.6: a document's original as a stream (S3 Body or SharePoint response
+// body), for files that must not be held in memory.
+async function openDocumentStream(doc, s3Key = doc.filePath) {
+  if (s3Key) {
+    const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
+    return object.Body;
+  }
+  if (doc.sourceProvider === "sharepoint" && doc.externalUrl && doc.externalId && doc.orgId) {
+    const integration = await prisma.orgIntegration.findUnique({
+      where: { orgId_provider: { orgId: doc.orgId, provider: "sharepoint" } },
+    });
+    if (!integration) throw new Error("SharePoint integration not found for a no-copy document");
+    const accessToken = await ensureFreshAppOnlyToken(integration);
+    const driveId = await resolveDriveId(doc, { scopeConfig: integration.scopeConfig, accessToken });
+    if (!driveId) throw new Error(`Couldn't tell which connected SharePoint site ${doc.externalUrl} belongs to`);
+    const res = await fetchDriveItemContent({ accessToken, driveId, itemId: doc.externalId });
+    return res.body;
+  }
+  throw new Error(`Document ${doc.id} has no stored file and no source to read it from`);
+}
+
+// E11.6 (E-6): a recording (video or audio). It is streamed to a temp file
+// and probed with ffprobe for its length; memory stays flat whatever its
+// size. A recording has no text of its own: what was said comes from its
+// transcript (E11.5), and transcription when there is none (E-M3).
+async function processRecording(doc, s3Key, filename) {
+  const docId = doc.id;
+  console.log(`🎬 RECORDING: ${docId} ${filename}`);
+  await prisma.document.update({ where: { id: docId }, data: { status: "extracting" } });
+  const memory = watchMemory();
+  const endTotal = startTimer("RECORDING", { docId });
+  let probe;
+  let bytes = 0;
+  try {
+    ({ bytes, probe } = await withTempDir(async (dir) => {
+      const path = joinPath(dir, `source${fileExtension(filename) || ".media"}`);
+      const written = await streamToFile(await openDocumentStream(doc, s3Key), path);
+      return { bytes: written, probe: await probeMedia(path) };
+    }));
+  } catch (err) {
+    const { startMb, peakMb } = memory.stop();
+    if (err instanceof MediaToolsUnavailable) {
+      // The recording is still playable; its length is filled in by a repair once ffmpeg is installed.
+      console.warn(`⚠️ ${err.message}; ${filename} is kept without its length`);
+      await prisma.document.update({ where: { id: docId }, data: { status: "ready" } });
+      return;
+    }
+    if (/^ffprobe couldn't read/.test(err.message)) {
+      // Retrying can't help: stop with a status the document cards explain.
+      console.warn(`⚠️ ${filename}: ${err.message} (memory ${startMb}→${peakMb} MB)`);
+      await prisma.document.update({ where: { id: docId }, data: { status: "unreadable_file" } });
+      return;
+    }
+    throw err;
+  }
+  const { startMb, peakMb } = memory.stop();
+  console.log(
+    `🎬 ${filename}: ${(bytes / 1048576).toFixed(1)} MB streamed to disk, ${probe.durationSeconds ?? "?"} s, ` +
+    `${probe.hasVideo ? "video" : "audio"}; worker memory ${startMb} MB → peak ${peakMb} MB`
+  );
+  await prisma.document.update({
+    where: { id: docId },
+    data: { durationSeconds: probe.durationSeconds, status: "ready" },
+  });
+  endTotal();
+}
+
 // Pulls one changed file into the existing pipeline exactly as a manual
 // upload would (same S3 + Document + SQS "chunk" entrypoint), with
 // sourceProvider/externalId/externalModifiedAt set.
@@ -833,8 +906,11 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
     where: { orgId, sourceProvider: "sharepoint", externalId: change.externalId },
     select: { id: true, filePath: true, externalModifiedAt: true, aclSyncedAt: true, externalUrl: true, status: true },
   });
-  // A-24: a file skipped as too large is indexed once the limit is raised above its size.
-  const nowFits = existing?.status === TOO_LARGE && !exceedsSizeLimit(change.size, integration.scopeConfig);
+  // A-24: a file skipped as too large is indexed once the limit is raised
+  // above its size. E-6: recordings are streamed, so the limit doesn't apply.
+  const isRecording = isMediaFile(change.name);
+  const overLimit = !isRecording && exceedsSizeLimit(change.size, integration.scopeConfig);
+  const nowFits = existing?.status === TOO_LARGE && !overLimit;
   if (!nowFits && existing?.externalModifiedAt && existing.externalModifiedAt.getTime() === new Date(change.modifiedAt).getTime()) {
     const refreshAcl = Boolean(aclResolver) && (change.permissionsChanged || !existing.aclSyncedAt);
     const fillSource = Boolean(change.webUrl) && change.webUrl !== existing.externalUrl;
@@ -851,7 +927,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
 
   // A-24: above the size limit (an 8 GB video), only the name, permissions
   // and link are kept. The file is never downloaded or indexed.
-  if (exceedsSizeLimit(change.size, integration.scopeConfig)) {
+  if (overLimit) {
     return recordTooLargeFile({ change, existing, integration, site, connectedByUserId, aclRows, sourceFields });
   }
 
@@ -916,9 +992,21 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
     throw new Error("Storage limit exceeded");
   }
 
-  const connector = getConnector("sharepoint", { accessToken, siteId: site.siteId });
-  const buffer = await connector.downloadFile(change.externalId);
-  await s3.send(new PutObjectCommand({ Bucket: S3_BUCKET, Key: s3Key, Body: buffer }));
+  // E11.6: streamed from SharePoint to S3 in parts, never held in memory
+  // (a recording can be several GB).
+  if (driveId) {
+    const res = await fetchDriveItemContent({ accessToken, driveId, itemId: change.externalId });
+    await new Upload({
+      client: s3,
+      params: { Bucket: S3_BUCKET, Key: s3Key, Body: toNodeReadable(res.body) },
+      queueSize: 2,
+      partSize: 16 * 1024 * 1024,
+    }).done();
+  } else {
+    const connector = getConnector("sharepoint", { accessToken, siteId: site.siteId });
+    const buffer = await connector.downloadFile(change.externalId);
+    await s3.send(new PutObjectCommand({ Bucket: S3_BUCKET, Key: s3Key, Body: buffer }));
+  }
 
   const [doc] = await prisma.$transaction([
     existing
@@ -1216,9 +1304,13 @@ async function processSharePointSyncJob(job) {
         console.error(`❌ Couldn't read the document library of site ${site.siteId}:`, err.message);
       }
       let changes = [];
-      let cursor = site.lastSyncCursor;
+      // E-6: recordings and transcripts were skipped before E-M2 (unsupported,
+      // or above the A-24 limit). The change feed only lists changed files,
+      // so each site is listed in full once to pick them up.
+      const startCursor = site.mediaListedAt ? site.lastSyncCursor : null;
+      let cursor = startCursor;
       try {
-        ({ changes, cursor } = await connector.listChanges(site.lastSyncCursor));
+        ({ changes, cursor } = await connector.listChanges(startCursor));
       } catch (err) {
         console.error(`❌ Delta query failed for site ${site.siteId}:`, err.message);
         filesFailed++;
@@ -1332,6 +1424,7 @@ async function processSharePointSyncJob(job) {
             ? {
                 ...s,
                 lastSyncCursor: cursor,
+                mediaListedAt: s.mediaListedAt || new Date().toISOString(),
                 aclFingerprint,
                 sourceTagsReadAt,
                 driveId: siteDriveId || s.driveId || null,
@@ -1465,6 +1558,12 @@ async function processRepairJob(job) {
   if (isSlideDeck(doc.filename) && doc.filePath) await queueSlidePreview(doc.id);
 
   const base = { docId: doc.id, filename: doc.filename, projectId: doc.projectId, userId: doc.userId, orgId: doc.orgId };
+  // E-6: a recording only needs its length; what was said lives in its transcript.
+  if (isMediaFile(doc.filename)) {
+    if (doc.durationSeconds == null) return processChunkJob({ ...base, s3Key: doc.filePath, visibility: doc.visibility });
+    await prisma.document.update({ where: { id: doc.id }, data: { status: "ready" } });
+    return;
+  }
   if (stage === "chunk") return processChunkJob({ ...base, s3Key: doc.filePath, visibility: doc.visibility });
   if (stage === "embed") return processEmbeddingJob(base);
   if (stage === "summarize") return processSummarizationJob({ ...base, regenerate: false });

@@ -4,7 +4,7 @@ import { Upload, X, FileText, AlertCircle, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { cn, formatFileSize } from '@/lib/utils';
-import { MAX_UPLOAD_TEXT, SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS_TEXT, checkFileFormat, checkFileSize } from '@/lib/fileFormats';
+import { UPLOAD_LIMITS_TEXT, SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS_TEXT, checkFileFormat, checkFileSize } from '@/lib/fileFormats';
 
 const CATEGORIES = [
   "Policies",
@@ -71,7 +71,7 @@ const FileUpload = ({
     }
     
     // Check file size (EQ-5: one limit, shared with the upload APIs)
-    const size = checkFileSize(file.size);
+    const size = checkFileSize(file.size, file.name);
     if (!size.ok) errors.push(size.reason);
     
     return errors;
@@ -258,7 +258,7 @@ const FileUpload = ({
                 Drop files here or click to browse
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                Supports {acceptedTypes === SUPPORTED_EXTENSIONS ? SUPPORTED_FORMATS_TEXT : acceptedTypes.join(', ')} files up to {MAX_UPLOAD_TEXT} each
+                Supports {acceptedTypes === SUPPORTED_EXTENSIONS ? SUPPORTED_FORMATS_TEXT : acceptedTypes.join(', ')} files up to {UPLOAD_LIMITS_TEXT}
               </p>
             </div>
             

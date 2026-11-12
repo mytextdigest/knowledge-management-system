@@ -12,6 +12,11 @@
 // The worker's `repair` job runs the first missing stage; each stage then
 // queues the next as in normal processing, so everything after it is redone
 // too. Shared by the worker and the API, so relative imports only.
+//
+// A recording (E11.6) has no stages: it is probed for its length and is
+// ready. Its text comes from its transcript, which is its own document.
+
+import { isMediaFile } from "./fileFormats.js";
 
 export const PIPELINE_STAGES = ["chunk", "embed", "summarize", "cluster"];
 
@@ -54,6 +59,7 @@ export async function pipelineState(db, doc) {
  * no text and nothing to read it from.
  */
 export function firstMissingStage(doc, state) {
+  if (isMediaFile(doc.filename)) return null;
   if (state.textChunks === 0) return canReadSource(doc) ? "chunk" : "unrepairable";
   if (state.embedded < state.textChunks) return "embed";
   if (!state.hasSummary) return "summarize";

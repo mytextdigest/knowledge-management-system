@@ -1,10 +1,10 @@
-// EQ-5 (Workstream E): one 100 MB upload limit for the upload dialogs, the
+// EQ-5 (Workstream E): one 100 MB upload limit (2 GB for recordings, E-6) for the upload dialogs, the
 // presign policy and the ingest/replace APIs (src/lib/fileFormats.js).
 // Run: npm run ekp:e:test
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { checkFileSize, MAX_UPLOAD_BYTES, MAX_UPLOAD_TEXT } from "../../src/lib/fileFormats.js";
+import { checkFileSize, maxUploadBytes, MAX_UPLOAD_BYTES, MAX_UPLOAD_TEXT, MAX_MEDIA_UPLOAD_BYTES } from "../../src/lib/fileFormats.js";
 
 const MB = 1024 * 1024;
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
@@ -29,28 +29,40 @@ test("a larger file is refused with its size, the limit and the SharePoint route
   assert.match(checkFileSize(100 * MB + 1).reason, /^This file is 101 MB\./);
 });
 
+test("recordings may be up to 2 GB; other files keep 100 MB", () => {
+  assert.equal(MAX_MEDIA_UPLOAD_BYTES, 2048 * MB);
+  assert.equal(maxUploadBytes("Weekly sync.MP4"), MAX_MEDIA_UPLOAD_BYTES);
+  assert.equal(maxUploadBytes("deck.pptx"), MAX_UPLOAD_BYTES);
+  assert.equal(checkFileSize(900 * MB, "Weekly sync.mp4").ok, true);
+  assert.equal(checkFileSize(900 * MB, "notes.vtt").ok, false);
+  assert.equal(
+    checkFileSize(3000 * MB, "town hall.mov").reason,
+    "This recording is 3000 MB. Recordings are limited to 2 GB; for larger ones, sync them from SharePoint."
+  );
+});
+
 test("presign refuses early with 413 and caps the S3 policy at the same limit", () => {
   const route = read("src/app/api/s3/upload/route.js");
-  assert.match(route, /checkFileSize\(fileSize\)/);
+  assert.match(route, /checkFileSize\(fileSize, fileName\)/);
   assert.match(route, /code: "FILE_TOO_LARGE" \}, \{ status: 413 \}/);
-  assert.match(route, /\["content-length-range", 0, MAX_UPLOAD_BYTES\]/);
+  assert.match(route, /\["content-length-range", 0, maxUploadBytes\(fileName\)\]/);
   assert.doesNotMatch(route, /10 \* 1024 \* 1024/);
 });
 
 test("ingest and replace check the stored object's size", () => {
-  assert.match(read("src/app/api/documents/ingest/route.js"), /checkFileSize\(fileSizeBytes\)/);
-  assert.match(read("src/app/api/documents/[id]/replace/route.js"), /checkFileSize\(head\.ContentLength\)/);
+  assert.match(read("src/app/api/documents/ingest/route.js"), /checkFileSize\(fileSizeBytes, filename\)/);
+  assert.match(read("src/app/api/documents/[id]/replace/route.js"), /checkFileSize\(head\.ContentLength, s3Key\)/);
 });
 
 test("both dialogs check the size on selection, show the limit, and send the size to presign", () => {
   const modal = read("src/components/repository/UploadToRepositoryModal.jsx");
-  assert.match(modal, /checkFileSize\(file\.size\)/);
-  assert.match(modal, /\{MAX_UPLOAD_TEXT\} each/);
+  assert.match(modal, /checkFileSize\(file\.size, file\.name\)/);
+  assert.match(modal, /\{UPLOAD_LIMITS_TEXT\}/);
   assert.match(modal, /fileSize: fileItem\.file\.size/);
 
   const dialog = read("src/components/documents/FileUpload.jsx");
-  assert.match(dialog, /checkFileSize\(file\.size\)/);
-  assert.match(dialog, /\{MAX_UPLOAD_TEXT\} each/);
+  assert.match(dialog, /checkFileSize\(file\.size, file\.name\)/);
+  assert.match(dialog, /\{UPLOAD_LIMITS_TEXT\}/);
   assert.doesNotMatch(dialog, /maxFileSize/);
 
   const project = read("src/app/(app)/project/page.jsx");
