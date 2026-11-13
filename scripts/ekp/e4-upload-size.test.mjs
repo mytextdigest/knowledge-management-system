@@ -58,7 +58,7 @@ test("both dialogs check the size on selection, show the limit, and send the siz
   const modal = read("src/components/repository/UploadToRepositoryModal.jsx");
   assert.match(modal, /checkFileSize\(file\.size, file\.name\)/);
   assert.match(modal, /\{UPLOAD_LIMITS_TEXT\}/);
-  assert.match(modal, /fileSize: fileItem\.file\.size/);
+  assert.match(modal, /fileSize: file\.size/);
 
   const dialog = read("src/components/documents/FileUpload.jsx");
   assert.match(dialog, /checkFileSize\(file\.size, file\.name\)/);

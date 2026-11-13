@@ -45,7 +45,7 @@ import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
 import { checkFileFormat, fileExtension, isMediaFile, playableContentType } from "../src/lib/fileFormats.js";
 import { parseVtt, parseWordTranscript, chunkTranscript, transcriptText } from "../src/lib/transcripts.js";
-import { refreshAutoLinks, mayBeTranscript } from "../src/lib/transcriptLinking.js";
+import { refreshAutoLinks, mayBeTranscript, UPLOAD_WINDOW_DAYS } from "../src/lib/transcriptLinking.js";
 import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable, MediaToolsUnavailable } from "./media.js";
 import { AUDIT_EVENTS } from "../src/lib/audit/events.js";
 
@@ -903,12 +903,21 @@ async function processRecording(doc, s3Key, filename) {
 
 // E-8: re-check a document's automatic transcript links (src/lib/transcriptLinking.js).
 // Non-fatal: a missing link can be set by hand on the document page.
+const LINK_REASONS = {
+  ambiguous: "more than one recording fits",
+  length_differs: "its length doesn't match the recording's",
+  length_unknown: "the recording's length isn't known yet",
+  uploaded_apart: `uploaded more than ${UPLOAD_WINDOW_DAYS} days apart from the recording`,
+  no_recording: "no recording with its name next to it",
+  not_a_transcript: "the file isn't a transcript",
+};
+
 async function linkTranscripts(docId) {
   try {
-    for (const { transcriptId, recordingId } of await refreshAutoLinks(prisma, docId)) {
+    for (const { transcriptId, recordingId, reason } of await refreshAutoLinks(prisma, docId)) {
       console.log(recordingId
         ? `🔗 Transcript ${transcriptId} linked to recording ${recordingId}: the recording uses it, no transcription call`
-        : `🔗 Transcript ${transcriptId} unlinked`);
+        : `🔗 Transcript ${transcriptId} not linked (${LINK_REASONS[reason] || reason}); it can be linked on the document page`);
     }
   } catch (err) {
     console.error(`⚠️ Couldn't check the transcript links of ${docId}:`, err.message);

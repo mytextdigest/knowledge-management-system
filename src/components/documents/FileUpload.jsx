@@ -4,7 +4,9 @@ import { Upload, X, FileText, AlertCircle, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { cn, formatFileSize } from '@/lib/utils';
-import { UPLOAD_LIMITS_TEXT, SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS_TEXT, checkFileFormat, checkFileSize } from '@/lib/fileFormats';
+import { UPLOAD_LIMITS_TEXT, SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS_TEXT, checkFileFormat, checkFileSize, isMediaFile } from '@/lib/fileFormats';
+import { pairByName } from '@/lib/transcriptAttach';
+import AttachTranscript from '@/components/documents/AttachTranscript';
 
 const CATEGORIES = [
   "Policies",
@@ -91,8 +93,12 @@ const FileUpload = ({
       };
     });
     
-    setFiles(prev => [...prev, ...newFiles]);
+    // E11.5: a .vtt/.docx picked with a recording of the same name is attached to it.
+    setFiles(prev => pairByName([...prev, ...newFiles]));
   }, [acceptedTypes]);
+
+  const setTranscript = (id, transcript) =>
+    setFiles(prev => prev.map(f => (f.id === id ? { ...f, transcript } : f)));
 
   const handleDrag = useCallback((e) => {
     e.preventDefault();
@@ -169,7 +175,7 @@ const FileUpload = ({
         }
 
         // Actual upload (network / backend)
-        await onUpload(fileItem.file, fileItem.visibility, category);
+        const uploaded = await onUpload(fileItem.file, fileItem.visibility, category);
   
         // Mark as fully complete only AFTER upload finishes
         setUploadProgress(prev => ({ ...prev, [fileItem.id]: 100 }));
@@ -179,6 +185,20 @@ const FileUpload = ({
             f.id === fileItem.id ? { ...f, status: 'success' } : f
           )
         );
+
+        // E11.5: the attached transcript goes up next, linked to the recording.
+        const t = fileItem.transcript;
+        if (t && !t.error && uploaded?.id) {
+          try {
+            await onUpload(t.file, fileItem.visibility, category, { transcriptOf: uploaded.id });
+            setTranscript(fileItem.id, { ...t, done: true });
+          } catch (err) {
+            hadErrors = true;
+            setTranscript(fileItem.id, { ...t, error: `not uploaded: ${err?.message || 'upload failed'}. Link it on the recording's page.` });
+          }
+        } else if (t) {
+          hadErrors = true;
+        }
       } catch (error) {
 
           hadErrors = true;
@@ -389,6 +409,14 @@ const FileUpload = ({
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                           {formatFileSize(fileItem.size)}
                         </p>
+
+                        {isMediaFile(fileItem.name) && fileItem.status !== 'error' && (fileItem.status === 'pending' || fileItem.transcript) && (
+                          <AttachTranscript
+                            transcript={fileItem.transcript}
+                            onChange={(t) => setTranscript(fileItem.id, t)}
+                            disabled={uploading || fileItem.status !== 'pending'}
+                          />
+                        )}
 
                         {/* Visibility selector */}
                         {fileItem.status === 'pending' && (

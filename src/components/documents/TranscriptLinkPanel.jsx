@@ -2,11 +2,23 @@
 
 import { useState } from 'react';
 import { Link2, Unlink, Search, Loader2 } from 'lucide-react';
+import { formatTimestamp } from '@/lib/transcripts';
+import { UPLOAD_WINDOW_DAYS } from '@/lib/transcriptLinking';
+
+// Why a same-name file wasn't linked automatically (transcriptLinking.matchRecordings).
+const REASONS = {
+  ambiguous: 'more than one recording fits',
+  length_differs: "its length doesn't match",
+  length_unknown: "the recording's length isn't known yet",
+  uploaded_apart: `uploaded more than ${UPLOAD_WINDOW_DAYS} days apart`,
+  match: 'matches',
+};
 
 // EKP E11.5 (Workstream E, E-8): the Details tab's transcript ↔ recording
 // link. On a recording: its transcripts, unlink, and link another. On a
 // transcript: its recording, unlink, and link one. A link set here is
-// "manual", and a sync never changes it.
+// "manual", and a sync never changes it. When nothing is linked, the
+// same-name files next to it are offered, with why KMS didn't link them.
 export default function TranscriptLinkPanel({ doc, onChanged }) {
   const media = doc?.media;
   const isRecording = media && media.kind !== 'transcript';
@@ -93,9 +105,39 @@ export default function TranscriptLinkPanel({ doc, onChanged }) {
       ) : (
         <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
           {isRecording
-            ? 'No transcript yet. A .vtt or Teams transcript with the same name in the same folder is linked automatically.'
+            ? 'No transcript yet. A .vtt or Teams transcript with the same name, in the same folder and of the same length, is linked automatically; you can also attach one when you upload a recording.'
             : 'Not linked to a recording.'}
         </p>
+      )}
+
+      {media.suggestions?.length > 0 && (
+        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-800 dark:bg-amber-900/20">
+          <p className="mb-1.5 text-xs font-medium text-amber-800 dark:text-amber-200">
+            {isRecording ? 'Possible transcripts' : 'Possible recordings'}: KMS didn't link {media.suggestions.length === 1 ? 'it' : 'them'} automatically.
+          </p>
+          <ul className="space-y-1.5">
+            {media.suggestions.map((s) => (
+              <li key={s.id} className="flex items-center gap-2 text-sm">
+                <div className="min-w-0 flex-1">
+                  <a href={`/document?id=${encodeURIComponent(s.id)}`} className="block truncate text-gray-900 hover:underline dark:text-gray-100" title={s.filename}>{s.filename}</a>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {s.durationSeconds ? `${formatTimestamp(s.durationSeconds)} · ` : ''}{REASONS[s.reason] || s.reason}
+                  </span>
+                </div>
+                {canLink && (
+                  <button
+                    type="button"
+                    onClick={() => change(isRecording ? { transcriptId: s.id, linked: true } : { recordingId: s.id }, `link-${s.id}`)}
+                    disabled={Boolean(busy)}
+                    className="shrink-0 inline-flex h-7 items-center gap-1 rounded-md bg-blue-600 px-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {busy === `link-${s.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />} Link
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {canLink && (isRecording || !media.recording) && (
