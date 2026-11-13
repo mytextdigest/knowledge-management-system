@@ -128,18 +128,19 @@ export async function POST(req, { params }) {
     // ----------------------------
     // 5) LOAD CHUNKS
     // ----------------------------
-    // E11.5: a recording has no text of its own; its linked transcripts are what was said.
+    // E11.5: what was said in a recording is in its linked transcripts, or
+    // in KMS's own transcript, stored on the recording itself (E-10).
     const isRecording = isMediaFile(doc.filename);
     const chunks = await prisma.chunk.findMany({
       where: isRecording
-        ? { document: { transcriptOfId: documentId, deletedAt: null } }
+        ? { OR: [{ documentId }, { document: { transcriptOfId: documentId, deletedAt: null } }] }
         : { documentId },
       orderBy: [{ documentId: "asc" }, { chunkIndex: "asc" }]
     });
 
     if (isRecording && chunks.length === 0) {
       // Nothing was said that KMS can read yet: say so instead of asking the model.
-      const answer = "This recording has no transcript yet, so I can't tell what was said in it. Put its .vtt or Teams transcript next to it in SharePoint (same folder and name), or link a transcript under Details.";
+      const answer = "This recording has no transcript yet, so I can't tell what was said in it. Transcribe it from the notice above the player, put its .vtt or Teams transcript next to it (same folder and name), or link a transcript under Details.";
       await prisma.message.update({ where: { id: userMsg.id }, data: { status: "done" } });
       await prisma.message.create({ data: { conversationId, role: "assistant", content: answer, status: "done" } });
       activeRequests.delete(requestId);
@@ -277,7 +278,7 @@ export async function POST(req, { params }) {
         - Be concise, factual, and avoid assumptions.${isRecording ? `
         - The document is a recording; the context is its transcript. Each line starts with the
           time it was said, e.g. "[12:34] Jane Smith: …". When you use a line, give its time as
-          m:ss or h:mm:ss (e.g. "at 12:34") and who said it, so the user can play it from there.` : ""}
+          m:ss or h:mm:ss (e.g. "at 12:34") and who said it when the line names them, so the user can play it from there.` : ""}
       `.trim()
     };
 

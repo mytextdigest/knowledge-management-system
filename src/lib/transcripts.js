@@ -96,7 +96,9 @@ export function parseWordTranscript(text) {
  * Cues → chunks of about a minute, cut at cue boundaries: a chunk closes
  * once it spans `target` seconds, and before it would pass `max` seconds or
  * `maxChars` characters. Each line is "[m:ss] Speaker: words", with a
- * speaker's consecutive cues joined.
+ * named speaker's consecutive cues joined. Cues without a speaker (KMS's own
+ * transcripts, a .vtt without voice tags) stay one line each, so every line
+ * keeps its own time.
  */
 export function chunkTranscript(cues, { target = 60, max = 90, maxChars = 2000 } = {}) {
   const chunks = [];
@@ -126,7 +128,7 @@ export function chunkTranscript(cues, { target = 60, max = 90, maxChars = 2000 }
     if (start == null) start = cue.start;
     end = Math.max(end ?? cueEnd, cueEnd);
     if (cue.speaker) speakers.add(cue.speaker);
-    if (last && last.speaker === cue.speaker) {
+    if (last && cue.speaker && last.speaker === cue.speaker) {
       last.words += ` ${cue.text}`;
     } else {
       if (last) lines.push(lineText(last));

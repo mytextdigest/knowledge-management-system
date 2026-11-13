@@ -133,12 +133,13 @@ export async function matchRecordings(db, doc) {
 }
 
 async function refreshTranscript(db, doc) {
+  const previousRecordingId = doc.transcriptOfId ?? null;
   const isTranscript = (await db.document.count({ where: { id: doc.id, ...HAS_TIME_CHUNKS } })) > 0;
   if (!isTranscript) {
     // Not a transcript after all (a .docx that isn't one, even if attached as one): no link.
     if (!doc.transcriptOfId) return [];
     await db.document.update({ where: { id: doc.id }, data: { transcriptOfId: null, transcriptLinkSource: null } });
-    return [{ transcriptId: doc.id, recordingId: null, reason: "not_a_transcript" }];
+    return [{ transcriptId: doc.id, recordingId: null, previousRecordingId, reason: "not_a_transcript" }];
   }
   if (doc.transcriptLinkSource === "manual") return [];
   const { recordingId, candidates } = await matchRecordings(db, doc);
@@ -151,7 +152,7 @@ async function refreshTranscript(db, doc) {
     : candidates.some((c) => c.reason === "ambiguous") ? "ambiguous"
     : candidates.length ? candidates[0].reason
     : "no_recording";
-  return [{ transcriptId: doc.id, recordingId, reason, candidates: candidates.length }];
+  return [{ transcriptId: doc.id, recordingId, previousRecordingId, reason, candidates: candidates.length }];
 }
 
 /**
@@ -160,7 +161,7 @@ async function refreshTranscript(db, doc) {
  * no longer holds (when another recording now fits too, for instance). For a
  * recording: re-check every transcript with its name next to it the same way,
  * so a recording that arrives later can make a match ambiguous.
- * Returns what changed: [{ transcriptId, recordingId | null, reason }].
+ * Returns what changed: [{ transcriptId, recordingId | null, previousRecordingId, reason }].
  */
 export async function refreshAutoLinks(db, docId) {
   const doc = await db.document.findUnique({ where: { id: docId }, select: { ...LINK_SELECT, deletedAt: true } });

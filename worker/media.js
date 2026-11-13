@@ -87,3 +87,33 @@ export function watchMemory(intervalMs = 250) {
     },
   };
 }
+
+// EKP E11.3 (E-10): audio for transcription.
+
+async function ffmpeg(args, timeout) {
+  try {
+    return await run("ffmpeg", ["-hide_banner", "-nostdin", ...args], { timeout, maxBuffer: 64 * 1024 * 1024 });
+  } catch (err) {
+    if (err.code === "ENOENT") throw new MediaToolsUnavailable("ffmpeg isn't installed on this worker (apt-get install ffmpeg)");
+    throw new Error(`ffmpeg failed: ${String(err.stderr || err.message).trim().split("\n").slice(-3).join(" ").slice(0, 300)}`);
+  }
+}
+
+/** The recording's audio track as a small MP3 (`audioArgs` from src/lib/transcription.js). */
+export async function extractAudio(source, target, audioArgs) {
+  await ffmpeg(["-y", "-i", source, ...audioArgs, target], 60 * 60_000);
+  return (await stat(target)).size;
+}
+
+/** ffmpeg's silencedetect log for a file (parse with parseSilences). */
+export async function detectSilences(path) {
+  const { stderr } = await ffmpeg(["-i", path, "-af", "silencedetect=noise=-35dB:d=0.4", "-f", "null", "-"], 30 * 60_000);
+  return stderr;
+}
+
+/** Copies seconds `start`–`end` of an MP3 into its own file. */
+export async function cutPiece(source, target, start, end) {
+  // -ss before -i seeks the input; -t is the piece's length.
+  await ffmpeg(["-y", "-ss", String(start), "-i", source, "-t", String(Math.max(0, end - start)), "-c", "copy", target], 10 * 60_000);
+  return (await stat(target)).size;
+}

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, SendMessageCommand } from "@aws-sdk/client-sqs";
+import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, SendMessageCommand, ChangeMessageVisibilityCommand } from "@aws-sdk/client-sqs";
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { join as joinPath } from "node:path";
@@ -48,6 +48,8 @@ import { parseVtt, parseWordTranscript, chunkTranscript, transcriptText } from "
 import { refreshAutoLinks, mayBeTranscript, UPLOAD_WINDOW_DAYS } from "../src/lib/transcriptLinking.js";
 import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable, MediaToolsUnavailable } from "./media.js";
 import { AUDIT_EVENTS } from "../src/lib/audit/events.js";
+import { createMediaJobs } from "./transcription.js";
+import { dropGeneratedTranscript } from "../src/lib/generatedTranscript.js";
 
 const QUEUE_URL = process.env.SQS_QUEUE_URL;
 const S3_BUCKET = process.env.S3_BUCKET;
@@ -56,6 +58,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const sqs = new SQSClient({});
 const s3 = new S3Client({});
 const prisma = new PrismaClient();
+// E-10/E-11: transcription and chapters (worker/transcription.js).
+const mediaJobs = createMediaJobs({ prisma, sqs, queueUrl: QUEUE_URL, openDocumentStream });
 // const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 async function streamToBuffer(stream) {
@@ -858,6 +862,8 @@ async function processRecording(doc, s3Key, filename) {
   const docId = doc.id;
   console.log(`🎬 RECORDING: ${docId} ${filename}`);
   await prisma.document.update({ where: { id: docId }, data: { status: "extracting" } });
+  // E-10: new or changed content: KMS's own transcript of the old content no longer applies.
+  await dropGeneratedTranscript(prisma, docId);
   const memory = watchMemory();
   const endTotal = startTimer("RECORDING", { docId });
   let probe;
@@ -898,6 +904,11 @@ async function processRecording(doc, s3Key, filename) {
   console.log(transcripts
     ? `📝 ${filename}: uses its transcript (${transcripts}), no transcription call`
     : `📝 ${filename}: no transcript next to it yet; it can be linked on the document page`);
+  // E-10: none: transcribe it (after a wait, in case one arrives), if the org allows it.
+  if (!transcripts) {
+    await mediaJobs.maybeAutoTranscribe({ id: docId, orgId: doc.orgId, filename }).catch((err) =>
+      console.error(`⚠️ Couldn't queue the transcription of ${filename}:`, err.message));
+  }
   endTotal();
 }
 
@@ -914,11 +925,15 @@ const LINK_REASONS = {
 
 async function linkTranscripts(docId) {
   try {
-    for (const { transcriptId, recordingId, reason } of await refreshAutoLinks(prisma, docId)) {
+    const changes = await refreshAutoLinks(prisma, docId);
+    for (const { transcriptId, recordingId, reason } of changes) {
       console.log(recordingId
         ? `🔗 Transcript ${transcriptId} linked to recording ${recordingId}: the recording uses it, no transcription call`
         : `🔗 Transcript ${transcriptId} not linked (${LINK_REASONS[reason] || reason}); it can be linked on the document page`);
     }
+    // E-10/E-11: the recordings whose transcript changed (and one this transcript was attached to at upload).
+    const self = await prisma.document.findUnique({ where: { id: docId }, select: { transcriptOfId: true } });
+    await mediaJobs.afterLinkChange([...changes.flatMap((c) => [c.recordingId, c.previousRecordingId]), self?.transcriptOfId]);
   } catch (err) {
     console.error(`⚠️ Couldn't check the transcript links of ${docId}:`, err.message);
   }
@@ -1602,11 +1617,10 @@ async function processRepairJob(job) {
   if (isSlideDeck(doc.filename) && doc.filePath) await queueSlidePreview(doc.id);
 
   const base = { docId: doc.id, filename: doc.filename, projectId: doc.projectId, userId: doc.userId, orgId: doc.orgId };
-  // E-6: a recording only needs its length; what was said lives in its transcript.
-  if (isMediaFile(doc.filename)) {
-    if (doc.durationSeconds == null) return processChunkJob({ ...base, s3Key: doc.filePath, visibility: doc.visibility });
-    await prisma.document.update({ where: { id: doc.id }, data: { status: "ready" } });
-    return;
+  // E-6: a recording needs its length; what was said lives in its transcript,
+  // or in KMS's own (E-10), which then goes through the stages below.
+  if (isMediaFile(doc.filename) && doc.durationSeconds == null) {
+    return processChunkJob({ ...base, s3Key: doc.filePath, visibility: doc.visibility });
   }
   if (stage === "chunk") return processChunkJob({ ...base, s3Key: doc.filePath, visibility: doc.visibility });
   if (stage === "embed") return processEmbeddingJob(base);
@@ -1667,6 +1681,8 @@ async function processJob(job) {
   if (job.type === "summarize") return processSummarizationJob(job);
   if (job.type === "repair") return processRepairJob(job);
   if (job.type === "slide_preview") return processSlidePreviewJob(job);
+  if (job.type === "transcribe") return mediaJobs.processTranscribeJob(job);
+  if (job.type === "segment") return mediaJobs.processSegmentJob(job);
   if (job.type === "cluster") {
     const result = await processClusterJobWorker(job.docId, job.projectId, job.recluster ?? false);
     try { await processKnowledgeContext(job.docId); } catch (error) { console.error("Knowledge context job failed", error); }
@@ -1711,6 +1727,13 @@ async function mainLoop() {
         throw new Error("Invalid SQS job payload");
       }
 
+      // Long jobs (a 3-hour recording's transcription) outlast the 10-minute
+      // visibility timeout: keep the message hidden while the job runs, so
+      // no other worker picks it up again.
+      const heartbeat = setInterval(() => {
+        sqs.send(new ChangeMessageVisibilityCommand({ QueueUrl: QUEUE_URL, ReceiptHandle: msg.ReceiptHandle, VisibilityTimeout: 600 }))
+          .catch((err) => console.error("Couldn't extend the job's visibility:", err.message));
+      }, 4 * 60 * 1000);
       try {
         await processJob(body);
       } catch (err) {
@@ -1742,6 +1765,8 @@ async function mainLoop() {
           }
         }
         continue;
+      } finally {
+        clearInterval(heartbeat);
       }
 
       // A failed SQS acknowledgment is not a failed processing job.

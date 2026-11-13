@@ -104,7 +104,9 @@ export default function TranscriptLinkPanel({ doc, onChanged }) {
         </ul>
       ) : (
         <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
-          {isRecording
+          {isRecording && media.generated
+            ? 'KMS transcribed this recording (no speaker names). A .vtt or Teams transcript linked here replaces it.'
+            : isRecording
             ? 'No transcript yet. A .vtt or Teams transcript with the same name, in the same folder and of the same length, is linked automatically; you can also attach one when you upload a recording.'
             : 'Not linked to a recording.'}
         </p>

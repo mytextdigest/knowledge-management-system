@@ -214,6 +214,8 @@ export async function GET(req, { params }) {
       canMoveToTopic: canManage,
       // E-8: who may link or unlink a transcript (PUT /api/documents/[id]/transcript-link checks again).
       canLinkTranscript: canManage,
+      // E-10: who may ask KMS to transcribe a recording (POST /api/documents/[id]/transcribe checks again).
+      canTranscribe: canManage && isMediaFile(doc.filename),
     },
   });
 }

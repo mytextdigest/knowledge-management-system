@@ -13,8 +13,10 @@
 // queues the next as in normal processing, so everything after it is redone
 // too. Shared by the worker and the API, so relative imports only.
 //
-// A recording (E11.6) has no stages: it is probed for its length and is
-// ready. Its text comes from its transcript, which is its own document.
+// A recording (E11.6) is probed for its length. Its text comes from its
+// transcript, which is its own document, so it has no stages, unless KMS
+// transcribed it (E-10): then its chunks go through embed, summarize and
+// cluster like any document's.
 
 import { isMediaFile } from "./fileFormats.js";
 
@@ -59,7 +61,7 @@ export async function pipelineState(db, doc) {
  * no text and nothing to read it from.
  */
 export function firstMissingStage(doc, state) {
-  if (isMediaFile(doc.filename)) return null;
+  if (isMediaFile(doc.filename) && state.textChunks === 0) return null;
   if (state.textChunks === 0) return canReadSource(doc) ? "chunk" : "unrepairable";
   if (state.embedded < state.textChunks) return "embed";
   if (!state.hasSummary) return "summarize";

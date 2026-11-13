@@ -7,6 +7,8 @@ import { logAudit } from "@/lib/auditLog";
 import { AUDIT_EVENTS } from "@/lib/audit/events";
 import { isMediaFile, MEDIA_EXTENSIONS } from "@/lib/fileFormats";
 import { HAS_TIME_CHUNKS } from "@/lib/transcriptLinking";
+import { dropGeneratedTranscript } from "@/lib/generatedTranscript";
+import { queueChapters } from "@/lib/mediaQueue";
 
 // EKP E11.5 (Workstream E, E-8): link a transcript to its recording by hand,
 // or unlink it (§3.4). The route is on either document:
@@ -130,5 +132,10 @@ export async function PUT(req, { params }) {
     before,
     after,
   });
+  // E-10: a provided transcript replaces KMS's own; E-11: chapters follow the transcript.
+  if (recordingId) await dropGeneratedTranscript(prisma, recordingId);
+  for (const rec of new Set([recordingId, before.transcriptOfId].filter(Boolean))) {
+    await queueChapters(rec).catch((err) => console.error(`Couldn't queue chapters for ${rec}:`, err.message));
+  }
   return NextResponse.json({ transcriptId: transcript.id, ...after });
 }

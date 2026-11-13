@@ -98,10 +98,10 @@ test("two recordings that both fit: no guess, and an existing auto link is dropp
     { id: "mp4", filename: "Town hall-20261110_140000-Meeting Recording.mp4", durationSeconds: 600, createdAt: new Date(1) },
     { id: "t", filename: "Town hall-20261110_140000-Meeting Transcript.docx", createdAt: new Date(2) },
   ], { timed: ["t"] });
-  assert.deepEqual(await refreshAutoLinks(db, "t"), [{ transcriptId: "t", recordingId: "mp4", reason: "match", candidates: 1 }]);
+  assert.deepEqual(await refreshAutoLinks(db, "t"), [{ transcriptId: "t", recordingId: "mp4", previousRecordingId: null, reason: "match", candidates: 1 }]);
 
   db.rows.set("mov", { ...db.rows.get("mp4"), id: "mov", filename: "Town hall-20261110_140000-Meeting Recording.mov", createdAt: new Date(3) });
-  assert.deepEqual(await refreshAutoLinks(db, "mov"), [{ transcriptId: "t", recordingId: null, reason: "ambiguous", candidates: 2 }]);
+  assert.deepEqual(await refreshAutoLinks(db, "mov"), [{ transcriptId: "t", recordingId: null, previousRecordingId: "mp4", reason: "ambiguous", candidates: 2 }]);
   assert.equal(db.rows.get("t").transcriptLinkSource, null);
   assert.deepEqual((await linkSuggestions(db, "t")).map((c) => [c.id, c.reason]), [["mov", "ambiguous"], ["mp4", "ambiguous"]]);
   assert.deepEqual((await linkSuggestions(db, "mp4")).map((c) => [c.id, c.reason]), [["t", "ambiguous"]]);
@@ -142,7 +142,7 @@ test("a manual link or unlink is left alone; a file that isn't a transcript lose
   assert.deepEqual(await refreshAutoLinks(db, "t"), []);
   assert.deepEqual(await refreshAutoLinks(db, "plain"), []);
   assert.equal(db.updates.length, 0);
-  assert.deepEqual(await refreshAutoLinks(db, "attached"), [{ transcriptId: "attached", recordingId: null, reason: "not_a_transcript" }]);
+  assert.deepEqual(await refreshAutoLinks(db, "attached"), [{ transcriptId: "attached", recordingId: null, previousRecordingId: "rec", reason: "not_a_transcript" }]);
   assert.deepEqual(await linkSuggestions(db, "rec"), [], "unlinked by hand: not suggested again");
 });
 

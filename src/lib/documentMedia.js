@@ -20,11 +20,14 @@ const timedChunks = (chunks) =>
 
 /**
  * doc: the document page's document (with chunks). Returns
- *   recording:  { kind: "video" | "audio", durationSeconds, transcripts: [{ id, filename, summary, linkSource, chunks }], suggestions }
+ *   recording:  { kind: "video" | "audio", durationSeconds, transcripts: [{ id, filename, summary, linkSource, chunks }], suggestions,
+ *                 generated: { chunks, language } | null, transcription: { status, progress, error, … } | null, chapters }
  *   transcript: { kind: "transcript", recording: { id, filename } | null, linkSource, chunks, suggestions }
  *   otherwise null.
  * `suggestions`: when nothing is linked, the same-name files next to it and
  * why they weren't linked automatically (transcriptLinking.linkSuggestions).
+ * `generated`: KMS's own transcript (E-10), stored on the recording.
+ * `transcription`: the latest transcription job. `chapters`: E-11 topics.
  */
 export async function documentMedia(doc, { userId, role, db = prisma }) {
   const canView = async (d) => d && !d.deletedAt && (d.userId === userId || (await canViewDocument(d, { userId, role, db })));
@@ -44,7 +47,21 @@ export async function documentMedia(doc, { userId, role, db = prisma }) {
       transcripts.push({ id: t.id, filename: t.filename, summary: t.summary, linkSource: t.transcriptLinkSource, chunks: timedChunks(t.chunks) });
     }
     const suggestions = transcripts.length ? [] : await visibleSuggestions(db, doc.id, canView);
-    return { kind, durationSeconds: doc.durationSeconds ?? null, transcripts, suggestions };
+    const own = timedChunks(doc.chunks);
+    const job = await db.mediaJob.findFirst({
+      where: { documentId: doc.id, kind: "transcribe" },
+      orderBy: { createdAt: "desc" },
+      select: { status: true, progress: true, error: true, createdAt: true, startedAt: true, finishedAt: true, audioSeconds: true },
+    });
+    return {
+      kind,
+      durationSeconds: doc.durationSeconds ?? null,
+      transcripts,
+      suggestions,
+      generated: own.length ? { chunks: own, language: doc.chunks.find((c) => c.metadata?.language)?.metadata.language ?? null } : null,
+      transcription: job ? { ...job, createdAt: job.createdAt?.toISOString(), startedAt: job.startedAt?.toISOString() ?? null, finishedAt: job.finishedAt?.toISOString() ?? null } : null,
+      chapters: Array.isArray(doc.mediaSegments) ? doc.mediaSegments : [],
+    };
   }
   if (!doc.chunks?.some((c) => timeOf(c))) return null;
   const recording = doc.transcriptOfId

@@ -12,7 +12,7 @@ import DocumentLifecycleActions from "@/components/governance/DocumentLifecycleA
 import Layout from '@/components/layout/Layout';
 import TwoColumnLayout from '@/components/layout/TwoColumnLayout';
 import { Button } from '@/components/ui/Button';
-import { FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Trash2, CheckCircle2, Copy, Check, Printer, BookOpen, ChevronDown, Captions, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network, Info, ArrowLeft } from 'lucide-react';
+import { ListOrdered, FileText, MessageCircle, AlertCircle, BarChart3, Clock, FileType, Calendar, Trash2, CheckCircle2, Copy, Check, Printer, BookOpen, ChevronDown, Captions, ChevronRight, HelpCircle, Lightbulb, Sheet, Gavel, AlertTriangle, Maximize2, Network, Info, ArrowLeft } from 'lucide-react';
 import BackButton from '@/components/ui/BackButton';
 import mammoth from "mammoth";
 import ClearChatDialog from "@/components/documents/ClearChatDialog";
@@ -38,6 +38,8 @@ import OpenInSourceLink from '@/components/documents/OpenInSourceLink';
 import MediaPlayer from '@/components/documents/MediaPlayer';
 import TranscriptView from '@/components/documents/TranscriptView';
 import TranscriptLinkPanel from '@/components/documents/TranscriptLinkPanel';
+import TranscriptionNotice from '@/components/documents/TranscriptionNotice';
+import ChapterList from '@/components/documents/ChapterList';
 
 
 
@@ -121,6 +123,10 @@ function DocumentContent() {
   const isTranscriptDoc = doc?.media?.kind === 'transcript';
   const recordingTranscripts = isRecording ? doc.media.transcripts : [];
   const linkedRecording = isTranscriptDoc ? doc.media.recording : null;
+  // E-10: KMS's own transcript (when it transcribed the recording) and the transcription job; E-11: chapters.
+  const ownTranscript = isRecording ? doc.media.generated : null;
+  const transcriptionActive = isRecording && ['queued', 'running'].includes(doc.media.transcription?.status);
+  const chapters = isRecording ? doc.media.chapters || [] : [];
   const seekRecording = useCallback((seconds) => playerRef.current?.seek(seconds), []);
   // Times in chat answers: play them here on a recording; on a linked transcript, open the recording there.
   const onTimestampClick = isRecording
@@ -524,7 +530,7 @@ function DocumentContent() {
   // summary shows "Regenerate" on the Summary tab instead of waiting forever.
   const isProcessing = isProcessingStatus(doc?.status);
   useEffect(() => {
-    if (!id || !isProcessing) return;
+    if (!id || !(isProcessing || transcriptionActive)) return;
     const interval = setInterval(async () => {
       try {
         const data = await fetchDocument(id);
@@ -552,7 +558,7 @@ function DocumentContent() {
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [id, isProcessing, fetchDocument, applyFreshDoc]);
+  }, [id, isProcessing, transcriptionActive, fetchDocument, applyFreshDoc]);
 
 
   useEffect(() => {
@@ -1150,15 +1156,11 @@ function DocumentContent() {
         </>
       ),
     },
-    // E11.5: until a transcript is linked, nothing that was said is searchable.
-    isRecording && !isProcessing && recordingTranscripts.length === 0 && {
+    // E11.5: until there is a transcript, nothing that was said is searchable;
+    // E-10: KMS transcribes it (automatically or on request), with progress here.
+    isRecording && recordingTranscripts.length === 0 && !ownTranscript && (!isProcessing || transcriptionActive) && {
       key: 'no-transcript',
-      body: (
-        <>
-          No transcript yet, so chat and search can&apos;t use what was said. Put its .vtt or Teams transcript next to it (same folder and name){' '}
-          {doc?.permissions?.canLinkTranscript ? <>or <button type="button" onClick={() => setActiveTab('details')} className="font-medium underline">link one under Details</button></> : 'or ask an owner to link one'}.
-        </>
-      ),
+      body: <TranscriptionNotice doc={doc} onChanged={refreshDoc} onShowDetails={() => setActiveTab('details')} />,
     },
     doc?.supersededById && {
       key: 'superseded',
@@ -1271,6 +1273,7 @@ function DocumentContent() {
   const tabs = [
     { id: 'chat', label: 'Chat', icon: MessageCircle },
     isRecording && { id: 'transcript', label: 'Transcript', icon: Captions },
+    isRecording && chapters.length > 0 && { id: 'chapters', label: 'Chapters', icon: ListOrdered, count: chapters.length },
     { id: 'summary', label: 'Summary', icon: BarChart3 },
     // Recordings and transcripts have no pages; their Transcript is the walk-through.
     !isRecording && !isTranscriptDoc && { id: 'guide', label: 'Pagewise Summary', icon: BookOpen },
@@ -1314,9 +1317,22 @@ function DocumentContent() {
                   {recordingTranscripts.length > 1 && <h3 className="px-4 pt-3 text-xs font-semibold text-gray-500 dark:text-gray-400">{t.filename}</h3>}
                   <TranscriptView chunks={t.chunks} currentTime={playTime} onSeek={seekRecording} />
                 </section>
-              )) : (
-                <p className="p-4 text-sm text-gray-500 dark:text-gray-400">No transcript is linked to this recording yet.</p>
+              )) : ownTranscript ? (
+                <section>
+                  <p className="px-4 pt-3 text-xs text-gray-500 dark:text-gray-400">
+                    Transcribed by KMS{ownTranscript.language ? ` (${ownTranscript.language})` : ''}. Speakers aren&apos;t named; a .vtt or Teams transcript linked later replaces this one.
+                  </p>
+                  <TranscriptView chunks={ownTranscript.chunks} currentTime={playTime} onSeek={seekRecording} />
+                </section>
+              ) : (
+                <p className="p-4 text-sm text-gray-500 dark:text-gray-400">
+                  {transcriptionActive ? 'Being transcribed; the transcript appears here when it is done.' : 'No transcript is linked to this recording yet.'}
+                </p>
               )}
+            </div>
+          ) : activeTab === 'chapters' && isRecording ? (
+            <div className="h-full overflow-y-auto">
+              <ChapterList chapters={chapters} currentTime={playTime} onSeek={seekRecording} />
             </div>
           ) : activeTab === 'versions' ? (
             <div className="overflow-y-auto h-full"><DocumentVersionsPanel documentId={id} /></div>
@@ -1817,7 +1833,7 @@ function DocumentContent() {
                     {!isProcessing && (
                       <p className="max-w-sm mx-auto text-sm text-gray-500 dark:text-gray-400 mb-4">
                         {isRecording
-                          ? "A recording's summary comes from its transcript. Link one under Details, or put its .vtt or Teams transcript next to it."
+                          ? "A recording's summary comes from its transcript. Transcribe it, link one under Details, or put its .vtt or Teams transcript next to it."
                           : canRegenerateSummary
                           ? "Processing finished without one. Regenerate it from the document's text."
                           : "Processing finished without one. Ask an owner or department admin of this document to regenerate it."}

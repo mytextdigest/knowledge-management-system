@@ -80,6 +80,8 @@ test("the page polls only while the worker is on the document", () => {
   for (const s of ["queued", "chunked", "embedding", "summarizing", "clustering"]) assert.equal(isProcessingStatus(s), true, s);
   for (const s of ["ready", "error", "ocr_failed", "password_protected", "unreadable_file", undefined]) assert.equal(isProcessingStatus(s), false, String(s));
   const page = read("src/app/(app)/document/page.jsx");
-  assert.match(page, /if \(!id \|\| !isProcessing\) return;/);
+  // E-10: also while a recording's transcription is queued or running.
+  assert.match(page, /if \(!id \|\| !\(isProcessing \|\| transcriptionActive\)\) return;/);
+  assert.equal(isProcessingStatus("transcribing"), true);
   assert.doesNotMatch(page, /Generate summary when switching to summary tab/);
 });

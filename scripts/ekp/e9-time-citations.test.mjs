@@ -56,7 +56,7 @@ test("org chat: transcript lines are tagged with times, cited as the recording",
 
 test("document chat on a recording answers from its linked transcripts, with times", () => {
   const route = read("src/app/api/documents/[id]/ask/route.js");
-  assert.match(route, /\? \{ document: \{ transcriptOfId: documentId, deletedAt: null \} \}/);
+  assert.match(route, /\? \{ OR: \[\{ documentId \}, \{ document: \{ transcriptOfId: documentId, deletedAt: null \} \}\] \}/);
   assert.match(route, /The document is a recording; the context is its transcript\./);
   assert.match(route, /This recording has no transcript yet/);
 });

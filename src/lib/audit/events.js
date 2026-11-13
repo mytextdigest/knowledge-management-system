@@ -15,6 +15,7 @@ export const AUDIT_EVENTS = Object.freeze({
   DOCUMENT_SUMMARY_EDITED: "document.summary_edited",
   DOCUMENT_TRANSCRIPT_LINKED: "document.transcript_linked",
   DOCUMENT_TRANSCRIPT_UNLINKED: "document.transcript_unlinked",
+  DOCUMENT_TRANSCRIPTION_REQUESTED: "document.transcription_requested",
   WORKFLOW_SUBMITTED: "workflow.submitted",
   WORKFLOW_APPROVED: "workflow.approved",
   WORKFLOW_REJECTED: "workflow.rejected",

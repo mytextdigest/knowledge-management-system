@@ -23,6 +23,7 @@ const PROCESSING_STATUSES = new Set([
   'queued',
   'extracting',
   'running_ocr',
+  'transcribing',
   'chunked',
   'embedding',
   'embedded',

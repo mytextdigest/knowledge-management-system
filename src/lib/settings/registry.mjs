@@ -18,6 +18,8 @@ export const SETTINGS_REGISTRY = Object.freeze({
  'duplicates.threshold': { label:'Duplicate similarity threshold', default:Number(process.env.CLASSIFICATION_DUPLICATE_THRESHOLD || 0.92), validate:x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1 },
  'sharepoint.storeOriginals': { label:'Store SharePoint originals', default:false, validate:boolean },
  'sharepoint.syncIntervalMinutes': { label:'SharePoint sync interval (minutes)', default:60, validate:positiveInt },
+ // EKP E11.3 (E-10): transcribe recordings that have no transcript, automatically (decided on by default, 2026-11-13).
+ 'media.transcription.auto': { label:'Transcribe recordings that have no transcript', default:true, validate:boolean },
 });
 export function validateSetting(key, value) {
  const entry=SETTINGS_REGISTRY[key];
