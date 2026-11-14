@@ -8,7 +8,7 @@
 | **Foundations used**  | F1 document access, F2 audit, F3 scheduled jobs, F5 org settings, F6 workflow engine (E14) |
 | **Phase 2 window**    | Mon 2 Nov – Thu 26 Nov 2026 (code-complete), integration to Mon 30 Nov                 |
 | **Branch**            | `feature/ekp-ws-e` (one branch for the phase, one PR per milestone; see [PHASE2_OVERVIEW.md](PHASE2_OVERVIEW.md) §3) |
-| **Status**            | E-M1 merged to `dev` (PR #36, 2026-11-07). E-M2 (E-6 to E-9) and E-10, E-11 of E-M3 (transcription, chapters) in one PR to `dev` (2026-11-14). E-12 (SAML) is the last E-M3 task, not started. E-M4 outlined, detail it before it starts. |
+| **Status**            | E-M1 merged to `dev` (PR #36, 2026-11-07). E-M2 (E-6 to E-9) and E-10, E-11 of E-M3 (transcription, chapters) in PR #39 to `dev` (2026-11-14). E-12 (SAML) is the last E-M3 task, not started. E-M4 outlined, detail it before it starts. |
 
 **Source documents (don't copy from them, link to them):**
 
@@ -161,13 +161,13 @@ Each milestone ends with a PR from `feature/ekp-ws-e` into `dev`, opened one wor
 | `E-4` | E-M1 · E11.4: shared format allow-list (upload, API, SharePoint filter); clear rejection messages | `DONE` | Johurul | `E-1` | #36 | 2026-11-04 | 2026-11-07 |
 | `E-5` | E-M1 · E11.1: PPTX slides + notes, one chunk per slide, "slide N" citations, viewer opens at slide | `DONE` | Johurul | `E-4` | #36 | 2026-11-04 | 2026-11-07 |
 | `E-M1` | **Milestone PR + demo: PowerPoint searchable + SharePoint tags kept** (due Fri 6 Nov) | `DONE` | Johurul | `E-3`–`E-5` | #36 | 2026-11-04 | 2026-11-07 |
-| `E-6` | E-M2 · E11.6: stream S3/Graph to temp file; media bypass the `A-24` skip; re-queue skipped media; `ffmpeg` in worker image | `DONE` | Johurul | `E-M1` | | 2026-11-12 | 2026-11-14 |
-| `E-7` | E-M2 · E11.5: VTT + Word transcript parsers, time-window chunks | `DONE` | Johurul | `E-M1` | | 2026-11-12 | 2026-11-14 |
-| `E-8` | E-M2 · Transcript ↔ recording linking; use the transcript, no transcription call | `DONE` | Johurul | `E-6`, `E-7` | | 2026-11-12 | 2026-11-14 |
-| `E-9` | E-M2 · Media player with `?t=`; timestamp citations in chat and search | `DONE` | Johurul | `E-8` | | 2026-11-12 | 2026-11-14 |
-| `E-M2` | **Milestone PR + demo: Video with transcript** (due Fri 13 Nov) | `DONE` | Johurul | `E-6`–`E-9` | | 2026-11-12 | 2026-11-14 |
-| `E-10` | E-M3 · E11.3: transcription fallback (provider interface, F5 setting, ≤ 25 MB pieces, progress, cost log) | `DONE` | Johurul | `E-M2` | | 2026-11-13 | 2026-11-14 |
-| `E-11` | E-M3 · E11.7: topic segments + chapter list | `DONE` | Johurul | `E-8` | | 2026-11-13 | 2026-11-14 |
+| `E-6` | E-M2 · E11.6: stream S3/Graph to temp file; media bypass the `A-24` skip; re-queue skipped media; `ffmpeg` in worker image | `DONE` | Johurul | `E-M1` | #39 | 2026-11-12 | 2026-11-14 |
+| `E-7` | E-M2 · E11.5: VTT + Word transcript parsers, time-window chunks | `DONE` | Johurul | `E-M1` | #39 | 2026-11-12 | 2026-11-14 |
+| `E-8` | E-M2 · Transcript ↔ recording linking; use the transcript, no transcription call | `DONE` | Johurul | `E-6`, `E-7` | #39 | 2026-11-12 | 2026-11-14 |
+| `E-9` | E-M2 · Media player with `?t=`; timestamp citations in chat and search | `DONE` | Johurul | `E-8` | #39 | 2026-11-12 | 2026-11-14 |
+| `E-M2` | **Milestone PR + demo: Video with transcript** (due Fri 13 Nov) | `DONE` | Johurul | `E-6`–`E-9` | #39 | 2026-11-12 | 2026-11-14 |
+| `E-10` | E-M3 · E11.3: transcription fallback (provider interface, F5 setting, ≤ 25 MB pieces, progress, cost log) | `DONE` | Johurul | `E-M2` | #39 | 2026-11-13 | 2026-11-14 |
+| `E-11` | E-M3 · E11.7: topic segments + chapter list | `DONE` | Johurul | `E-8` | #39 | 2026-11-13 | 2026-11-14 |
 | `E-12` | E-M3 · **`A-16`**: SAML 2.0 via embedded SAML Jackson + `BoxyHQSAMLProvider` (RFP §6 S2) | `TODO` | Johurul | `E-1` | | | |
 | `E-M3` | **Milestone PR + demo: Transcription, chapters, SAML** (due Fri 20 Nov) | `IN_PROGRESS` | Johurul | `E-10`–`E-12` | | 2026-11-13 | |
 | `E-13` | E-M4 · Schema: `thumbnailPath`, `AssetTemplate`, `AssetTemplateVersion`, `Document.templateVersionId`, `assetData` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
