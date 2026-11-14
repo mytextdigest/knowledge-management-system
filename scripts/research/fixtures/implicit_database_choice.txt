@@ -1,0 +1,15 @@
+Engineering Sync Notes — Payments Platform
+
+Monday:
+Sarah asked in the architecture channel: "Should we use PostgreSQL or MySQL for the new payments service?" A few people weighed in on both sides but nobody gave a final answer in the thread.
+
+Tuesday:
+John replied: "Okay, I'll proceed with the PostgreSQL approach for now — it lines up better with what the rest of the platform already uses."
+
+Wednesday:
+John posted: "I've created the migration tickets for the Postgres schema (PAY-412, PAY-413)."
+
+Friday:
+The on-call runbook was updated to say: "The payments service's primary datastore is Postgres; see PAY-412 for the migration history."
+
+No one ever wrote a sentence containing the word "decided" anywhere in this thread, but by Friday the whole team was treating Postgres as the settled choice for the payments service.

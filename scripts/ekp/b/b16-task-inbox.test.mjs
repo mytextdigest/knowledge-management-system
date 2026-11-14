@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {normalizeTaskFilter,taskWhere,validateTaskDecision} from '../../../src/lib/workflows/taskInbox.mjs';
+test('filter defaults to pending',()=>{assert.equal(normalizeTaskFilter('bogus'),'pending');assert.equal(normalizeTaskFilter('all'),'all')});
+test('pending inbox is scoped to user and org',()=>assert.deepEqual(taskWhere({orgId:'org1',userId:'u1'}),{assigneeId:'u1',instance:{orgId:'org1'},status:'pending'}));
+test('completed inbox excludes pending',()=>assert.deepEqual(taskWhere({orgId:'org1',userId:'u1',filter:'completed'}).status,{not:'pending'}));
+test('reject requires reason',()=>assert.match(validateTaskDecision('reject',''),/reason/));
+test('request changes requires reason',()=>assert.match(validateTaskDecision('request_changes','  '),/reason/));
+test('approve allows empty comment',()=>assert.equal(validateTaskDecision('approve',''),null));
+test('rejects invalid actions and long comments',()=>{assert.ok(validateTaskDecision('delete',''));assert.ok(validateTaskDecision('approve','x'.repeat(2001)))});

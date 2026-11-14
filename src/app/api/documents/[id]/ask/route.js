@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import OpenAI from "openai";
-import { getUserOpenAIKey } from "@/utils/key_helper";
+import { resolveOpenAIKey } from "@/utils/key_helper";
 import { activeRequests } from "@/lib/requestCancellation";
+import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
+import { firstMissingStage, pipelineState } from "@/lib/documentPipeline";
+import { queueRepair } from "@/lib/documentReprocess";
+import { isMediaFile } from "@/lib/fileFormats";
 
 // const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -31,23 +35,33 @@ export async function POST(req, { params }) {
       return NextResponse.json({ error: "Missing params" }, { status: 400 });
 
     // ----------------------------
-    // 2) DOCUMENT OWNERSHIP CHECK
+    // 2) DOCUMENT MANAGEMENT CHECK
     // ----------------------------
-    const doc = await prisma.document.findFirst({
-      where: {
-        id: documentId,
-        user: { email: session.user.email },
-        selected: 1   // ← only include selected docs
-      },
-      include: { user: true }
-    });
+    const access = await resolveDocumentManagementAccess(session.user.email, documentId);
+    if (!access.document)
+      return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    if (!access.canManage)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    if (!doc)
+    const doc = await prisma.document.findUnique({
+      where: { id: documentId },
+      include: { user: true, project: { select: { orgId: true } } },
+    });
+    if (!doc || doc.selected !== 1)
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
 
-    const userId = doc.userId;
+    const actingUser = access.user || await prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { id: true },
+    });
+    if (!actingUser)
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    const userId = actingUser.id;
 
-    const apiKey = await getUserOpenAIKey(userId);
+    const apiKey = await resolveOpenAIKey({
+      userId,
+      orgId: doc.orgId || doc.project?.orgId || null,
+    });
 
     if (!apiKey) {
       return NextResponse.json(
@@ -57,6 +71,20 @@ export async function POST(req, { params }) {
     }
 
     const openai = new OpenAI({ apiKey });
+
+    // A ready document whose processing stopped part-way (search index or
+    // summary missing). Answer from its text as usual (step 6 embeds what's
+    // needed for this chat) and queue a repair once; the worker finishes the
+    // missing stages in order.
+    let notice = null;
+    try {
+      const missing = doc.status === "ready" ? firstMissingStage(doc, await pipelineState(prisma, doc)) : null;
+      if ((missing === "embed" || missing === "summarize") && (await queueRepair(prisma, doc))) {
+        notice = "This document wasn't fully processed, so its search index or summary is incomplete. KMS has started finishing it; this usually takes a minute or two. Answers may be less complete until it's done.";
+      }
+    } catch (err) {
+      console.error("Couldn't queue reprocessing for document", documentId, err);
+    }
 
     // ----------------------------
     // 3) ENSURE CONVERSATION EXISTS
@@ -100,10 +128,24 @@ export async function POST(req, { params }) {
     // ----------------------------
     // 5) LOAD CHUNKS
     // ----------------------------
+    // E11.5: what was said in a recording is in its linked transcripts, or
+    // in KMS's own transcript, stored on the recording itself (E-10).
+    const isRecording = isMediaFile(doc.filename);
     const chunks = await prisma.chunk.findMany({
-      where: { documentId },
-      orderBy: { chunkIndex: "asc" }
+      where: isRecording
+        ? { OR: [{ documentId }, { document: { transcriptOfId: documentId, deletedAt: null } }] }
+        : { documentId },
+      orderBy: [{ documentId: "asc" }, { chunkIndex: "asc" }]
     });
+
+    if (isRecording && chunks.length === 0) {
+      // Nothing was said that KMS can read yet: say so instead of asking the model.
+      const answer = "This recording has no transcript yet, so I can't tell what was said in it. Transcribe it from the notice above the player, put its .vtt or Teams transcript next to it (same folder and name), or link a transcript under Details.";
+      await prisma.message.update({ where: { id: userMsg.id }, data: { status: "done" } });
+      await prisma.message.create({ data: { conversationId, role: "assistant", content: answer, status: "done" } });
+      activeRequests.delete(requestId);
+      return NextResponse.json({ success: true, conversationId, answer });
+    }
 
     const allChunks = chunks.map(c => ({
       id: c.id,
@@ -230,8 +272,13 @@ export async function POST(req, { params }) {
         - NEVER use information that is not present in the document context.
         - NEVER invent facts, numbers, names, or claims.
         - If the document does not fully answer the question, provide the closest accurate information the document contains (do not say "I don't know").
-        - Plain text only (no markdown, no bullets, no special formatting).
-        - Be concise, factual, and avoid assumptions.
+        - You may use light markdown formatting where it aids clarity — **bold** for key terms or
+          figures, short bullet lists for multiple items. Keep it natural and sparing; this is a
+          chat reply, not a report.
+        - Be concise, factual, and avoid assumptions.${isRecording ? `
+        - The document is a recording; the context is its transcript. Each line starts with the
+          time it was said, e.g. "[12:34] Jane Smith: …". When you use a line, give its time as
+          m:ss or h:mm:ss (e.g. "at 12:34") and who said it when the line names them, so the user can play it from there.` : ""}
       `.trim()
     };
 
@@ -327,7 +374,8 @@ export async function POST(req, { params }) {
     return NextResponse.json({
       success: true,
       conversationId,
-      answer: assistantText
+      answer: assistantText,
+      ...(notice ? { notice, reprocessing: true } : {})
     });
 
   } catch (err) {
@@ -338,3 +386,5 @@ export async function POST(req, { params }) {
     );
   }
 }
+
+

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 
 export async function POST(req, { params }) {
   try {
@@ -10,22 +11,28 @@ export async function POST(req, { params }) {
 
     const { id: documentId } = await params;
 
-    const doc = await prisma.document.findFirst({
-      where: { id: documentId, user: { email: session.user.email } }
-    });
-
-    if (!doc)
+    const access = await resolveDocumentManagementAccess(session.user.email, documentId);
+    if (!access.document)
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    if (!access.canManage)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    // 🔥 Find the active conversation
+    const actingUser = access.user || await prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { id: true },
+    });
+    if (!actingUser)
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    // Find the caller's active conversation for this shared document.
     const conv = await prisma.conversation.findFirst({
-      where: { documentId, userId: doc.userId },
+      where: { documentId, userId: actingUser.id },
       orderBy: { createdAt: "desc" }
     });
 
     if (!conv) {
       const newConv = await prisma.conversation.create({
-        data: { documentId, userId: doc.userId }
+        data: { documentId, userId: actingUser.id }
       });
       return NextResponse.json({ success: true, conversationId: newConv.id });
     }

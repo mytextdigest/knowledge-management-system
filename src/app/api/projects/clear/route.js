@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { resolveProjectManagementAccess } from "@/lib/projectManagementPolicy";
 
 export async function POST(req) {
   try {
@@ -12,14 +13,14 @@ export async function POST(req) {
     if (!projectId)
       return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
 
-    // verify project belongs to user
-    const project = await prisma.project.findFirst({
-      where: { id: projectId, user: { email: session.user.email } },
-    });
+    const { project, user: actingUser, canManage } =
+      await resolveProjectManagementAccess(session.user.email, projectId);
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    if (!canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+    // Clear only the caller's project chat, not another manager's conversation.
     const conversations = await prisma.projectConversation.findMany({
-      where: { projectId },
+      where: { projectId, userId: actingUser.id },
       select: { id: true },
     });
 

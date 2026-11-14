@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { decide, validateDefinition } from '../../../src/lib/workflows/engine.mjs';
+const input = { actorId: 'reviewer', submittedById: 'author', assigneeId: 'reviewer', status: 'in_review', taskStatus: 'pending', action: 'approve', position: 1, totalStages: 2 };
+test('definition requires stages', () => assert.match(validateDefinition({name:'A', stages:[]}), /1–12/));
+test('definition accepts stages', () => assert.equal(validateDefinition({name:'A', stages:[{name:'Review',approverUserId:'x'}]}), null));
+test('never self approve', () => assert.match(decide({...input, submittedById:'reviewer'}).error, /Self-approval/));
+test('only assigned reviewer can decide', () => assert.match(decide({...input, actorId:'other'}).error, /assigned/));
+test('first approval progresses', () => assert.deepEqual(decide(input), {taskStatus:'approved',instanceStatus:'in_review',nextPosition:2}));
+test('final approval completes', () => assert.equal(decide({...input,position:2}).instanceStatus,'approved'));
+test('rejection terminates', () => assert.equal(decide({...input,action:'reject'}).instanceStatus,'rejected'));
+test('request changes terminates', () => assert.equal(decide({...input,action:'request_changes'}).instanceStatus,'changes_requested'));
+test('cannot decide twice', () => assert.match(decide({...input,taskStatus:'approved'}).error,/not pending/));

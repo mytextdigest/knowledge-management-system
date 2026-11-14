@@ -1,0 +1,7 @@
+Architecture Review — Meeting Minutes, September 12
+
+After comparing the cost and migration effort of AWS RDS against Neon, the team decided to migrate the primary application database to Neon Postgres. This was approved by the engineering lead in this meeting.
+
+From now on, all new services must use the shared logging library instead of writing their own console-based logging. This applies immediately to any service entering development after today's date.
+
+Rationale: Neon's pooled connections and branch-based dev databases reduce our AWS bill and make local development significantly easier, since engineers no longer need to spin up their own database instances.
