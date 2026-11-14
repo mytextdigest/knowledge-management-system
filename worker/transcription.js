@@ -5,7 +5,8 @@
 //               the timed chunks on the recording, then the normal embed →
 //               summarize → cluster stages. Automatic when the org's
 //               `media.transcription.auto` is on (the default), after
-//               AUTO_TRANSCRIBE_DELAY_SECONDS so a transcript that arrives
+//               a wait (10 min from SharePoint, 1 min for an upload:
+//               autoTranscribeDelaySeconds) so a transcript that arrives
 //               with the recording is used instead; or on request from the
 //               document page. One recording at a time per org. Never retried
 //               by SQS (a failed job is marked failed and can be retried from
@@ -26,7 +27,7 @@ import {
   AUDIO_ARGS, DEFAULT_PROVIDER, TRANSCRIPTION_PROVIDERS, parseSilences, planPieces, segmentsToCues, transcriptionCost,
 } from "../src/lib/transcription.js";
 import {
-  AUTO_TRANSCRIBE_DELAY_SECONDS, ACTIVE_JOB_STATUSES, hasLinkedTranscript, dropGeneratedTranscript, generatedChunkCount,
+  autoTranscribeDelaySeconds, ACTIVE_JOB_STATUSES, hasLinkedTranscript, dropGeneratedTranscript, generatedChunkCount,
 } from "../src/lib/generatedTranscript.js";
 import { CHAPTER_INSTRUCTIONS, MIN_CHAPTER_RECORDING_SECONDS, chapterInput, parseChapters } from "../src/lib/chapters.js";
 
@@ -52,14 +53,14 @@ export function createMediaJobs({ prisma, sqs, queueUrl, openDocumentStream }) {
 
   /**
    * Queue a transcription (a MediaJob row, then the SQS message). `auto`:
-   * started by KMS, waits AUTO_TRANSCRIBE_DELAY_SECONDS and is dropped if a
+   * started by KMS, waits autoTranscribeDelaySeconds(doc) and is dropped if a
    * transcript arrives or the setting is turned off meanwhile.
    */
   async function queueTranscription(doc, { auto }) {
     const job = await prisma.mediaJob.create({
       data: { orgId: doc.orgId, documentId: doc.id, kind: "transcribe", status: "queued", provider: DEFAULT_PROVIDER },
     });
-    await send({ type: "transcribe", docId: doc.id, jobId: job.id, auto }, auto ? AUTO_TRANSCRIBE_DELAY_SECONDS : 0);
+    await send({ type: "transcribe", docId: doc.id, jobId: job.id, auto }, auto ? autoTranscribeDelaySeconds(doc) : 0);
     return job;
   }
 
@@ -72,7 +73,7 @@ export function createMediaJobs({ prisma, sqs, queueUrl, openDocumentStream }) {
     const active = await prisma.mediaJob.count({ where: { documentId: doc.id, kind: "transcribe", status: { in: ACTIVE_JOB_STATUSES } } });
     if (active) return null;
     const job = await queueTranscription(doc, { auto: true });
-    console.log(`🎙️ ${doc.filename}: no transcript; transcription queued (starts in ${AUTO_TRANSCRIBE_DELAY_SECONDS / 60} min unless a transcript arrives)`);
+    console.log(`🎙️ ${doc.filename}: no transcript; transcription queued (starts in ${autoTranscribeDelaySeconds(doc) / 60} min unless a transcript arrives)`);
     return job;
   }
 
@@ -123,7 +124,8 @@ export function createMediaJobs({ prisma, sqs, queueUrl, openDocumentStream }) {
       const openai = await getOpenAIForDocument(docId);
       await withTempDir(async (dir) => {
         const source = join(dir, `source${fileExtension(doc.filename) || ".media"}`);
-        await streamToFile(await openDocumentStream(doc), source);
+        const { body, bytes } = await openDocumentStream(doc);
+        await streamToFile(body, source, { bytes });
         const audio = join(dir, "audio.mp3");
         const audioBytes = await extractAudio(source, audio, AUDIO_ARGS);
         audioSeconds = (await probeMedia(audio)).durationSeconds || doc.durationSeconds || 0;

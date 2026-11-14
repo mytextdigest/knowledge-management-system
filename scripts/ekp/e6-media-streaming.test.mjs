@@ -4,11 +4,12 @@
 // Run: npm run ekp:e:test
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { execFileSync } from "node:child_process";
-import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable } from "../../worker/media.js";
+import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable, ensureDiskSpace, removeStaleTempDirs, NotEnoughDiskSpace, DISK_HEADROOM_BYTES } from "../../worker/media.js";
 import { checkFileFormat, isMediaFile, mediaKind } from "../../src/lib/fileFormats.js";
 import { firstMissingStage } from "../../src/lib/documentPipeline.js";
 
@@ -86,6 +87,49 @@ test("ffprobe reads a recording's length and kind", { skip: !hasFfmpeg && "ffmpe
     await streamToFile(Readable.from([Buffer.from("not a video")]), junk);
     await assert.rejects(probeMedia(junk), /^Error: ffprobe couldn't read the file/);
   });
+});
+
+test("disk: a file that won't fit is refused before downloading; unknown sizes aren't checked", async () => {
+  const GB = 1024 ** 3;
+  await ensureDiskSpace("/", 2 * GB, { freeBytes: 3 * GB });
+  await assert.rejects(ensureDiskSpace("/", 2 * GB, { freeBytes: 2 * GB + DISK_HEADROOM_BYTES - 1 }), NotEnoughDiskSpace);
+  await assert.rejects(ensureDiskSpace("/", 8 * GB, { freeBytes: 5 * GB }), /needs 8\.50 GB, 5\.00 GB is free/);
+  await ensureDiskSpace("/", 0, { freeBytes: 0 });
+  await ensureDiskSpace(tmpdir(), 1024); // the real file system
+
+  let destroyed = false;
+  const body = Readable.from([Buffer.from("x")]);
+  body.destroy = () => { destroyed = true; };
+  await withTempDir(async (dir) => {
+    await assert.rejects(streamToFile(body, join(dir, "huge.mp4"), { bytes: Number.MAX_SAFE_INTEGER }), NotEnoughDiskSpace);
+    assert.equal(existsSync(join(dir, "huge.mp4")), false, "nothing written");
+  });
+  assert.equal(destroyed, true, "the source connection is closed");
+});
+
+test("temp folders: named with the worker's pid; ones left by a dead worker are removed at start", async () => {
+  await withTempDir(async (dir) => assert.match(dir, new RegExp(`kms-media-${process.pid}-`)));
+  const root = mkdtempSync(join(tmpdir(), "e6-stale-"));
+  try {
+    const dead = 2 ** 22 + 12345; // above Linux's pid_max default: not running
+    for (const name of [`kms-media-${dead}-aaa`, `kms-media-${process.pid}-bbb`, "kms-media-old111", "kms-media-new222", "other-dir"]) mkdirSync(join(root, name));
+    const hourAgo = (Date.now() - 2 * 3600_000) / 1000;
+    utimesSync(join(root, "kms-media-old111"), hourAgo, hourAgo);
+    const removed = await removeStaleTempDirs(root);
+    assert.deepEqual(removed.sort(), [`kms-media-${dead}-aaa`, "kms-media-old111"]);
+    assert.equal(existsSync(join(root, `kms-media-${process.pid}-bbb`)), true, "this worker's own folder is kept");
+    assert.equal(existsSync(join(root, "kms-media-new222")), true, "an old-style folder under an hour old is kept");
+    assert.equal(existsSync(join(root, "other-dir")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  const worker = read("worker/index.js");
+  assert.match(worker, /const stale = await removeStaleTempDirs\(\);/);
+  assert.match(worker, /const \{ body, bytes: size \} = await openDocumentStream\(doc, s3Key\);\s*const written = await streamToFile\(body, path, \{ bytes: size \}\);/);
+  assert.match(worker, /return \{ body: object\.Body, bytes: Number\(object\.ContentLength\) \|\| 0 \};/);
+  assert.match(worker, /return \{ body: res\.body, bytes: Number\(res\.headers\?\.get\?\.\("content-length"\)\) \|\| 0 \};/);
+  assert.match(worker, /err instanceof MediaToolsUnavailable \|\| err instanceof NotEnoughDiskSpace/, "no room: kept playable, not retried by SQS");
+  assert.match(read("worker/transcription.js"), /const \{ body, bytes \} = await openDocumentStream\(doc\);\s*await streamToFile\(body, source, \{ bytes \}\);/);
 });
 
 test("the worker streams recordings and lets them past the A-24 size limit", () => {

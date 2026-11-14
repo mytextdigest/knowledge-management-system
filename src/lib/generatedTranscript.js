@@ -10,12 +10,18 @@
 import { isMediaFile } from "./fileFormats.js";
 
 /**
- * Seconds an automatic transcription waits, so a transcript syncing or
- * uploaded with the recording is used instead. 1 minute for testing
- * (Johurul, 2026-11-14). TODO before deploy: 10 minutes (600) for SharePoint
- * sync only; uploads keep the short wait.
+ * Seconds an automatic transcription waits, so a transcript arriving with the
+ * recording is used instead. Decided (Johurul, 2026-11-14): 10 minutes for a
+ * recording from SharePoint sync, where Teams writes the transcript after the
+ * recording and the next sync brings it; 1 minute for an upload, where the
+ * transcript is attached or selected with the recording.
  */
-export const AUTO_TRANSCRIBE_DELAY_SECONDS = 60;
+export const AUTO_TRANSCRIBE_DELAY_SECONDS = { sharepoint: 600, upload: 60 };
+
+/** The wait for this recording: SharePoint sync or upload. */
+export function autoTranscribeDelaySeconds(doc) {
+  return doc?.sourceProvider === "sharepoint" ? AUTO_TRANSCRIBE_DELAY_SECONDS.sharepoint : AUTO_TRANSCRIBE_DELAY_SECONDS.upload;
+}
 
 /** Statuses of a transcription job that is still to finish. */
 export const ACTIVE_JOB_STATUSES = ["queued", "running"];

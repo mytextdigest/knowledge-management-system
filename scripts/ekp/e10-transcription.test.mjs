@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseSilences, planPieces, segmentsToCues, transcriptionCost, PIECE_SECONDS } from "../../src/lib/transcription.js";
 import { parseChapters, chapterInput } from "../../src/lib/chapters.js";
-import { dropGeneratedTranscript, hasLinkedTranscript } from "../../src/lib/generatedTranscript.js";
+import { dropGeneratedTranscript, hasLinkedTranscript, autoTranscribeDelaySeconds } from "../../src/lib/generatedTranscript.js";
 import { firstMissingStage } from "../../src/lib/documentPipeline.js";
 import { SETTINGS_REGISTRY } from "../../src/lib/settings/registry.mjs";
 import { chunkTranscript } from "../../src/lib/transcripts.js";
@@ -96,6 +96,13 @@ test("a provided transcript replaces KMS's own; a recording's own chunks go thro
   assert.equal(firstMissingStage(rec, { textChunks: 8, embedded: 8, hasSummary: false }), "summarize");
 });
 
+test("automatic transcription waits 10 minutes for a SharePoint recording, 1 minute for an upload", () => {
+  assert.equal(autoTranscribeDelaySeconds({ sourceProvider: "sharepoint" }), 600);
+  assert.equal(autoTranscribeDelaySeconds({ sourceProvider: "manual" }), 60);
+  assert.equal(autoTranscribeDelaySeconds({ sourceProvider: null }), 60);
+  assert.match(read("worker/index.js"), /maybeAutoTranscribe\(\{ id: docId, orgId: doc\.orgId, filename, sourceProvider: doc\.sourceProvider \}\)/);
+});
+
 test("automatic transcription is an org setting, on by default", () => {
   const entry = SETTINGS_REGISTRY["media.transcription.auto"];
   assert.equal(entry.default, true);
@@ -105,7 +112,7 @@ test("automatic transcription is an org setting, on by default", () => {
 
 test("worker: queued after the probe, waits for a transcript, one per org, never retried by SQS", () => {
   const worker = read("worker/index.js");
-  assert.match(worker, /await mediaJobs\.maybeAutoTranscribe\(\{ id: docId, orgId: doc\.orgId, filename \}\)/);
+  assert.match(worker, /await mediaJobs\.maybeAutoTranscribe\(\{ id: docId, orgId: doc\.orgId, filename, sourceProvider: doc\.sourceProvider \}\)/);
   assert.match(worker, /if \(job\.type === "transcribe"\) return mediaJobs\.processTranscribeJob\(job\);/);
   assert.match(worker, /if \(job\.type === "segment"\) return mediaJobs\.processSegmentJob\(job\);/);
   assert.match(worker, /await dropGeneratedTranscript\(prisma, docId\);/, "new content: the old transcript of it goes");
@@ -114,7 +121,7 @@ test("worker: queued after the probe, waits for a transcript, one per org, never
   assert.match(worker, /clearInterval\(heartbeat\);/);
 
   const jobs = read("worker/transcription.js");
-  assert.match(jobs, /auto \? AUTO_TRANSCRIBE_DELAY_SECONDS : 0/);
+  assert.match(jobs, /auto \? autoTranscribeDelaySeconds\(doc\) : 0/);
   assert.match(jobs, /if \(await hasLinkedTranscript\(prisma, docId\)\) \{\s*await finish\(job\.id, \{ status: "cancelled"/);
   assert.match(jobs, /if \(auto && !\(await getSetting\(doc\.orgId, "media\.transcription\.auto"\)\)\)/);
   assert.match(jobs, /status: "running", id: \{ not: job\.id \}/, "one at a time per org");

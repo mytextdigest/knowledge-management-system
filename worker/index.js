@@ -46,7 +46,7 @@ import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
 import { checkFileFormat, fileExtension, isMediaFile, playableContentType } from "../src/lib/fileFormats.js";
 import { parseVtt, parseWordTranscript, chunkTranscript, transcriptText } from "../src/lib/transcripts.js";
 import { refreshAutoLinks, mayBeTranscript, UPLOAD_WINDOW_DAYS } from "../src/lib/transcriptLinking.js";
-import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable, MediaToolsUnavailable } from "./media.js";
+import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable, MediaToolsUnavailable, NotEnoughDiskSpace, removeStaleTempDirs } from "./media.js";
 import { AUDIT_EVENTS } from "../src/lib/audit/events.js";
 import { createMediaJobs } from "./transcription.js";
 import { dropGeneratedTranscript } from "../src/lib/generatedTranscript.js";
@@ -834,11 +834,12 @@ async function getDocumentBytes(doc, s3Key = doc.filePath) {
 }
 
 // E11.6: a document's original as a stream (S3 Body or SharePoint response
-// body), for files that must not be held in memory.
+// body), for files that must not be held in memory, with its size in bytes
+// when the source tells it (0 when not), so the disk is checked first.
 async function openDocumentStream(doc, s3Key = doc.filePath) {
   if (s3Key) {
     const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
-    return object.Body;
+    return { body: object.Body, bytes: Number(object.ContentLength) || 0 };
   }
   if (doc.sourceProvider === "sharepoint" && doc.externalUrl && doc.externalId && doc.orgId) {
     const integration = await prisma.orgIntegration.findUnique({
@@ -849,7 +850,7 @@ async function openDocumentStream(doc, s3Key = doc.filePath) {
     const driveId = await resolveDriveId(doc, { scopeConfig: integration.scopeConfig, accessToken });
     if (!driveId) throw new Error(`Couldn't tell which connected SharePoint site ${doc.externalUrl} belongs to`);
     const res = await fetchDriveItemContent({ accessToken, driveId, itemId: doc.externalId });
-    return res.body;
+    return { body: res.body, bytes: Number(res.headers?.get?.("content-length")) || 0 };
   }
   throw new Error(`Document ${doc.id} has no stored file and no source to read it from`);
 }
@@ -871,13 +872,14 @@ async function processRecording(doc, s3Key, filename) {
   try {
     ({ bytes, probe } = await withTempDir(async (dir) => {
       const path = joinPath(dir, `source${fileExtension(filename) || ".media"}`);
-      const written = await streamToFile(await openDocumentStream(doc, s3Key), path);
+      const { body, bytes: size } = await openDocumentStream(doc, s3Key);
+      const written = await streamToFile(body, path, { bytes: size });
       return { bytes: written, probe: await probeMedia(path) };
     }));
   } catch (err) {
     const { startMb, peakMb } = memory.stop();
-    if (err instanceof MediaToolsUnavailable) {
-      // The recording is still playable; its length is filled in by a repair once ffmpeg is installed.
+    if (err instanceof MediaToolsUnavailable || err instanceof NotEnoughDiskSpace) {
+      // The recording is still playable; its length is filled in by a repair once ffmpeg is installed or space is freed.
       console.warn(`⚠️ ${err.message}; ${filename} is kept without its length`);
       await prisma.document.update({ where: { id: docId }, data: { status: "ready" } });
       return;
@@ -906,7 +908,7 @@ async function processRecording(doc, s3Key, filename) {
     : `📝 ${filename}: no transcript next to it yet; it can be linked on the document page`);
   // E-10: none: transcribe it (after a wait, in case one arrives), if the org allows it.
   if (!transcripts) {
-    await mediaJobs.maybeAutoTranscribe({ id: docId, orgId: doc.orgId, filename }).catch((err) =>
+    await mediaJobs.maybeAutoTranscribe({ id: docId, orgId: doc.orgId, filename, sourceProvider: doc.sourceProvider }).catch((err) =>
       console.error(`⚠️ Couldn't queue the transcription of ${filename}:`, err.message));
   }
   endTotal();
@@ -1697,6 +1699,9 @@ async function processJob(job) {
 
 async function mainLoop() {
   console.log("Worker started. Waiting for jobs...");
+  // E11.6: temp folders of a worker killed mid-download (pm2 restart, OOM, reboot).
+  const stale = await removeStaleTempDirs();
+  if (stale.length) console.log(`🧹 Removed ${stale.length} temp folder(s) left by an earlier worker: ${stale.join(", ")}`);
 
   while (true) {
     let res;
