@@ -33,7 +33,7 @@ export async function POST(req, { params }) {
 
   const s3 = new S3Client({ region: process.env.AWS_REGION });
   const head = await s3.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: s3Key }));
-  const size = checkFileSize(head.ContentLength); // EQ-5
+  const size = checkFileSize(head.ContentLength, s3Key); // EQ-5; a recording may be larger
   if (!size.ok) return NextResponse.json({ error: size.reason, code: "FILE_TOO_LARGE" }, { status: 413 });
   const filename = s3Key.split("/").pop() || doc.filename;
 

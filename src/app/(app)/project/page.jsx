@@ -23,6 +23,7 @@ const PROCESSING_STATUSES = new Set([
   'queued',
   'extracting',
   'running_ocr',
+  'transcribing',
   'chunked',
   'embedding',
   'embedded',
@@ -204,7 +205,7 @@ function ProjectPageInner() {
     }
   };
 
-  async function handleFileUpload(file, userId, projectId, visibility, category) {
+  async function handleFileUpload(file, userId, projectId, visibility, category, { transcriptOf } = {}) {
     const presignRes = await fetch("/api/s3/upload", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -245,17 +246,20 @@ function ProjectPageInner() {
     ingestForm.append("projectId", projectId);
     ingestForm.append("visibility", visibility);
     if (category) ingestForm.append("category", category);
+    if (transcriptOf) ingestForm.append("transcriptOf", transcriptOf); // E11.5: attached to a recording
 
     const ingestRes = await fetch("/api/documents/ingest", {
       method: "POST",
       body: ingestForm,
     });
 
+    const ingested = await ingestRes.json().catch(() => ({}));
     if (!ingestRes.ok) {
-      throw new Error("Ingestion failed");
+      throw new Error(ingested.error || "Ingestion failed");
     }
 
     await loadDocuments();
+    return ingested;
   }
 
   const handleDelete = async (id) => {
@@ -597,8 +601,8 @@ function ProjectPageInner() {
 
         <ModalContent className="flex flex-col max-h-[calc(100vh-8rem)] overflow-hidden">
           <FileUpload
-            onUpload={(file, visibility, category) =>
-              handleFileUpload(file, userId, projectId, visibility, category)
+            onUpload={(file, visibility, category, options) =>
+              handleFileUpload(file, userId, projectId, visibility, category, options)
             }
             onClose={() => setUploadModalOpen(false)}
           />

@@ -15,6 +15,8 @@ import { getAccessibleRelatedDocuments, getAccessibleExperts } from "@/lib/knowl
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 import { canReviewDecision } from "@/lib/decisionAccess";
 import { effectiveSummaryStatus } from "@/lib/governance/summaryReview.mjs";
+import { documentMedia } from "@/lib/documentMedia";
+import { isMediaFile } from "@/lib/fileFormats";
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -180,6 +182,9 @@ export async function GET(req, { params }) {
 
   const { conflictsAsDocA, conflictsAsDocB, decisions: _rawDecisions, summaryReview, ...docWithoutRawConflicts } = doc;
 
+  // E11.5: a recording's transcripts, or a transcript's recording.
+  const media = user ? await documentMedia(doc, { userId: user.id, role }) : null;
+
   return NextResponse.json({
     ...docWithoutRawConflicts,
     decisions: visibleDecisions,
@@ -188,6 +193,7 @@ export async function GET(req, { params }) {
     experts,
     fileUrl: signedUrl,
     fileDownloadUrl: downloadUrl,
+    media,
     // e.g. { missing: "search index" } for a document whose processing stopped part-way.
     processing: { missing: missingStage ? (STAGE_LABELS[missingStage] || missingStage) : null, repairable: missingStage !== "unrepairable" },
     created_at: doc.createdAt.toISOString(),
@@ -195,7 +201,8 @@ export async function GET(req, { params }) {
     summaryStatus: effectiveSummaryStatus(doc.summary, summaryReview),
     permissions: {
       canManage,
-      canRegenerate: canManage && missingStage !== "unrepairable" && !PROCESSING_STATUSES.has(doc.status) && !FILE_PROBLEM_STATUSES.has(doc.status),
+      // A recording's summary is its transcript's (E11.5), so it has nothing to regenerate.
+      canRegenerate: canManage && !isMediaFile(doc.filename) && missingStage !== "unrepairable" && !PROCESSING_STATUSES.has(doc.status) && !FILE_PROBLEM_STATUSES.has(doc.status),
       canAsk: canManage,
       canClearChat: canManage,
       canStar: canManage,
@@ -205,6 +212,10 @@ export async function GET(req, { params }) {
       canSupersede: doc.scope === "repository" && isDepartmentAdmin,
       canUnassign: canManage,
       canMoveToTopic: canManage,
+      // E-8: who may link or unlink a transcript (PUT /api/documents/[id]/transcript-link checks again).
+      canLinkTranscript: canManage,
+      // E-10: who may ask KMS to transcribe a recording (POST /api/documents/[id]/transcribe checks again).
+      canTranscribe: canManage && isMediaFile(doc.filename),
     },
   });
 }

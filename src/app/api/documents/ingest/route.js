@@ -12,7 +12,10 @@ import { resolveOrgRole } from "@/lib/orgGuard";
 import { getOrgSubscription, isSubscriptionActive } from "@/lib/subscription";
 import { defaultOwnerId } from "@/lib/governance/defaultOwner";
 import { initialUploadLifecycle } from "@/lib/workflows/publishFlow";
-import { checkFileFormat, checkFileSize } from "@/lib/fileFormats";
+import { checkFileFormat, checkFileSize, isMediaFile } from "@/lib/fileFormats";
+import { mayBeTranscript } from "@/lib/transcriptLinking";
+import { logAudit } from "@/lib/auditLog";
+import { AUDIT_EVENTS } from "@/lib/audit/events";
 
 export async function POST(req) {
   try {
@@ -28,6 +31,8 @@ export async function POST(req) {
     let   orgId        = formData.get("orgId")        || null;
     const departmentId = formData.get("departmentId") || null;
     const category     = formData.get("category")     || null;
+    // E11.5: a transcript attached to a recording in the same upload (the recording's document id).
+    const transcriptOf = formData.get("transcriptOf") || null;
 
     if (!s3Key)
       return NextResponse.json({ error: "Missing s3Key" }, { status: 400 });
@@ -69,6 +74,22 @@ export async function POST(req) {
 
     if (!dbUser)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    // E11.5: attaching a transcript is the uploader's own choice, so the link
+    // is "manual" and no sync changes it. Only to a recording the same person
+    // uploaded in this org (the dialog sends the id it just got back).
+    if (transcriptOf) {
+      if (!mayBeTranscript(filename)) {
+        return NextResponse.json({ error: "Only a .vtt or a Teams Word transcript (.docx) can be attached to a recording" }, { status: 400 });
+      }
+      const recording = await prisma.document.findFirst({
+        where: { id: String(transcriptOf), deletedAt: null },
+        select: { filename: true, orgId: true, userId: true },
+      });
+      if (!recording || !isMediaFile(recording.filename) || recording.orgId !== orgId || recording.userId !== dbUser.id) {
+        return NextResponse.json({ error: "The recording to attach this transcript to wasn't found" }, { status: 400 });
+      }
+    }
 
     const orgSubscription = await getOrgSubscription(orgId);
 
@@ -135,7 +156,7 @@ export async function POST(req) {
     }
 
     // EQ-5: the presign policy already caps uploads; this covers keys put in S3 another way.
-    const size = checkFileSize(fileSizeBytes);
+    const size = checkFileSize(fileSizeBytes, filename);
     if (!size.ok) {
       return NextResponse.json({ error: size.reason, code: "FILE_TOO_LARGE" }, { status: 413 });
     }
@@ -181,6 +202,7 @@ export async function POST(req) {
           ...(orgId        ? { organization: { connect: { id: orgId        } } } : {}),
           ...(departmentId ? { department:   { connect: { id: departmentId } } } : {}),
           ...(category     ? { category }                                         : {}),
+          ...(transcriptOf ? { transcriptOf: { connect: { id: String(transcriptOf) } }, transcriptLinkSource: "manual" } : {}),
           user: { connect: { id: dbUser.id } },
           owner: { connect: { id: ownerId } },
         },
@@ -195,6 +217,18 @@ export async function POST(req) {
         }
       })
     ]);
+
+    if (transcriptOf) {
+      await logAudit({
+        orgId: doc.orgId,
+        actorUserId: dbUser.id,
+        action: AUDIT_EVENTS.DOCUMENT_TRANSCRIPT_LINKED,
+        entityType: "document",
+        entityId: doc.id,
+        before: null,
+        after: { transcriptOfId: String(transcriptOf), transcriptLinkSource: "manual", attachedAtUpload: true },
+      });
+    }
 
     // SQS client
     const sqs = new SQSClient({ region: process.env.AWS_REGION });

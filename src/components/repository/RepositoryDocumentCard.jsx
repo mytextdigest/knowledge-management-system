@@ -380,6 +380,17 @@ export default function RepositoryDocumentCard({
         <p className="mt-3 text-xs text-red-600 dark:text-red-400">KMS couldn't read this file: it isn't a valid PowerPoint (.pptx) file.</p>
       ) : document?.status ? <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Status: <span className="font-medium">{document.status}</span></p> : null}
 
+      {document?.match?.locator ? (
+        // E-9: where the search matched ("slide 7", "12:34"); opens it there.
+        <button
+          type="button"
+          onClick={() => { onSearchResultOpen?.(); router.push(document.match.viewerUrl); }}
+          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline dark:text-blue-300"
+        >
+          Matched at {document.match.locator}{document.match.recording ? ` in ${document.match.recording.filename}` : ""} →
+        </button>
+      ) : null}
+
       <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
         {document?.contentType !== "page" && document?.contentType !== "article" ? (
           <>
