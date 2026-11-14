@@ -9,8 +9,13 @@
 
 import { isMediaFile } from "./fileFormats.js";
 
-/** Seconds an automatic transcription waits, so a transcript syncing or uploaded with the recording is used instead. */
-export const AUTO_TRANSCRIBE_DELAY_SECONDS = 600;
+/**
+ * Seconds an automatic transcription waits, so a transcript syncing or
+ * uploaded with the recording is used instead. 1 minute for testing
+ * (Johurul, 2026-11-14). TODO before deploy: 10 minutes (600) for SharePoint
+ * sync only; uploads keep the short wait.
+ */
+export const AUTO_TRANSCRIBE_DELAY_SECONDS = 60;
 
 /** Statuses of a transcription job that is still to finish. */
 export const ACTIVE_JOB_STATUSES = ["queued", "running"];
