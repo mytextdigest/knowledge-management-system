@@ -37,7 +37,7 @@ function ListTable({ title, rows, columns, empty = 'No activity in this period' 
               <tr key={row.id || index}>
                 {columns.map(([key, , render]) => (
                   <td key={key} className="break-words border-b border-gray-100 p-2 text-gray-800 dark:border-gray-800 dark:text-gray-200">
-                    {render ? render(row[key], row) : String(row[key] ?? 'â€”')}
+                    {render ? render(row[key], row) : String(row[key] ?? '—')}
                   </td>
                 ))}
               </tr>
@@ -94,7 +94,6 @@ export default function AnalyticsPage() {
       <main className="mx-auto max-w-6xl space-y-6 p-6 text-gray-900 dark:text-gray-100">
         <header>
           <h1 className="text-2xl font-semibold">Analytics</h1>
-          <Link href={`/org/${orgId}/analytics/usage`} className="text-sm text-blue-700 underline dark:text-blue-400">Usage &amp; Adoption</Link>
           <p className="text-sm text-gray-500 dark:text-gray-400">Search activity and discovery trends. Department administrators see searches by members of the departments they manage.</p>
         </header>
         <AnalyticsTabs orgId={orgId} showGovernance={isOrgScope} />
@@ -123,8 +122,8 @@ export default function AnalyticsPage() {
         {data && <>
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Scope: {isOrgScope ? 'whole organization' : 'departments you manage'}
-            {data.filters.departmentId ? ` Â· ${departmentName[data.filters.departmentId] || 'one department'}` : ''}
-            {' '}Â· Retrieval latency excludes embedding and answer-generation time.
+            {data.filters.departmentId ? ` · ${departmentName[data.filters.departmentId] || 'one department'}` : ''}
+            {' '}· Retrieval latency excludes embedding and answer-generation time.
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <StatTile label="Searches" value={data.summary.total} />
@@ -145,9 +144,9 @@ export default function AnalyticsPage() {
               ['createdAt', 'When', (v) => new Date(v).toLocaleString()],
               ['kind', 'Source', (v) => SOURCE_LABELS[v] || v],
               ['normalizedQuery', 'Query'],
-              ['departmentId', 'Department', (v) => (v ? departmentName[v] || 'â€”' : 'â€”')],
+              ['departmentId', 'Department', (v) => (v ? departmentName[v] || '—' : '—')],
               ['resultCount', 'Results'],
-              ['latencyMs', 'Retrieval ms', (v) => (v ?? 'â€”')],
+              ['latencyMs', 'Retrieval ms', (v) => (v ?? '—')],
             ]}
           />
         </>}

@@ -214,7 +214,15 @@ export default function RepositoryPage({ params }) {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ searchEventId, documentId: document.id, rank: (page - 1) * 20 + index + 1 }),
-                }).catch(() => {});
+                })
+                  .then((res) => (res.ok ? res.json() : null))
+                  .then((data) => {
+                    // The document page adds its reading time to this click (E30.3 dwell).
+                    if (data?.clickId) {
+                      try { sessionStorage.setItem(`kms.searchClick.${document.id}`, data.clickId); } catch {}
+                    }
+                  })
+                  .catch(() => {});
               } : undefined}
               departments={departments}
               onDocumentSignalChange={(docId, patch) =>

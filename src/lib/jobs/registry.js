@@ -78,9 +78,11 @@ async function queueSync({ prisma, orgId, enqueue, provider, name }) {
 }
 
 export const JOB_DEFINITIONS = {
-  "analytics.usage-daily": {
-    label: "Daily usage analytics rollup",
-    description: "Recomputes recent UTC usage metrics for the organization and each department.",
+  // D-6: daily usage metrics into AnalyticsDaily. Recomputes the last 3 UTC
+  // days each run so late clicks and follow-ups are counted.
+  "analytics.rollup": {
+    label: "Usage analytics roll-up",
+    description: "Computes daily search, question, click-through, bounce and time-to-answer figures for the Usage & adoption dashboard.",
     defaultIntervalMinutes: 1440,
     minIntervalMinutes: 60,
     lockMinutes: 60,
