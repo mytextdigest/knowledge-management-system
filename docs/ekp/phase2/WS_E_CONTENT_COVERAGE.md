@@ -8,7 +8,7 @@
 | **Foundations used**  | F1 document access, F2 audit, F3 scheduled jobs, F5 org settings, F6 workflow engine (E14) |
 | **Phase 2 window**    | Mon 2 Nov – Thu 26 Nov 2026 (code-complete), integration to Mon 30 Nov                 |
 | **Branch**            | `feature/ekp-ws-e` (one branch for the phase, one PR per milestone; see [PHASE2_OVERVIEW.md](PHASE2_OVERVIEW.md) §3) |
-| **Status**            | E-M1 merged to `dev` (PR #36, 2026-11-07). E-M2 (E-6 to E-9) and E-10, E-11 of E-M3 (transcription, chapters) in PR #39 to `dev` (2026-11-14). E-12 (SAML) is the last E-M3 task, not started. E-M4 outlined, detail it before it starts. |
+| **Status**            | E-M1 merged to `dev` (PR #36, 2026-11-07). E-M2 (E-6 to E-9) and E-10, E-11 of E-M3 (transcription, chapters) merged to `dev` (PR #39, 2026-11-14). E-12 (SAML) is the last E-M3 task, not started. E-M4 outlined, detail it before it starts. |
 
 **Source documents (don't copy from them, link to them):**
 
