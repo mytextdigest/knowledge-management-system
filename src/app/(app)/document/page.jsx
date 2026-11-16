@@ -40,6 +40,7 @@ import TranscriptView from '@/components/documents/TranscriptView';
 import TranscriptLinkPanel from '@/components/documents/TranscriptLinkPanel';
 import TranscriptionNotice from '@/components/documents/TranscriptionNotice';
 import ChapterList from '@/components/documents/ChapterList';
+import DocumentTaggingPanel from '@/components/taxonomy/DocumentTaggingPanel';
 
 
 
@@ -1270,6 +1271,12 @@ function DocumentContent() {
       {isRepositoryDoc && <DocumentCompletenessBadge documentId={doc.id} />}
       <TranscriptLinkPanel doc={doc} onChanged={refreshDoc} />
       <SourceTagsPanel tags={doc?.sourceTags} />
+      {doc?.orgId ? (
+        <section aria-label="Taxonomy tags" className="rounded-lg border border-gray-200 bg-white p-3 text-left dark:border-gray-700 dark:bg-gray-900">
+          <h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">Taxonomy tags</h3>
+          <DocumentTaggingPanel orgId={doc.orgId} documentId={doc.id} />
+        </section>
+      ) : null}
     </div>
   );
 

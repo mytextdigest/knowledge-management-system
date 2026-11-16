@@ -27,7 +27,9 @@ export async function POST(req, { params }) {
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!keyPattern.test(key) || !name || name.length > 120 || typeof body.termSetId !== "string") return fail("Invalid field key, name or term set");
   const set = await prisma.termSet.findFirst({ where: { id: body.termSetId, orgId } });
-  if (!set || set.readOnly) return fail("Local term set not found", 404);
+  // Imported (read-only) sets can back a field too: the field is KMS config,
+  // only the terms are managed outside (C-8 maps SharePoint columns to it).
+  if (!set) return fail("Term set not found", 404);
   try {
     const field = await prisma.metadataField.create({ data: { orgId, key, name, termSetId: set.id, multi: body.multi === true, required: body.required === true, facet: body.facet === true } });
     await logAudit({ orgId, actorUserId: actor.user.id, action: "taxonomy.metadata_field.created", entityType: "MetadataField", entityId: field.id, after: { key, name, termSetId: set.id } });
@@ -42,7 +44,6 @@ export async function PATCH(req, { params }) {
   if (typeof body.id !== "string") return fail("Field id required");
   const old = await prisma.metadataField.findFirst({ where: { id: body.id, orgId }, include: { _count: { select: { documentTerms: true } }, termSet: true } });
   if (!old) return fail("Field not found", 404);
-  if (old.termSet.readOnly) return fail("Externally managed field", 403);
   const name = body.name === undefined ? old.name : typeof body.name === "string" ? body.name.trim() : "";
   if (!name || name.length > 120) return fail("Invalid name");
   const multi = body.multi === undefined ? old.multi : body.multi;
