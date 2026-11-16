@@ -430,7 +430,20 @@ export default function SharePointIntegrationPage() {
                       <p className="text-xs text-gray-600 dark:text-gray-400">
                         {run.filesFound} file{run.filesFound === 1 ? '' : 's'} synced
                         {run.filesFailed > 0 ? `, ${run.filesFailed} failed` : ''}
+                        {run.filesSkipped > 0 ? `, ${run.filesSkipped} not indexed` : ''}
                       </p>
+                      {run.skippedFiles?.length > 0 && (
+                        <details className="text-xs text-gray-600 dark:text-gray-400">
+                          <summary className="cursor-pointer select-none">Files not indexed</summary>
+                          <ul className="mt-1 space-y-0.5 pl-4 list-disc">
+                            {run.skippedFiles.map((f, i) => (
+                              <li key={`${f.name}-${i}`}>
+                                <span className="font-medium text-gray-800 dark:text-gray-200">{f.name}</span>: {f.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
                       {run.error && <p className="text-xs text-red-600">{run.error}</p>}
                     </div>
                   ))}

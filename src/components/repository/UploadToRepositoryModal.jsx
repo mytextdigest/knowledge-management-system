@@ -3,6 +3,9 @@
 import { useCallback, useRef, useState } from "react";
 import { Upload, FileText, X, AlertCircle, CheckCircle } from "lucide-react";
 import { cn, formatFileSize } from "@/lib/utils";
+import { ACCEPT_ATTRIBUTE, UPLOAD_LIMITS_TEXT, SUPPORTED_FORMATS_TEXT, checkFileFormat, checkFileSize, isMediaFile } from "@/lib/fileFormats";
+import { pairByName } from "@/lib/transcriptAttach";
+import AttachTranscript from "@/components/documents/AttachTranscript";
 
 const CATEGORIES = [
   "Policies",
@@ -14,18 +17,15 @@ const CATEGORIES = [
   "Other",
 ];
 
-// Kept in sync with the extraction branches in worker/index.js — .doc (legacy
-// binary Word) and .md are NOT handled there, so they're deliberately left
-// out here rather than accepted client-side and failing ingestion silently.
-const ACCEPTED_TYPES = [".pdf", ".docx", ".xlsx", ".xls", ".csv", ".txt"];
+// E11.4: one allow-list shared with the upload APIs and the SharePoint sync.
 const MAX_FILES = 10;
 
 function makeFileEntry(file) {
-  const ext = "." + file.name.split(".").pop().toLowerCase();
   const errors = [];
-  if (!ACCEPTED_TYPES.includes(ext)) {
-    errors.push(`File type ${ext} is not supported`);
-  }
+  const format = checkFileFormat(file.name);
+  if (!format.ok) errors.push(format.reason);
+  const size = checkFileSize(file.size, file.name); // EQ-5
+  if (!size.ok) errors.push(size.reason);
   return {
     id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 9)}`,
     file,
@@ -75,7 +75,8 @@ export default function UploadToRepositoryModal({
       if (incoming.length > room) {
         setFormError(`Only ${MAX_FILES} files can be uploaded at once — the rest were skipped.`);
       }
-      return [...prev, ...accepted];
+      // E11.5: a .vtt/.docx picked with a recording of the same name is attached to it.
+      return pairByName([...prev, ...accepted]);
     });
   }
 
@@ -97,13 +98,18 @@ export default function UploadToRepositoryModal({
     if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
   }
 
-  async function uploadOne(fileItem) {
+  function setTranscript(id, transcript) {
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, transcript } : f)));
+  }
+
+  async function uploadOne(file, { transcriptOf } = {}) {
     const presignRes = await fetch("/api/s3/upload", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        fileName: fileItem.file.name,
-        fileType: fileItem.file.type,
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
         userId,
         orgId,
       }),
@@ -114,7 +120,7 @@ export default function UploadToRepositoryModal({
     const { url, fields, key } = presignData;
     const s3Form = new FormData();
     Object.entries(fields).forEach(([k, v]) => s3Form.append(k, v));
-    s3Form.append("file", fileItem.file);
+    s3Form.append("file", file);
 
     const s3Res = await fetch(url, { method: "POST", body: s3Form });
     if (!s3Res.ok) throw new Error("S3 upload failed.");
@@ -125,6 +131,7 @@ export default function UploadToRepositoryModal({
     ingestForm.append("orgId", orgId);
     ingestForm.append("category", category);
     if (departmentId) ingestForm.append("departmentId", departmentId);
+    if (transcriptOf) ingestForm.append("transcriptOf", transcriptOf);
 
     const ingestRes = await fetch("/api/documents/ingest", { method: "POST", body: ingestForm });
     const data = await ingestRes.json().catch(() => ({}));
@@ -157,8 +164,22 @@ export default function UploadToRepositoryModal({
     for (const fileItem of pending) {
       setFiles((prev) => prev.map((f) => (f.id === fileItem.id ? { ...f, status: "uploading" } : f)));
       try {
-        if ((await uploadOne(fileItem))?.lifecycle === "draft") drafts++;
+        const data = await uploadOne(fileItem.file);
+        if (data?.lifecycle === "draft") drafts++;
         setFiles((prev) => prev.map((f) => (f.id === fileItem.id ? { ...f, status: "success" } : f)));
+        // E11.5: the attached transcript goes up next, linked to the recording.
+        const t = fileItem.transcript;
+        if (t && !t.error) {
+          try {
+            if ((await uploadOne(t.file, { transcriptOf: data.id }))?.lifecycle === "draft") drafts++;
+            setTranscript(fileItem.id, { ...t, done: true });
+          } catch (err) {
+            hadErrors = true;
+            setTranscript(fileItem.id, { ...t, error: `not uploaded: ${err.message || "upload failed"}. Link it on the recording's page.` });
+          }
+        } else if (t) {
+          hadErrors = true;
+        }
       } catch (err) {
         hadErrors = true;
         setFiles((prev) =>
@@ -231,7 +252,7 @@ export default function UploadToRepositoryModal({
               ref={fileInputRef}
               type="file"
               multiple
-              accept={ACCEPTED_TYPES.join(",")}
+              accept={ACCEPT_ATTRIBUTE}
               onChange={(e) => {
                 if (e.target.files?.length) addFiles(e.target.files);
                 e.target.value = "";
@@ -243,7 +264,7 @@ export default function UploadToRepositoryModal({
               Drop files here or click to browse
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Supports PDF, Word (.docx), Excel (.xlsx, .xls), CSV, and TXT — up to {MAX_FILES} files at once
+              Supports {SUPPORTED_FORMATS_TEXT}, up to {UPLOAD_LIMITS_TEXT} and {MAX_FILES} files at once
             </p>
           </div>
 
@@ -276,6 +297,13 @@ export default function UploadToRepositoryModal({
                         {f.status === "uploading" ? " · Uploading..." : ""}
                         {f.error ? ` · ${f.error}` : ""}
                       </p>
+                      {isMediaFile(f.name) && f.status !== "error" && (f.status === "pending" || f.transcript) && (
+                        <AttachTranscript
+                          transcript={f.transcript}
+                          onChange={(t) => setTranscript(f.id, t)}
+                          disabled={isUploading || f.status !== "pending"}
+                        />
+                      )}
                     </div>
                   </div>
                   {f.status !== "uploading" && f.status !== "success" && (

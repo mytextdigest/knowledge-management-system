@@ -325,9 +325,13 @@ export async function getUserGroupIds({ accessToken, userId }) {
 
 // App-only-token call: a drive item's content as a fetch Response (Graph
 // redirects to a short-lived download URL; fetch follows it). For streaming.
-export async function fetchDriveItemContent({ accessToken, driveId, itemId }) {
-  const res = await fetchWithRetry(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}/content`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+// format: "pdf" has SharePoint convert the file (e.g. a PowerPoint deck) first.
+// `range` (an HTTP Range header value) asks for part of the file, so a media
+// player can seek (E-9); the response is then 206 with Content-Range.
+export async function fetchDriveItemContent({ accessToken, driveId, itemId, format = null, range = null }) {
+  const query = format ? `?format=${encodeURIComponent(format)}` : "";
+  const res = await fetchWithRetry(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}/content${query}`, {
+    headers: { Authorization: `Bearer ${accessToken}`, ...(range ? { Range: range } : {}) },
   });
   if (!res.ok) throw await parseGraphError(res);
   return res;
@@ -379,4 +383,10 @@ export async function getDriveItemFields({ accessToken, driveId, itemId }) {
     if (err.status === 404) return null;
     throw err;
   }
+}
+
+// A-23: the column definitions of a document library (name, displayName and,
+// for managed-metadata columns, the `term` facet with its term set).
+export async function listDriveColumns({ accessToken, driveId }) {
+  return graphGetAll(`/drives/${driveId}/list/columns`, { accessToken });
 }

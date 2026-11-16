@@ -6,6 +6,8 @@ import { getSetting } from "@/lib/settings";
 import { calculatePurgeAfter } from "@/lib/lifecycle/softDelete.mjs";
 import { generateSignedUrl, generateSignedDownloadUrl } from "@/lib/s3SignedUrl";
 import { canStreamFromSource, sourcePreviewUrl } from "@/lib/documentSource";
+import { FILE_PROBLEM_STATUSES, PROCESSING_STATUSES } from "@/lib/documentStatus";
+import { firstMissingStage, pipelineState, STAGE_LABELS } from "@/lib/documentPipeline";
 import { computeDocumentEmbedding, adjustTopicOnDocumentRemoval } from "@/lib/topicUtils";
 import { resolveOrgRole, isSuperAdmin, canManageDepartment } from "@/lib/orgGuard";
 import { canViewDocument, filterAccessibleDocuments } from "@/lib/access/documentAccess";
@@ -13,6 +15,8 @@ import { getAccessibleRelatedDocuments, getAccessibleExperts } from "@/lib/knowl
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 import { canReviewDecision } from "@/lib/decisionAccess";
 import { effectiveSummaryStatus } from "@/lib/governance/summaryReview.mjs";
+import { documentMedia } from "@/lib/documentMedia";
+import { isMediaFile } from "@/lib/fileFormats";
 
 export async function GET(req, { params }) {
   const session = await getServerSession();
@@ -31,6 +35,11 @@ export async function GET(req, { params }) {
       project: { select: { orgId: true, departmentId: true, scope: true } },
       decisions: { orderBy: { decidedAt: "desc" } },
       summaryReview: { select: { status: true, summaryHash: true } },
+      // A-23: managed-metadata values the file had in SharePoint (raw, until WS-C maps them to terms).
+      sourceTags: {
+        select: { fieldName: true, fieldDisplayName: true, label: true, termGuid: true, syncedAt: true },
+        orderBy: [{ fieldName: "asc" }, { label: "asc" }],
+      },
       conflictsAsDocA: {
         orderBy: { createdAt: "desc" },
         include: {
@@ -88,10 +97,6 @@ export async function GET(req, { params }) {
     downloadUrl = sourcePreviewUrl(doc.id, { download: true });
   }
 
-  const PROCESSING_STATUSES = new Set([
-    'queued', 'extracting', 'running_ocr', 'chunked',
-    'embedding', 'embedded', 'summarizing', 'clustering',
-  ]);
 
   const rawConflicts = [
     ...doc.conflictsAsDocA.map((c) => ({
@@ -158,6 +163,11 @@ export async function GET(req, { params }) {
       (await canManageDepartment(role, effectiveDepartmentId, user.id)));
   const canManage = Boolean(isOwner) || isDepartmentAdmin;
 
+  // What the worker pipeline left undone (null when complete or still running).
+  const missingStage = PROCESSING_STATUSES.has(doc.status) || FILE_PROBLEM_STATUSES.has(doc.status)
+    ? null
+    : firstMissingStage(doc, await pipelineState(prisma, doc));
+
   // Decision Extraction v2, FR-5: a "pending"/"rejected" decision must not
   // appear on the document page either, unless the viewer is a reviewer for
   // this document's department (or super_admin). Everyone else only sees
@@ -172,6 +182,9 @@ export async function GET(req, { params }) {
 
   const { conflictsAsDocA, conflictsAsDocB, decisions: _rawDecisions, summaryReview, ...docWithoutRawConflicts } = doc;
 
+  // E11.5: a recording's transcripts, or a transcript's recording.
+  const media = user ? await documentMedia(doc, { userId: user.id, role }) : null;
+
   return NextResponse.json({
     ...docWithoutRawConflicts,
     decisions: visibleDecisions,
@@ -180,12 +193,16 @@ export async function GET(req, { params }) {
     experts,
     fileUrl: signedUrl,
     fileDownloadUrl: downloadUrl,
+    media,
+    // e.g. { missing: "search index" } for a document whose processing stopped part-way.
+    processing: { missing: missingStage ? (STAGE_LABELS[missingStage] || missingStage) : null, repairable: missingStage !== "unrepairable" },
     created_at: doc.createdAt.toISOString(),
     // E19: AI summaries are labelled until a reviewer approves the current text.
     summaryStatus: effectiveSummaryStatus(doc.summary, summaryReview),
     permissions: {
       canManage,
-      canRegenerate: canManage && (!!doc.filePath || canStreamFromSource(doc)) && !PROCESSING_STATUSES.has(doc.status),
+      // A recording's summary is its transcript's (E11.5), so it has nothing to regenerate.
+      canRegenerate: canManage && !isMediaFile(doc.filename) && missingStage !== "unrepairable" && !PROCESSING_STATUSES.has(doc.status) && !FILE_PROBLEM_STATUSES.has(doc.status),
       canAsk: canManage,
       canClearChat: canManage,
       canStar: canManage,
@@ -195,6 +212,10 @@ export async function GET(req, { params }) {
       canSupersede: doc.scope === "repository" && isDepartmentAdmin,
       canUnassign: canManage,
       canMoveToTopic: canManage,
+      // E-8: who may link or unlink a transcript (PUT /api/documents/[id]/transcript-link checks again).
+      canLinkTranscript: canManage,
+      // E-10: who may ask KMS to transcribe a recording (POST /api/documents/[id]/transcribe checks again).
+      canTranscribe: canManage && isMediaFile(doc.filename),
     },
   });
 }

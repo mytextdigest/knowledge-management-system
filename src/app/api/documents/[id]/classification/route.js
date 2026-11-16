@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole } from "@/lib/orgGuard";
 import { canManageDocument } from "@/lib/access/documentAccess";
+import { syncDocumentCategory } from "@/lib/taxonomy/defaultCategory.mjs";
 
 async function resolveManagedDocument(id, email) {
   const doc = await prisma.document.findUnique({
@@ -62,5 +63,16 @@ export async function PATCH(req, { params }) {
       lifecycleSuggestion: true, lifecycleSuggestionReason: true,
     },
   });
+  // A reviewer's category correction is also the document's Category tag
+  // (C-3), and it wins over the classifier's on later runs.
+  if (Object.hasOwn(data, "category") && access.orgId) {
+    try {
+      await syncDocumentCategory(prisma, {
+        documentId: id, orgId: access.orgId, category: data.category, source: "manual", actorId: access.user.id,
+      });
+    } catch (err) {
+      console.warn("Category tag not updated:", err?.message);
+    }
+  }
   return NextResponse.json(updated);
 }

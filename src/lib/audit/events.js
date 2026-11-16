@@ -13,6 +13,9 @@ export const AUDIT_EVENTS = Object.freeze({
   DOCUMENT_STEWARD_CHANGED: "document.steward_changed",
   DOCUMENT_SUMMARY_APPROVED: "document.summary_approved",
   DOCUMENT_SUMMARY_EDITED: "document.summary_edited",
+  DOCUMENT_TRANSCRIPT_LINKED: "document.transcript_linked",
+  DOCUMENT_TRANSCRIPT_UNLINKED: "document.transcript_unlinked",
+  DOCUMENT_TRANSCRIPTION_REQUESTED: "document.transcription_requested",
   WORKFLOW_SUBMITTED: "workflow.submitted",
   WORKFLOW_APPROVED: "workflow.approved",
   WORKFLOW_REJECTED: "workflow.rejected",
@@ -29,4 +32,5 @@ export const AUDIT_EVENTS = Object.freeze({
   REVIEW_POLICY_CHANGED: "review.policy_changed",
   AUTH_SSO_LOGIN: "auth.sso_login",
   AUTH_SSO_USER_CREATED: "auth.sso_user_created",
+  SYNC_FILES_SKIPPED: "sync.files_skipped", // E11.4 / A-24: files a sync run didn't index, with reasons
 });

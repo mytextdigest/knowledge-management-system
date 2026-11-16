@@ -207,6 +207,7 @@ export default function RepositoryPage({ params }) {
             <RepositoryDocumentCard
               key={document.id}
               document={document}
+              orgId={orgId}
               orgRole={orgRole}
               onSearchResultOpen={searchEventId ? () => {
                 fetch(`/api/org/${orgId}/search/click`, {

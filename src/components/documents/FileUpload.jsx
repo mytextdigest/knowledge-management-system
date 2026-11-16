@@ -4,6 +4,9 @@ import { Upload, X, FileText, AlertCircle, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { cn, formatFileSize } from '@/lib/utils';
+import { UPLOAD_LIMITS_TEXT, SUPPORTED_EXTENSIONS, SUPPORTED_FORMATS_TEXT, checkFileFormat, checkFileSize, isMediaFile } from '@/lib/fileFormats';
+import { pairByName } from '@/lib/transcriptAttach';
+import AttachTranscript from '@/components/documents/AttachTranscript';
 
 const CATEGORIES = [
   "Policies",
@@ -18,8 +21,7 @@ const CATEGORIES = [
 const FileUpload = ({
   onUpload,
   onClose,
-  acceptedTypes = ['.txt', '.pdf', '.docx', '.csv', '.xlsx', '.xls'],
-  maxFileSize = 10 * 1024 * 1024, // 10MB
+  acceptedTypes = SUPPORTED_EXTENSIONS, // E11.4: shared allow-list
   className
 }) => {
   const [dragActive, setDragActive] = useState(false);
@@ -63,15 +65,16 @@ const FileUpload = ({
     const errors = [];
     
     // Check file type
-    const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
-    if (!acceptedTypes.includes(fileExtension)) {
-      errors.push(`File type ${fileExtension} is not supported`);
+    const format = checkFileFormat(file.name);
+    if (!format.ok) {
+      errors.push(format.reason);
+    } else if (!acceptedTypes.includes(format.ext)) {
+      errors.push(`KMS can't read ${format.ext} files here.`);
     }
     
-    // Check file size
-    if (file.size > maxFileSize) {
-      errors.push(`File size exceeds ${formatFileSize(maxFileSize)} limit`);
-    }
+    // Check file size (EQ-5: one limit, shared with the upload APIs)
+    const size = checkFileSize(file.size, file.name);
+    if (!size.ok) errors.push(size.reason);
     
     return errors;
   };
@@ -90,8 +93,12 @@ const FileUpload = ({
       };
     });
     
-    setFiles(prev => [...prev, ...newFiles]);
-  }, [acceptedTypes, maxFileSize]);
+    // E11.5: a .vtt/.docx picked with a recording of the same name is attached to it.
+    setFiles(prev => pairByName([...prev, ...newFiles]));
+  }, [acceptedTypes]);
+
+  const setTranscript = (id, transcript) =>
+    setFiles(prev => prev.map(f => (f.id === id ? { ...f, transcript } : f)));
 
   const handleDrag = useCallback((e) => {
     e.preventDefault();
@@ -168,7 +175,7 @@ const FileUpload = ({
         }
 
         // Actual upload (network / backend)
-        await onUpload(fileItem.file, fileItem.visibility, category);
+        const uploaded = await onUpload(fileItem.file, fileItem.visibility, category);
   
         // Mark as fully complete only AFTER upload finishes
         setUploadProgress(prev => ({ ...prev, [fileItem.id]: 100 }));
@@ -178,6 +185,20 @@ const FileUpload = ({
             f.id === fileItem.id ? { ...f, status: 'success' } : f
           )
         );
+
+        // E11.5: the attached transcript goes up next, linked to the recording.
+        const t = fileItem.transcript;
+        if (t && !t.error && uploaded?.id) {
+          try {
+            await onUpload(t.file, fileItem.visibility, category, { transcriptOf: uploaded.id });
+            setTranscript(fileItem.id, { ...t, done: true });
+          } catch (err) {
+            hadErrors = true;
+            setTranscript(fileItem.id, { ...t, error: `not uploaded: ${err?.message || 'upload failed'}. Link it on the recording's page.` });
+          }
+        } else if (t) {
+          hadErrors = true;
+        }
       } catch (error) {
 
           hadErrors = true;
@@ -257,7 +278,7 @@ const FileUpload = ({
                 Drop files here or click to browse
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                Supports {acceptedTypes.join(', ')} files up to {formatFileSize(maxFileSize)}
+                Supports {acceptedTypes === SUPPORTED_EXTENSIONS ? SUPPORTED_FORMATS_TEXT : acceptedTypes.join(', ')} files up to {UPLOAD_LIMITS_TEXT}
               </p>
             </div>
             
@@ -388,6 +409,14 @@ const FileUpload = ({
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                           {formatFileSize(fileItem.size)}
                         </p>
+
+                        {isMediaFile(fileItem.name) && fileItem.status !== 'error' && (fileItem.status === 'pending' || fileItem.transcript) && (
+                          <AttachTranscript
+                            transcript={fileItem.transcript}
+                            onChange={(t) => setTranscript(fileItem.id, t)}
+                            disabled={uploading || fileItem.status !== 'pending'}
+                          />
+                        )}
 
                         {/* Visibility selector */}
                         {fileItem.status === 'pending' && (

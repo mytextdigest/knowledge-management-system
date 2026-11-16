@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Eye, Download, Info, Loader2, Check, X, AlertTriangle } from "lucide-react";
+import { Eye, Download, Info, Loader2, Check, X, AlertTriangle, Tag } from "lucide-react";
 import { Modal, ModalHeader, ModalTitle, ModalContent } from "@/components/ui/Modal";
+import DocumentTaggingPanel from "@/components/taxonomy/DocumentTaggingPanel";
 import OpenInSourceLink, { sourceLabel } from "@/components/documents/OpenInSourceLink";
+import { fileExtension, mediaKind } from "@/lib/fileFormats";
 
 const CATEGORIES = [
   "Policies",
@@ -48,10 +50,14 @@ const FILE_TYPE_ICONS = {
   excel: { src: "/icons/file-types/excel.png", alt: "Excel spreadsheet" },
   csv: { src: "/icons/file-types/csv.png", alt: "CSV file" },
   txt: { src: "/icons/file-types/txt.png", alt: "Text file" },
+  mp4: { src: "/icons/file-types/mp4.png", alt: "MP4 video" },
+  media: { src: "/icons/file-types/video.png", alt: "Recording" },
   default: { src: "/icons/file-types/docs.png", alt: "Document" },
 };
 
 function getFileIcon(fileType = "", filename = "") {
+  // Recordings first, by extension, so a name like "docs review.mp4" isn't a Word icon.
+  if (mediaKind(filename)) return fileExtension(filename) === ".mp4" ? FILE_TYPE_ICONS.mp4 : FILE_TYPE_ICONS.media;
   const value = `${fileType} ${filename}`.toLowerCase();
   if (value.includes("pdf")) return FILE_TYPE_ICONS.pdf;
   if (value.includes("csv")) return FILE_TYPE_ICONS.csv;
@@ -68,6 +74,7 @@ function confidenceLabel(value) {
 
 export default function RepositoryDocumentCard({
   document,
+  orgId,
   orgRole,
   departments = [],
   onLifecycleChange,
@@ -88,6 +95,7 @@ export default function RepositoryDocumentCard({
   const [lifecycleSuggestion, setLifecycleSuggestion] = useState(document?.lifecycleSuggestion || null);
   const [lifecycleSuggestionReason, setLifecycleSuggestionReason] = useState(document?.lifecycleSuggestionReason || null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [taggingOpen, setTaggingOpen] = useState(false);
   const [reviewCategory, setReviewCategory] = useState(document?.category || "");
   const [reviewDepartmentId, setReviewDepartmentId] = useState(document?.departmentId || document?.suggestedDepartmentId || "");
   const [savingReview, setSavingReview] = useState(false);
@@ -371,7 +379,22 @@ export default function RepositoryDocumentCard({
 
       {document?.status === "skipped_too_large" ? (
         <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Larger than the SharePoint file size limit: not searchable by content. Open it in SharePoint.</p>
+      ) : document?.status === "password_protected" ? (
+        <p className="mt-3 text-xs text-red-600 dark:text-red-400">Password-protected: KMS can't read it. Remove the password, save it as .pptx and upload it again.</p>
+      ) : document?.status === "unreadable_file" ? (
+        <p className="mt-3 text-xs text-red-600 dark:text-red-400">KMS couldn't read this file: it isn't a valid PowerPoint (.pptx) file.</p>
       ) : document?.status ? <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Status: <span className="font-medium">{document.status}</span></p> : null}
+
+      {document?.match?.locator ? (
+        // E-9: where the search matched ("slide 7", "12:34"); opens it there.
+        <button
+          type="button"
+          onClick={() => { onSearchResultOpen?.(); router.push(document.match.viewerUrl); }}
+          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline dark:text-blue-300"
+        >
+          Matched at {document.match.locator}{document.match.recording ? ` in ${document.match.recording.filename}` : ""} →
+        </button>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
         {document?.contentType !== "page" && document?.contentType !== "article" ? (
@@ -381,8 +404,10 @@ export default function RepositoryDocumentCard({
           </>
         ) : null}
         <button type="button" onClick={() => { onSearchResultOpen?.(); router.push(`/document?id=${document.id}`); }} title="Open the full document viewer to read, chat with, and summarize this document" className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"><Info className="h-3.5 w-3.5" /> View</button>
+        <button type="button" onClick={() => setTaggingOpen((v) => !v)} aria-expanded={taggingOpen} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"><Tag className="h-3.5 w-3.5" /> Tags</button>
         <OpenInSourceLink url={document?.externalUrl} sourceProvider={document?.sourceProvider} />
       </div>
+      {taggingOpen && orgId ? <div className="mt-3"><DocumentTaggingPanel orgId={orgId} documentId={document.id}/></div> : null}
       {actionError ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{actionError}</p> : null}
 
       <Modal isOpen={!!preview} onClose={() => setPreview(null)} size="xl">
