@@ -442,11 +442,15 @@ function DocumentContent() {
         segmentStart = document.visibilityState === "visible" ? performance.now() : null;
       }
       const seconds = Math.floor(accumulatedMs / 1000);
-      if (seconds < 15) {
+      // Opened from a search result: report even short visits so dwell time
+      // on clicked results (E30.3) includes quick returns to the results.
+      let searchClickId = null;
+      try { searchClickId = sessionStorage.getItem(`kms.searchClick.${id}`); } catch {}
+      if (seconds < (searchClickId ? 1 : 15)) {
         if (isFinal) accumulatedMs = 0;
         return;
       }
-      const payload = JSON.stringify({ type: "study_duration", durationSeconds: seconds });
+      const payload = JSON.stringify({ type: "study_duration", durationSeconds: seconds, ...(searchClickId ? { searchClickId } : {}) });
       const url = `/api/documents/${id}/interactions`;
       if (navigator.sendBeacon) {
         navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
@@ -473,6 +477,8 @@ function DocumentContent() {
 
     return () => {
       flush(true);
+      // Leaving the document ends the visit that the search click started.
+      try { sessionStorage.removeItem(`kms.searchClick.${id}`); } catch {}
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pagehide", handlePageHide);
     };

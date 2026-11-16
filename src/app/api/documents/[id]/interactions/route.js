@@ -17,11 +17,13 @@ export async function POST(req, { params }) {
   // floor of 15s filters bounces, ceiling of 20 minutes stops a single
   // idle-open tab from dominating the expertise signal.
   let durationSeconds = null;
+  let tooShortForInteraction = false;
   if (type === "study_duration") {
     const raw = Number(body.durationSeconds);
-    if (!Number.isFinite(raw) || raw < 15) {
+    if (!Number.isFinite(raw) || raw < 1) {
       return NextResponse.json({ success: true, ignored: true }, { status: 200 });
     }
+    tooShortForInteraction = raw < 15;
     durationSeconds = Math.min(1200, Math.round(raw));
   }
 
@@ -57,6 +59,23 @@ export async function POST(req, { params }) {
   // actually reach through normal product surfaces.
   const canAccess = await canInteractWithDocument(doc, { userId: user.id, isSuperAdmin: isSuperAdmin(role) });
   if (!canAccess) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // E30.3: reading time after a search click. Short visits count here (they
+  // are the signal), capped at 1,200 s in total like the interaction timer.
+  const searchClickId = typeof body.searchClickId === "string" ? body.searchClickId : null;
+  if (type === "study_duration" && searchClickId) {
+    const click = await prisma.searchClick.findFirst({
+      where: { id: searchClickId, documentId: id, searchEvent: { userId: user.id, orgId } },
+      select: { id: true, dwellSeconds: true },
+    });
+    if (click) {
+      await prisma.searchClick.update({
+        where: { id: click.id },
+        data: { dwellSeconds: Math.min(1200, (click.dwellSeconds || 0) + durationSeconds) },
+      });
+    }
+  }
+  if (tooShortForInteraction) return NextResponse.json({ success: true, ignored: true }, { status: 200 });
 
   await prisma.documentInteraction.create({
     data: { documentId: id, userId: user.id, orgId, type, durationSeconds },
