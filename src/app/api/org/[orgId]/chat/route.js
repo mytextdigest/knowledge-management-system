@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
-import { search } from "@/lib/search/searchService";
+import { search, completeSearchEvent } from "@/lib/search/searchService";
 import { expandQuery } from "@/lib/queryExpansion";
 import { extractQuestionEntities } from "@/lib/entityExtraction";
 import { getRecentMemory, recordMemoryTopics } from "@/lib/orgMemberMemory";
@@ -147,6 +147,8 @@ export async function GET(req, { params }) {
 }
 
 export async function POST(req, { params }) {
+  // E29.2 time-to-answer is measured from here to the first answer token.
+  const requestStartedAt = Date.now();
   const session = await getServerSession();
   if (!session?.user?.email)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -351,8 +353,9 @@ export async function POST(req, { params }) {
     }
   }
 
+  let searchEventId = null;
   if (chunks.length === 0 && workflowRequest.action !== "stop") {
-    const { results: retrievedChunks } = await search({
+    const { results: retrievedChunks, searchEventId: loggedEventId } = await search({
         kind: "chat",
         query: question,
       queries: [...expandedQueries, ...extraKeywordQueries],
@@ -368,6 +371,7 @@ export async function POST(req, { params }) {
       exactTermQuestion: question,
     });
     chunks = retrievedChunks;
+    searchEventId = loggedEventId;
 
     if (workflowRequest.action === "start") {
       const candidateIds = [...new Set(chunks.map((chunk) => chunk.document_id).filter(Boolean))];
@@ -558,7 +562,7 @@ export async function POST(req, { params }) {
       };
 
       try {
-        send("meta", { conversationId, sources, confidence, crossProjectSynthesis });
+        send("meta", { conversationId, sources, confidence, crossProjectSynthesis, searchEventId });
 
         const titlePromise = isNewConversation ? generateTitle(openai, question) : null;
 
@@ -571,9 +575,11 @@ export async function POST(req, { params }) {
         });
 
         let answer = "";
+        let firstTokenMs = null;
         for await (const chunk of completionStream) {
           const delta = chunk?.choices?.[0]?.delta?.content || "";
           if (delta) {
+            if (firstTokenMs === null) firstTokenMs = Date.now() - requestStartedAt;
             answer += delta;
             send("token", { text: delta });
           }
@@ -588,6 +594,12 @@ export async function POST(req, { params }) {
 
         const assistantMessage = await prisma.orgMessage.create({
           data: { conversationId, role: "assistant", content: answer, sources, confidence },
+        });
+        await completeSearchEvent(searchEventId, {
+          firstTokenMs: firstTokenMs ?? Date.now() - requestStartedAt,
+          answerShown: true,
+          confidence,
+          orgMessageId: assistantMessage.id,
         });
 
         await prisma.chatAuditLog.create({

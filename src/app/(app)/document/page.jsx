@@ -40,6 +40,7 @@ import TranscriptView from '@/components/documents/TranscriptView';
 import TranscriptLinkPanel from '@/components/documents/TranscriptLinkPanel';
 import TranscriptionNotice from '@/components/documents/TranscriptionNotice';
 import ChapterList from '@/components/documents/ChapterList';
+import DocumentTaggingPanel from '@/components/taxonomy/DocumentTaggingPanel';
 
 
 
@@ -441,11 +442,15 @@ function DocumentContent() {
         segmentStart = document.visibilityState === "visible" ? performance.now() : null;
       }
       const seconds = Math.floor(accumulatedMs / 1000);
-      if (seconds < 15) {
+      // Opened from a search result: report even short visits so dwell time
+      // on clicked results (E30.3) includes quick returns to the results.
+      let searchClickId = null;
+      try { searchClickId = sessionStorage.getItem(`kms.searchClick.${id}`); } catch {}
+      if (seconds < (searchClickId ? 1 : 15)) {
         if (isFinal) accumulatedMs = 0;
         return;
       }
-      const payload = JSON.stringify({ type: "study_duration", durationSeconds: seconds });
+      const payload = JSON.stringify({ type: "study_duration", durationSeconds: seconds, ...(searchClickId ? { searchClickId } : {}) });
       const url = `/api/documents/${id}/interactions`;
       if (navigator.sendBeacon) {
         navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
@@ -472,6 +477,8 @@ function DocumentContent() {
 
     return () => {
       flush(true);
+      // Leaving the document ends the visit that the search click started.
+      try { sessionStorage.removeItem(`kms.searchClick.${id}`); } catch {}
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pagehide", handlePageHide);
     };
@@ -1264,6 +1271,12 @@ function DocumentContent() {
       {isRepositoryDoc && <DocumentCompletenessBadge documentId={doc.id} />}
       <TranscriptLinkPanel doc={doc} onChanged={refreshDoc} />
       <SourceTagsPanel tags={doc?.sourceTags} />
+      {doc?.orgId ? (
+        <section aria-label="Taxonomy tags" className="rounded-lg border border-gray-200 bg-white p-3 text-left dark:border-gray-700 dark:bg-gray-900">
+          <h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">Taxonomy tags</h3>
+          <DocumentTaggingPanel orgId={doc.orgId} documentId={doc.id} />
+        </section>
+      ) : null}
     </div>
   );
 

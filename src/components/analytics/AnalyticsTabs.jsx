@@ -10,6 +10,7 @@ export default function AnalyticsTabs({ orgId, showGovernance = false }) {
   const pathname = usePathname();
   const tabs = [
     { label: "Search activity", href: `/org/${orgId}/analytics` },
+    { label: "Usage & adoption", href: `/org/${orgId}/analytics/usage` },
     ...(showGovernance ? [{ label: "Governance", href: `/org/${orgId}/governance-metrics` }] : []),
   ];
   return (
