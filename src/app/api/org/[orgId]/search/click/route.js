@@ -13,6 +13,12 @@ export async function POST(req, { params }) {
   const body = await req.json().catch(() => ({}));
   const { searchEventId, documentId } = body;
   const rank = Number(body.rank);
+  // Optional position inside the document (slide, timestamp or locator label).
+  const chunkRef = body.chunkRef && typeof body.chunkRef === "object" && !Array.isArray(body.chunkRef)
+    ? Object.fromEntries(Object.entries(body.chunkRef)
+      .filter(([k, v]) => ["slide", "start", "locator"].includes(k) && ["string", "number"].includes(typeof v))
+      .map(([k, v]) => [k, typeof v === "string" ? v.slice(0, 100) : v]))
+    : null;
   if (typeof searchEventId !== "string" || typeof documentId !== "string" || !Number.isInteger(rank) || rank < 1 || rank > 200) {
     return NextResponse.json({ error: "Invalid click" }, { status: 400 });
   }
@@ -27,7 +33,7 @@ export async function POST(req, { params }) {
   const doc = await prisma.document.findFirst({ where: { AND: [{ id: documentId, orgId, deletedAt: null }, access] }, select: { id: true } });
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
   try {
-    const click = await prisma.searchClick.create({ data: { searchEventId, documentId, rank }, select: { id: true } });
+    const click = await prisma.searchClick.create({ data: { searchEventId, documentId, rank, ...(chunkRef && Object.keys(chunkRef).length ? { chunkRef } : {}) }, select: { id: true } });
     return NextResponse.json({ clickId: click.id });
   } catch {
     return NextResponse.json({ error: "Telemetry unavailable" }, { status: 503 });

@@ -178,6 +178,25 @@ function ConversationRow({ conversation, active, onSelect, onRename, onDelete })
 export default function OrgChatPage() {
   const { orgId } = useParams();
 
+  // E29/E30: a citation opened from an answer counts as a click on that
+  // question's results, ranked among the answer's document citations.
+  const recordCitationClick = (message, source) => {
+    if (!message.searchEventId || !source?.documentId || source.type === 'decision' || source.type === 'lesson') return;
+    const documentSources = message.sources.filter((x) => x.documentId && x.type !== 'decision' && x.type !== 'lesson');
+    const rank = documentSources.indexOf(source) + 1;
+    if (rank < 1) return;
+    fetch(`/api/org/${orgId}/search/click`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        searchEventId: message.searchEventId,
+        documentId: source.documentId,
+        rank,
+        ...(source.locator ? { chunkRef: { locator: String(source.locator).slice(0, 100) } } : {}),
+      }),
+    }).catch(() => {});
+  };
+
   const [conversations, setConversations] = useState([]);
   const [conversationId, setConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -358,11 +377,11 @@ export default function OrgChatPage() {
         conversationId,
         scope,
         departmentId: scope === 'department' ? departmentId : null,
-        onMeta: ({ conversationId: newConvId, sources, confidence }) => {
+        onMeta: ({ conversationId: newConvId, sources, confidence, searchEventId }) => {
           activeConvId = newConvId;
           setConversationId(newConvId);
           setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMsgId ? { ...m, sources, confidence } : m))
+            prev.map((m) => (m.id === assistantMsgId ? { ...m, sources, confidence, searchEventId } : m))
           );
           if (wasNewConversation) loadConversations();
         },
@@ -599,7 +618,7 @@ export default function OrgChatPage() {
                               <button
                                 key={`${s.documentId || s.lessonId || s.filename || 'source'}-${i}`}
                                 type="button"
-                                onClick={() => setSelectedSource(s)}
+                                onClick={() => { recordCitationClick(m, s); setSelectedSource(s); }}
                                 title={label}
                                 className={className}
                               >
