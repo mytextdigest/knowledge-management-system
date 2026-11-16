@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { checkFileFormat, fileExtension, isSupportedFile, SUPPORTED_EXTENSIONS } from "../../src/lib/fileFormats.js";
+import { checkFileFormat, fileExtension, isSupportedFile, SUPPORTED_EXTENSIONS, MEDIA_EXTENSIONS } from "../../src/lib/fileFormats.js";
 
 test("fileExtension: lower-case, last dot, ignores folders and dot-files", () => {
   assert.equal(fileExtension("Q3 Review.PDF"), ".pdf");
@@ -35,7 +35,8 @@ test("other formats are refused with a clear reason naming the extension", () =>
 
 test("every extension the allow-list accepts has an extraction branch in the worker", () => {
   const worker = readFileSync(new URL("../../worker/index.js", import.meta.url), "utf8");
-  for (const ext of SUPPORTED_EXTENSIONS) {
+  assert.match(worker, /if \(isMediaFile\(filename\)\) return processRecording\(/, "recordings have one branch (E-6)");
+  for (const ext of SUPPORTED_EXTENSIONS.filter((e) => !MEDIA_EXTENSIONS.includes(e))) {
     assert.ok(worker.includes(`"${ext}"`), `worker/index.js has no branch for ${ext}`);
   }
 });

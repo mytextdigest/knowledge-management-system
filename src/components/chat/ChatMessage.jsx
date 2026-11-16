@@ -40,7 +40,7 @@ const rowMotion = {
   transition: { duration: 0.3, ease: 'easeOut' },
 };
 
-export default function ChatMessage({ message, onExpand, onCitationClick, children }) {
+export default function ChatMessage({ message, onExpand, onCitationClick, onTimestampClick, maxSeconds, children }) {
   if (message.role === 'user') {
     const time = formatTime(message.timestamp);
     return (
@@ -79,6 +79,8 @@ export default function ChatMessage({ message, onExpand, onCitationClick, childr
           content={message.content}
           citations={message.citations}
           onCitationClick={onCitationClick}
+          onTimestampClick={isSystem ? undefined : onTimestampClick}
+          maxSeconds={maxSeconds}
           className={cn('w-full text-[15px]', isSystem && 'text-gray-500 dark:text-gray-400')}
         />
 

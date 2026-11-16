@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { S3Client } from "@aws-sdk/client-s3";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { prisma } from "@/lib/prisma";
-import { MAX_UPLOAD_BYTES, checkFileFormat, checkFileSize } from "@/lib/fileFormats";
+import { checkFileFormat, checkFileSize, maxUploadBytes } from "@/lib/fileFormats";
 
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
@@ -31,7 +31,7 @@ export async function POST(req) {
 
     // EQ-5: refuse an oversized file here with a clear message; the policy's
     // content-length-range below enforces the same limit at S3.
-    const size = checkFileSize(fileSize);
+    const size = checkFileSize(fileSize, fileName);
     if (!size.ok) {
       return NextResponse.json({ error: size.reason, code: "FILE_TOO_LARGE" }, { status: 413 });
     }
@@ -71,7 +71,7 @@ export async function POST(req) {
       },
       Conditions: [
         ["starts-with", "$Content-Type", ""],
-        ["content-length-range", 0, MAX_UPLOAD_BYTES],
+        ["content-length-range", 0, maxUploadBytes(fileName)],
       ],
       Expires: 60,
     });

@@ -6,6 +6,9 @@ import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { search } from "@/lib/search/searchService";
 import { repositoryAccessWhere, getUserPrincipals } from "@/lib/access/documentAccess";
 import { resolveOpenAIKey } from "@/utils/key_helper";
+import { chunkLocation } from "@/lib/chunkLocation";
+import { linkedRecordings } from "@/lib/recordingCitations";
+import { timeOf } from "@/lib/transcripts";
 
 const PAGE_SIZE = 20;
 
@@ -104,6 +107,7 @@ export async function GET(req, { params }) {
   // match so search still returns something rather than erroring out.
   let rankMap = null;
   let searchEventId = null;
+  const bestChunks = new Map(); // documentId → its best-matching chunk
   const trimmedSearch = searchTerm?.trim() || null;
 
   if (trimmedSearch) {
@@ -138,6 +142,7 @@ export async function GET(req, { params }) {
           if (seen.has(row.document_id)) continue;
           seen.add(row.document_id);
           candidateIds.push(row.document_id);
+          bestChunks.set(row.document_id, row); // E-9: where in the document it matched
         }
       }
     } catch (err) {
@@ -243,10 +248,22 @@ export async function GET(req, { params }) {
     }
   }
 
+  // E-9: "matched at slide 7 / 12:34" on each search hit's card.
+  const recordings = await linkedRecordings(
+    docs.filter((d) => timeOf(bestChunks.get(d.id))).map((d) => d.id),
+    { userId: user.id, role }
+  );
+  const matchOf = (d) => {
+    const row = bestChunks.get(d.id);
+    const at = row ? chunkLocation(row, recordings.get(d.id)) : {};
+    return at.locator ? { locator: at.locator, viewerUrl: at.viewerUrl, recording: at.recording || null } : null;
+  };
+
   return NextResponse.json({
     searchEventId,
     documents: docs.map((d) => ({
       ...d,
+      match: matchOf(d),
       relatedDocumentCount: (d._count?.relationshipsFrom || 0) + (d._count?.relationshipsTo || 0),
       _count: undefined,
       topic: d.topicDocument?.topic || null,

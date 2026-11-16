@@ -28,6 +28,20 @@ function linkifyCitations(content, citations) {
   });
 }
 
+// E11.5 (KMS): on a recording's page, times in an answer ("at 12:34") become
+// buttons that play the recording from there. Rewritten to `#seek-<seconds>`
+// links before parsing (a fragment, which react-markdown keeps), intercepted
+// in the `a` override. Times past the recording's end are left as text.
+const TIME_PATTERN = /(?<![\d:.A-Za-z])((?:\d{1,2}:)?\d{1,2}:\d{2})(?![\d:])/g;
+
+function linkifyTimes(content, maxSeconds) {
+  return content.replace(TIME_PATTERN, (match) => {
+    const seconds = match.split(':').reduce((total, part) => total * 60 + Number(part), 0);
+    if (Number.isFinite(maxSeconds) && seconds > maxSeconds + 1) return match;
+    return `[${match}](#seek-${seconds})`;
+  });
+}
+
 function isBoldOnlyParagraph(node) {
   // Ignore whitespace and a trailing colon outside the bold ("**Key Insights**:").
   const kids = (node?.children || []).filter((c) => !(c.type === 'text' && /^\s*:?\s*$/.test(c.value)));
@@ -37,8 +51,9 @@ function isBoldOnlyParagraph(node) {
 // variant="rich" (assistant answers in chat) renders headings as real headings
 // and gives nested lists their own bullet style; the default keeps headings as
 // bold lines for compact surfaces.
-export default function MarkdownMessage({ content, citations, onCitationClick, className, variant }) {
-  const text = linkifyCitations(content || '', citations);
+export default function MarkdownMessage({ content, citations, onCitationClick, onTimestampClick, maxSeconds, className, variant }) {
+  const cited = linkifyCitations(content || '', citations);
+  const text = onTimestampClick ? linkifyTimes(cited, maxSeconds) : cited;
   const rich = variant === 'rich';
 
   return (
@@ -83,6 +98,19 @@ export default function MarkdownMessage({ content, citations, onCitationClick, c
             ? <h4 className="text-lg font-semibold mt-4 mb-2 first:mt-0">{children}</h4>
             : <p className="font-semibold mb-1">{children}</p>,
           a: ({ href, children }) => {
+            if (onTimestampClick && href?.startsWith('#seek-')) {
+              const seconds = Number(href.slice('#seek-'.length));
+              return (
+                <button
+                  type="button"
+                  onClick={() => onTimestampClick(seconds)}
+                  title="Play from here"
+                  className="inline-flex items-center rounded bg-blue-50 px-1 font-medium tabular-nums text-blue-700 hover:bg-blue-100 dark:bg-blue-900/40 dark:text-blue-300 dark:hover:bg-blue-900/70"
+                >
+                  {children}
+                </button>
+              );
+            }
             if (href?.startsWith('citation:')) {
               const index = Number(href.slice('citation:'.length));
               const citation = citations?.[index];

@@ -12,6 +12,8 @@ import { resolveDriveId } from "@/lib/connectors/sharepointLocate";
 // document page (uploader, or the F1 browse policy including the file's
 // SharePoint permissions). ?download=1 sends it as an attachment.
 // ?format=pdf has SharePoint convert it first (slide previews of no-copy decks).
+// E-9: a Range request is passed on, so the media player can seek in a
+// recording without downloading all of it.
 export async function GET(req, { params }) {
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -42,12 +44,13 @@ export async function GET(req, { params }) {
   }
 
   const asPdf = new URL(req.url).searchParams.get("format") === "pdf";
+  const range = asPdf ? null : req.headers.get("range");
   let upstream;
   try {
     const accessToken = await getCachedAppOnlyToken(integration.scopeConfig?.tenantId);
     const driveId = await resolveDriveId(doc, { scopeConfig: integration.scopeConfig, accessToken });
     if (!driveId) return NextResponse.json({ error: "This file's SharePoint site is no longer connected" }, { status: 404 });
-    upstream = await fetchDriveItemContent({ accessToken, driveId, itemId: doc.externalId, format: asPdf ? "pdf" : null });
+    upstream = await fetchDriveItemContent({ accessToken, driveId, itemId: doc.externalId, format: asPdf ? "pdf" : null, range });
   } catch (err) {
     console.error("SharePoint preview failed:", err.message);
     const status = err.status === 404 ? 404 : 502;
@@ -63,5 +66,8 @@ export async function GET(req, { params }) {
   });
   const length = upstream.headers.get("content-length");
   if (length) headers.set("Content-Length", length);
-  return new Response(upstream.body, { status: 200, headers });
+  if (!asPdf) headers.set("Accept-Ranges", "bytes");
+  const partial = upstream.status === 206 && upstream.headers.get("content-range");
+  if (partial) headers.set("Content-Range", partial);
+  return new Response(upstream.body, { status: partial ? 206 : 200, headers });
 }

@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 import { FILE_PROBLEM_STATUSES, isProcessingStatus } from "@/lib/documentStatus";
 import { firstMissingStage, pipelineState, STAGE_LABELS } from "@/lib/documentPipeline";
+import { isMediaFile } from "@/lib/fileFormats";
 import { queueRepair } from "@/lib/documentReprocess";
 
 export async function POST(req, { params }) {
@@ -36,6 +37,13 @@ export async function POST(req, { params }) {
       return NextResponse.json(
         { error: "Document is currently being processed. Wait until processing completes before regenerating the summary." },
         { status: 409 }
+      );
+    }
+
+    if (isMediaFile(doc.filename)) {
+      return NextResponse.json(
+        { error: "A recording's summary comes from its transcript. Regenerate the transcript's summary instead." },
+        { status: 400 }
       );
     }
 

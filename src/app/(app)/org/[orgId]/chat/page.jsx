@@ -585,7 +585,7 @@ export default function OrgChatPage() {
                               ? s.statement
                               : isLesson
                               ? (s.topic || s.whatHappened)
-                              : [s.locator ? `${s.filename} · ${s.locator}` : s.filename, s.department, s.project].filter(Boolean).join(' → ');
+                              : [s.locator ? `${s.recording?.filename || s.filename} · ${s.locator}` : s.filename, s.department, s.project].filter(Boolean).join(' → ');
                             const className = cn(
                               'inline-flex max-w-[260px] items-center gap-1 rounded-full border px-2.5 py-1 text-xs',
                               isDecision
@@ -778,7 +778,8 @@ export default function OrgChatPage() {
 
             <div className="space-y-1 text-sm text-gray-600 dark:text-gray-300">
               {selectedSource.label && <p>Source: {selectedSource.label}</p>}
-              {selectedSource.locator && <p>Cited from {selectedSource.locator}</p>}
+              {selectedSource.locator && <p>Cited from {selectedSource.times?.length ? `${selectedSource.locator} (time in the recording)` : selectedSource.locator}</p>}
+              {selectedSource.recording && <p>Transcript of the recording {selectedSource.recording.filename}</p>}
               {selectedSource.mayBeOutdated && <p className="text-amber-700 dark:text-amber-300">May be outdated: this document has been flagged for review.</p>}
               {selectedSource.department && <p>Department: {selectedSource.department}</p>}
               {selectedSource.project && <p>Project: {selectedSource.project}</p>}
@@ -792,7 +793,9 @@ export default function OrgChatPage() {
                   rel="noopener noreferrer"
                   className="inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                 >
-                  Open at slide {selectedSource.slides?.[0]}
+                  {selectedSource.times?.length
+                    ? `Play from ${selectedSource.locator.split(",")[0]}`
+                    : `Open at slide ${selectedSource.slides?.[0]}`}
                 </a>
               )}
               {selectedSource.url && (

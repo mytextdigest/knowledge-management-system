@@ -2,7 +2,7 @@
 // document page's polling, the document API and documentReprocess.js).
 // No imports, so it is safe in client bundles.
 export const PROCESSING_STATUSES = new Set([
-  "queued", "extracting", "running_ocr", "chunked",
+  "queued", "extracting", "running_ocr", "transcribing", "chunked",
   "embedding", "embedded", "summarizing", "clustering",
 ]);
 
