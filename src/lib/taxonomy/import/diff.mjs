@@ -3,7 +3,9 @@ import { normalizeLabel } from '../labels.mjs';
 /** Pure, conservative diff for externally managed taxonomies. Never writes to Prisma. */
 export function previewTaxonomyDiff(parsed, existing = [], options = {}) {
   if (!Array.isArray(parsed?.concepts) || !Array.isArray(existing)) throw new Error('Expected concept and existing-term arrays');
-  const { allowPathDerivedIds = false } = options;
+  // Path-based CSV ids (csv:path:...) are stable while a term keeps its name
+  // and place; a rename or move shows up as a new term plus a deprecation.
+  const { allowPathDerivedIds = true } = options;
   const incoming = new Map();
   for (const item of parsed.concepts) {
     if (!item || typeof item.externalId !== 'string' || !item.externalId.trim() || typeof item.label !== 'string' || !item.label.trim()) throw new Error('Each concept requires externalId and label');
@@ -34,7 +36,8 @@ export function previewTaxonomyDiff(parsed, existing = [], options = {}) {
     const afterParent = item.parentExternalId ?? null;
     const renamed = normalizeLabel(prior.label) !== normalizeLabel(item.label);
     const moved = beforeParent !== afterParent;
-    const descriptionChanged = (prior.description ?? '') !== (item.description ?? '');
+    // Stored descriptions are cut at 1,000 characters (applyPlan).
+    const descriptionChanged = (prior.description ?? '') !== String(item.description ?? '').slice(0, 1000);
     const reactivated = prior.status === 'deprecated';
     const type = moved ? 'move' : (renamed || descriptionChanged || reactivated ? 'update' : 'unchanged');
     actions.push({ type, externalId: item.externalId, renamed, moved, descriptionChanged, reactivated,

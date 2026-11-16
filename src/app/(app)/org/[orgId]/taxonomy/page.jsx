@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { ChevronDown, ChevronRight, Loader2, Plus, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Loader2, Plus, Search, Trash2, Upload } from "lucide-react";
 import Layout from "@/components/layout/Layout";
 
 const card = "rounded-xl border border-gray-200 dark:border-gray-700";
@@ -83,14 +83,22 @@ function AddTermForm({ placeholder, onAdd, busy, onCancel }) {
   );
 }
 
-function TermNode({ term, tree, byId, editable, busy, filterIds, showDeprecated, actions, depth = 0 }) {
-  const [open, setOpen] = useState(true);
-  const [mode, setMode] = useState(null); // "edit" | "child" | "merge"
+// Large sets (an imported taxonomy) start collapsed: only expanded branches
+// are rendered, so a 2,600-term tree stays responsive.
+const OPEN_ALL_UP_TO = 150;
+
+function TermNode({ term, tree, byId, editable, busy, filterIds, showDeprecated, actions, defaultOpen, depth = 0 }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [mode, setMode] = useState(null); // "edit" | "child" | "merge" | "move"
   const [mergeTarget, setMergeTarget] = useState("");
+  const [moveTarget, setMoveTarget] = useState("");
   const children = (tree.get(term.id) || []).filter((c) => (showDeprecated || c.status === "active") && (!filterIds || filterIds.has(c.id)));
   const expanded = open || !!filterIds;
   const deprecated = term.status !== "active";
-  const mergeOptions = [...byId.values()].filter((t) => t.id !== term.id && t.status === "active" && !t.ancestorIds?.includes(term.id));
+  // Any active term outside this term's own subtree (built only when needed).
+  const otherTerms = mode === "merge" || mode === "move"
+    ? [...byId.values()].filter((t) => t.id !== term.id && t.status === "active" && !t.ancestorIds?.includes(term.id))
+    : [];
 
   return (
     <li>
@@ -116,6 +124,9 @@ function TermNode({ term, tree, byId, editable, busy, filterIds, showDeprecated,
               <button type="button" className={secondaryBtn} disabled={busy} onClick={() => setMode(mode === "edit" ? null : "edit")}>Edit</button>
               <button type="button" className={secondaryBtn} disabled={busy} onClick={() => setMode(mode === "child" ? null : "child")}>Add child</button>
               <button type="button" className={secondaryBtn} disabled={busy} onClick={() => setMode(mode === "merge" ? null : "merge")}>Merge</button>
+              <button type="button" className={secondaryBtn} disabled={busy} onClick={() => setMode(mode === "move" ? null : "move")}>Move</button>
+              <button type="button" aria-label={`Move ${term.label} up`} className={secondaryBtn} disabled={busy} onClick={() => actions.reorder(term.id, "up")}><ArrowUp className="h-3 w-3" /></button>
+              <button type="button" aria-label={`Move ${term.label} down`} className={secondaryBtn} disabled={busy} onClick={() => actions.reorder(term.id, "down")}><ArrowDown className="h-3 w-3" /></button>
             </> : null}
             <button type="button" className={secondaryBtn} disabled={busy} onClick={() => actions.update(term.id, { status: deprecated ? "active" : "deprecated" })}>
               {deprecated ? "Reactivate" : "Deprecate"}
@@ -142,16 +153,32 @@ function TermNode({ term, tree, byId, editable, busy, filterIds, showDeprecated,
           <span className="text-sm text-gray-600 dark:text-gray-300">Merge “{term.label}” into</span>
           <select aria-label="Merge target" className={control} value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)} required>
             <option value="">Choose a term</option>
-            {mergeOptions.map((t) => <option key={t.id} value={t.id}>{" ".repeat(t.depth * 2)}{t.label}</option>)}
+            {otherTerms.map((t) => <option key={t.id} value={t.id}>{" ".repeat(t.depth * 2)}{t.label}</option>)}
           </select>
           <button type="submit" disabled={busy || !mergeTarget} className={primaryBtn}>Merge</button>
+          <button type="button" onClick={() => setMode(null)} className={secondaryBtn}>Cancel</button>
+        </form>
+      ) : null}
+      {mode === "move" ? (
+        <form
+          className="mt-2 flex flex-wrap items-center gap-2"
+          style={{ paddingLeft: `${28 + depth * 20}px` }}
+          onSubmit={async (e) => { e.preventDefault(); if (await actions.move(term.id, moveTarget === "__top" ? null : moveTarget)) setMode(null); }}
+        >
+          <span className="text-sm text-gray-600 dark:text-gray-300">Move “{term.label}” under</span>
+          <select aria-label="New parent" className={control} value={moveTarget} onChange={(e) => setMoveTarget(e.target.value)} required>
+            <option value="">Choose a parent</option>
+            <option value="__top">Top level</option>
+            {otherTerms.map((t) => <option key={t.id} value={t.id}>{"\u00a0".repeat(t.depth * 2)}{t.label}</option>)}
+          </select>
+          <button type="submit" disabled={busy || !moveTarget} className={primaryBtn}>Move</button>
           <button type="button" onClick={() => setMode(null)} className={secondaryBtn}>Cancel</button>
         </form>
       ) : null}
       {expanded && children.length ? (
         <ul>
           {children.map((child) => (
-            <TermNode key={child.id} term={child} tree={tree} byId={byId} editable={editable} busy={busy} filterIds={filterIds} showDeprecated={showDeprecated} actions={actions} depth={depth + 1} />
+            <TermNode key={child.id} term={child} tree={tree} byId={byId} editable={editable} busy={busy} filterIds={filterIds} showDeprecated={showDeprecated} actions={actions} defaultOpen={defaultOpen} depth={depth + 1} />
           ))}
         </ul>
       ) : null}
@@ -159,7 +186,7 @@ function TermNode({ term, tree, byId, editable, busy, filterIds, showDeprecated,
   );
 }
 
-function TermSetCard({ set, canEdit, busy, actions }) {
+function TermSetCard({ set, canEdit, busy, actions, onReimport }) {
   const [query, setQuery] = useState("");
   const [showDeprecated, setShowDeprecated] = useState(false);
   const tree = useMemo(() => buildTree(set.terms), [set.terms]);
@@ -172,7 +199,10 @@ function TermSetCard({ set, canEdit, busy, actions }) {
     create: (t) => actions.createTerm({ ...t, termSetId: set.id }),
     update: actions.updateTerm,
     merge: actions.mergeTerm,
+    move: actions.moveTerm,
+    reorder: actions.reorderTerm,
   };
+  const defaultOpen = set.terms.length <= OPEN_ALL_UP_TO;
 
   return (
     <section className={`${card} p-5`}>
@@ -182,7 +212,10 @@ function TermSetCard({ set, canEdit, busy, actions }) {
             {set.name}
             {set.readOnly ? <span className={`${badge} ml-2 bg-gray-100 align-middle text-gray-600 dark:bg-gray-800 dark:text-gray-300`}>Managed outside KMS</span> : null}
           </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{activeCount} active term{activeCount === 1 ? "" : "s"}{set.description ? ` · ${set.description}` : ""}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {activeCount} active term{activeCount === 1 ? "" : "s"}{set.description ? ` · ${set.description}` : ""}
+            {set.lastImportedAt ? ` · last imported ${new Date(set.lastImportedAt).toLocaleString()}` : ""}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="relative">
@@ -192,11 +225,13 @@ function TermSetCard({ set, canEdit, busy, actions }) {
           <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
             <input type="checkbox" checked={showDeprecated} onChange={(e) => setShowDeprecated(e.target.checked)} /> Show deprecated
           </label>
+          {canEdit && set.readOnly ? <button type="button" className={secondaryBtn} disabled={busy} onClick={() => onReimport(set)}><Upload className="mr-1 inline h-3 w-3" />Re-import</button> : null}
+          {canEdit ? <button type="button" aria-label={`Delete ${set.name}`} title="Delete term set" className={secondaryBtn} disabled={busy} onClick={() => actions.deleteSet(set)}><Trash2 className="h-3 w-3" /></button> : null}
         </div>
       </div>
       <ul className="mt-3">
         {roots.map((term) => (
-          <TermNode key={term.id} term={term} tree={tree} byId={byId} editable={editable} busy={busy} filterIds={filterIds} showDeprecated={showDeprecated} actions={setActions} />
+          <TermNode key={term.id} term={term} tree={tree} byId={byId} editable={editable} busy={busy} filterIds={filterIds} showDeprecated={showDeprecated} actions={setActions} defaultOpen={defaultOpen} />
         ))}
       </ul>
       {!roots.length ? <p className="mt-3 text-sm text-gray-500">{query ? "No terms match." : "No terms yet."}</p> : null}
@@ -223,7 +258,7 @@ function MetadataFields({ fields, sets, canEdit, busy, onCreate, onRename }) {
                 {f.termSet?.name} · {f.multi ? "Multiple terms" : "One term"} · {f.required ? "Required" : "Optional"} · {f.facet ? "Search facet" : "Not a facet"} · {f._count?.documentTerms || 0} tags
               </p>
             </div>
-            {canEdit && !f.termSet?.readOnly ? <button type="button" className={secondaryBtn} disabled={busy} onClick={() => onRename(f)}>Rename</button> : null}
+            {canEdit ? <button type="button" className={secondaryBtn} disabled={busy} onClick={() => onRename(f)}>Rename</button> : null}
           </div>
         ))}
         {!fields.length ? <p className="py-3 text-sm text-gray-500">No metadata fields yet.</p> : null}
@@ -237,7 +272,7 @@ function MetadataFields({ fields, sets, canEdit, busy, onCreate, onRename }) {
           <input className={`${control} font-mono`} aria-label="Field key" placeholder="field_key" required pattern="[a-z][a-z0-9_]{1,63}" title="Lower-case letters, digits and _; starts with a letter" value={form.key} onChange={(e) => set({ key: e.target.value })} />
           <select className={control} aria-label="Term set" required value={form.termSetId} onChange={(e) => set({ termSetId: e.target.value })}>
             <option value="">Term set</option>
-            {sets.filter((s) => !s.readOnly).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {sets.map((s) => <option key={s.id} value={s.id}>{s.name}{s.readOnly ? " (imported)" : ""}</option>)}
           </select>
           <div className="flex flex-wrap items-center gap-4 text-sm text-gray-700 sm:col-span-2 dark:text-gray-300">
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={form.multi} onChange={(e) => set({ multi: e.target.checked })} /> Multiple terms</label>
@@ -247,6 +282,204 @@ function MetadataFields({ fields, sets, canEdit, busy, onCreate, onRename }) {
           <div className="sm:text-right"><button type="submit" disabled={busy} className={primaryBtn}>Create field</button></div>
         </form>
       ) : null}
+    </section>
+  );
+}
+
+const FORMAT_LABELS = { skos_ttl: "SKOS Turtle (.ttl)", skos_rdfxml: "SKOS RDF/XML (.rdf, .xml)", csv: "CSV" };
+const CHANGE_LABELS = { add: "New", update: "Changed", move: "Moved", deprecate: "Deprecated" };
+
+function guessFormat(name, text) {
+  const ext = name.toLowerCase().split(".").pop();
+  if (ext === "csv") return "csv";
+  if (["rdf", "xml", "owl"].includes(ext)) return "skos_rdfxml";
+  if (["ttl", "n3"].includes(ext)) return "skos_ttl";
+  return text.trimStart().startsWith("<") && !text.trimStart().startsWith("<http") ? "skos_rdfxml" : "skos_ttl";
+}
+
+// C-6/C-7: import a SKOS or CSV taxonomy as a read-only term set, or re-import
+// an imported set. Always previews the changes before anything is written.
+function ImportPanel({ base, sets, target, setTarget, onApplied, busy, setBusy }) {
+  const [file, setFile] = useState(null); // { name, text }
+  const [format, setFormat] = useState("skos_ttl");
+  const [newSetName, setNewSetName] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState("");
+  const external = sets.filter((x) => x.readOnly);
+  const targetId = target?.id || "";
+
+  const reset = () => { setPreview(null); setError(""); };
+  async function pick(e) {
+    const f = e.target.files?.[0];
+    reset();
+    if (!f) { setFile(null); return; }
+    if (f.size > 8 * 1024 * 1024) { setError("The file is larger than 8 MB."); setFile(null); return; }
+    const text = await f.text();
+    setFile({ name: f.name, text });
+    setFormat(guessFormat(f.name, text));
+    if (!targetId && !newSetName) setNewSetName(f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").slice(0, 120));
+  }
+  const payload = () => ({ format, content: file.text, ...(targetId ? { termSetId: targetId } : { newSetName }) });
+
+  async function call(path, body) {
+    setBusy(true); setError("");
+    try {
+      const res = await fetch(`${base}/import/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Import failed");
+      return json;
+    } catch (e) { setError(e.message); return null; } finally { setBusy(false); }
+  }
+  async function runPreview() { const r = await call("prepare", payload()); if (r) setPreview(r); }
+  async function runApply() {
+    const r = await call("apply", { ...payload(), confirmationToken: preview.confirmationToken, confirmApply: true });
+    if (!r) return;
+    const s = r.summary || {};
+    const mapped = r.tagMapping ? ` SharePoint tags mapped on ${r.tagMapping.synced} document(s)${r.tagMapping.review ? `, ${r.tagMapping.review} need review` : ""}.` : "";
+    onApplied(`Imported: ${s.added || 0} new, ${s.updated || 0} changed, ${s.moved || 0} moved, ${s.deprecated || 0} deprecated term(s).${mapped}`);
+    setFile(null); setPreview(null); setNewSetName(""); setTarget(null);
+  }
+
+  const s = preview?.summary;
+  return (
+    <section id="taxonomy-import" className={`${card} space-y-4 p-5`}>
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Import a taxonomy</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          A SKOS export (from Semaphore or another taxonomy tool) or a CSV becomes a read-only term set, managed in that tool. Re-import the updated file to bring changes in: renamed and moved terms keep their tags, and removed terms are deprecated, never deleted.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="text-xs text-gray-600 dark:text-gray-300">File
+          <input type="file" accept=".ttl,.n3,.rdf,.xml,.owl,.csv,text/turtle,application/rdf+xml,text/csv" onChange={pick} className="mt-1 block w-full text-sm" />
+        </label>
+        <label className="text-xs text-gray-600 dark:text-gray-300">Format
+          <select className={`${control} mt-1 w-full`} value={format} onChange={(e) => { setFormat(e.target.value); reset(); }}>
+            {Object.entries(FORMAT_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-gray-600 dark:text-gray-300">Import into
+          <select className={`${control} mt-1 w-full`} value={targetId} onChange={(e) => { setTarget(external.find((x) => x.id === e.target.value) || null); reset(); }}>
+            <option value="">A new term set</option>
+            {external.map((x) => <option key={x.id} value={x.id}>Re-import “{x.name}”</option>)}
+          </select>
+        </label>
+        {!targetId ? (
+          <label className="text-xs text-gray-600 dark:text-gray-300 sm:col-span-2">New term set name
+            <input className={`${control} mt-1 w-full`} value={newSetName} onChange={(e) => { setNewSetName(e.target.value); reset(); }} maxLength={120} placeholder="e.g. NYPA Enterprise Taxonomy" />
+          </label>
+        ) : null}
+        <div className="flex items-end gap-2">
+          <button type="button" className={primaryBtn} disabled={busy || !file || (!targetId && !newSetName.trim())} onClick={runPreview}>
+            {busy && !preview ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Preview changes
+          </button>
+        </div>
+      </div>
+      {error ? <p role="alert" className="rounded-md border border-red-300 p-3 text-sm text-red-700 dark:border-red-800 dark:text-red-300">{error}</p> : null}
+      {preview ? (
+        <div className="space-y-3 rounded-lg bg-gray-50 p-4 dark:bg-gray-800/60">
+          <p className="text-sm text-gray-800 dark:text-gray-200">
+            <strong>{preview.count}</strong> terms in {FORMAT_LABELS[preview.format]}{preview.schemeLabel ? ` (“${preview.schemeLabel}”)` : ""}.
+            {" "}{s.added} new · {s.updated} changed · {s.moved} moved · {s.deprecated} to deprecate · {s.unchanged} unchanged{preview.relations ? ` · ${preview.relations} related links` : ""}.
+          </p>
+          {preview.warnings?.length ? (
+            <details className="text-sm text-amber-800 dark:text-amber-300">
+              <summary>{preview.warnings.length} warning{preview.warnings.length === 1 ? "" : "s"}</summary>
+              <ul className="mt-1 list-disc pl-5">{preview.warnings.slice(0, 100).map((w, i) => <li key={i}>{w}</li>)}</ul>
+            </details>
+          ) : null}
+          {preview.changes.length ? (
+            <div className="max-h-72 overflow-y-auto">
+              <table className="w-full text-left text-sm">
+                <thead><tr className="text-gray-600 dark:text-gray-300"><th className="p-1.5">Change</th><th className="p-1.5">Term</th></tr></thead>
+                <tbody>
+                  {preview.changes.map((c) => (
+                    <tr key={c.externalId} className="border-t border-gray-200 dark:border-gray-700">
+                      <td className="p-1.5 text-gray-600 dark:text-gray-300">{CHANGE_LABELS[c.type] || c.type}</td>
+                      <td className="p-1.5 text-gray-900 dark:text-gray-100">{c.renamed ? `${c.before.label} → ${c.after.label}` : (c.after || c.before)?.label}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {preview.changesTotal > preview.changesShown ? <p className="mt-1 text-xs text-gray-500">Showing {preview.changesShown} of {preview.changesTotal} changes.</p> : null}
+            </div>
+          ) : <p className="text-sm text-gray-600 dark:text-gray-300">No term changes.</p>}
+          <div className="flex gap-2">
+            <button type="button" className={primaryBtn} disabled={busy} onClick={runApply}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Apply import</button>
+            <button type="button" className={secondaryBtn} disabled={busy} onClick={reset}>Cancel</button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+// C-8: SharePoint managed-metadata columns found in synced documents, and the
+// metadata field each one fills. Tags in a mapped column become terms.
+function SourceMappingPanel({ base, fields, busy, setBusy, onDone }) {
+  const [data, setData] = useState(null);
+  const [mapping, setMapping] = useState({});
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  const load = useCallback(async () => {
+    const res = await fetch(`${base}/source-mapping`, { cache: "no-store" });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || "Unable to load SharePoint columns");
+    setData(json); setMapping(json.mapping || {});
+  }, [base]);
+  useEffect(() => { load().catch((e) => setError(e.message)); }, [load]);
+
+  async function save() {
+    setBusy(true); setError(""); setResult(null);
+    try {
+      const res = await fetch(`${base}/source-mapping`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mapping }) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Save failed");
+      let cursor = null;
+      const total = { processed: 0, synced: 0, review: 0, failed: 0 };
+      if (Object.values(json.mapping).length) {
+        do {
+          const r = await fetch(`${base}/source-mapping`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cursor }) });
+          const batch = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(batch.error || "Mapping failed");
+          for (const k of Object.keys(total)) total[k] += batch[k] || 0;
+          cursor = batch.nextCursor;
+        } while (cursor);
+      }
+      setResult(total);
+      await load();
+      onDone();
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  if (!data) return error ? <p role="alert" className="text-sm text-red-700 dark:text-red-300">{error}</p> : null;
+  if (!data.columns.length) return null;
+  return (
+    <section className={`${card} space-y-4 p-5`}>
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">SharePoint tags</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Managed-metadata columns found on synced SharePoint files. Choose the field each one fills: its values are matched to terms (by term-store id, then by name) on save, after every sync and after each import. Values that don't match one term are left for review and the file keeps its other tags.
+        </p>
+      </div>
+      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+        {data.columns.map((c) => (
+          <div key={c.fieldName} className="flex flex-wrap items-center justify-between gap-3 py-2">
+            <div>
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{c.displayName} <span className="font-mono text-xs text-gray-500">{c.fieldName}</span></p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{c.tags} tag value(s) on synced files</p>
+            </div>
+            <select aria-label={`Field for ${c.displayName}`} className={control} value={mapping[c.fieldName] || ""} onChange={(e) => setMapping((m) => ({ ...m, [c.fieldName]: e.target.value || null }))}>
+              <option value="">Not mapped</option>
+              {fields.map((f) => <option key={f.id} value={f.id}>{f.name} ({f.termSet?.name})</option>)}
+            </select>
+          </div>
+        ))}
+      </div>
+      {error ? <p role="alert" className="text-sm text-red-700 dark:text-red-300">{error}</p> : null}
+      {result ? <p role="status" className="text-sm text-gray-700 dark:text-gray-300">Mapped tags on {result.synced} file(s){result.review ? `; ${result.review} need review (a value matched no term or more than one)` : ""}{result.failed ? `; ${result.failed} failed` : ""}.</p> : null}
+      <button type="button" className={primaryBtn} disabled={busy} onClick={save}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save and map tags</button>
     </section>
   );
 }
@@ -262,6 +495,7 @@ export default function TaxonomyPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [newSet, setNewSet] = useState("");
+  const [importTarget, setImportTarget] = useState(null);
 
   const refresh = useCallback(async () => {
     const [setsRes, fieldsRes] = await Promise.all([fetch(base, { cache: "no-store" }), fetch(`${base}/fields`, { cache: "no-store" })]);
@@ -299,6 +533,12 @@ export default function TaxonomyPage() {
   const actions = {
     createTerm: (t) => run(`${base}/terms`, "POST", t),
     updateTerm: (id, patch) => run(`${base}/terms`, "PATCH", { id, ...patch }),
+    moveTerm: (id, parentId) => run(`${base}/terms/move`, "POST", { id, parentId }, "Term moved."),
+    reorderTerm: (id, direction) => run(`${base}/terms/move`, "POST", { id, direction }),
+    deleteSet: (set) => {
+      if (!window.confirm(`Delete the term set "${set.name}" and its ${set.terms.length} term(s)? Fields that use it are deleted too. This can't be undone.`)) return false;
+      return run(`${base}?id=${encodeURIComponent(set.id)}`, "DELETE", {}, `Term set "${set.name}" deleted.`);
+    },
     mergeTerm: (source, target) => {
       if (!target) return false;
       const tagged = source._count?.documentTerms || 0;
@@ -332,7 +572,18 @@ export default function TaxonomyPage() {
                 <button type="submit" disabled={busy} className={primaryBtn}><Plus className="h-4 w-4" /> Create term set</button>
               </form>
             ) : null}
-            {sets.map((s) => <TermSetCard key={s.id} set={s} canEdit={canEdit} busy={busy} actions={actions} />)}
+            {canEdit ? (
+              <ImportPanel
+                base={base} sets={sets} target={importTarget} setTarget={setImportTarget} busy={busy} setBusy={setBusy}
+                onApplied={(message) => { setError(""); refresh().then(() => setNotice(message)).catch((e) => setError(e.message)); }}
+              />
+            ) : null}
+            {sets.map((s) => (
+              <TermSetCard
+                key={s.id} set={s} canEdit={canEdit} busy={busy} actions={actions}
+                onReimport={(set) => { setImportTarget(set); document.getElementById("taxonomy-import")?.scrollIntoView({ behavior: "smooth" }); }}
+              />
+            ))}
             {!sets.length ? <p className={`${card} p-6 text-center text-sm text-gray-500`}>No term sets yet.</p> : null}
             <MetadataFields
               fields={fields}
@@ -346,6 +597,7 @@ export default function TaxonomyPage() {
                 run(`${base}/fields`, "PATCH", { id: f.id, name }, "Field renamed.");
               }}
             />
+            {canEdit ? <SourceMappingPanel base={base} fields={fields} busy={busy} setBusy={setBusy} onDone={() => refresh().catch(() => {})} /> : null}
           </>
         )}
       </main>

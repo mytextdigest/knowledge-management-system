@@ -21,8 +21,9 @@ test('missing terms are deprecated, never deleted', () => {
   const p = previewTaxonomyDiff({ concepts: [] }, [{externalId:'X',label:'Retired',status:'active'}]);
   assert.equal(p.actions[0].type, 'deprecate');
 });
-test('path derived IDs are blocked for safe resync', () => {
-  assert.throws(()=>previewTaxonomyDiff({concepts:[concept('csv:path:alpha','Alpha')]}, []), /Path-derived/);
+test('path derived IDs are accepted, and can still be refused by option', () => {
+  assert.equal(previewTaxonomyDiff({concepts:[concept('csv:path:alpha','Alpha')]}, []).summary.added, 1);
+  assert.throws(()=>previewTaxonomyDiff({concepts:[concept('csv:path:alpha','Alpha')]}, [], { allowPathDerivedIds:false }), /Path-derived/);
 });
 test('missing parents and cycles rejected', () => {
   assert.throws(()=>previewTaxonomyDiff({concepts:[concept('A','Alpha','missing')]}, []), /Missing imported parent/);

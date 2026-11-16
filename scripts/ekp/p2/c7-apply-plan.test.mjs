@@ -11,6 +11,10 @@ test('hierarchy recalculated with real DB IDs', () => {
  assert.deepEqual(tree.get('child'), { id:'c1',parentId:'r1',ancestorIds:['r1'],depth:1 });
 });
 test('duplicate sibling labels rejected',()=> assert.throws(()=>buildApplyPlan([{externalId:'a',label:'Hi'},{externalId:'b',label:' hi '}]),/Duplicate sibling/));
-test('path derived identifiers blocked',()=>assert.throws(()=>buildApplyPlan([{externalId:'csv:path:foo',label:'Foo'}]),/Stable external/));
+test('path derived identifiers are accepted',()=>assert.equal(buildApplyPlan([{externalId:'csv:path:foo',label:'Foo'}]).length,1));
+test('long descriptions are cut to 1,000 characters, long synonyms skipped',()=>{
+ assert.equal(buildApplyPlan([{externalId:'a',label:'A',description:'x'.repeat(1500)}])[0].description.length,1000);
+ assert.deepEqual(normalizeImportedSynonyms({label:'A',synonyms:['ok','y'.repeat(200)]}).map(s=>s.label),['ok']);
+});
 test('synonyms deduplicated with kinds',()=>assert.deepEqual(normalizeImportedSynonyms(concepts[0]).map(x=>x.kind),['alt','hidden']));
 test('cycles rejected',()=>assert.throws(()=>buildApplyPlan([{externalId:'a',label:'A',parentExternalId:'b'},{externalId:'b',label:'B',parentExternalId:'a'}]),/Cycle/));

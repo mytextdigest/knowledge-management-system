@@ -5,11 +5,13 @@ import { prepareImportApply, verifyImportApply } from '../../../src/lib/taxonomy
 const old = [{ normalizedLabel:'local alias',kind:'alt' }];
 test('re-import retains local aliases and only adds missing synonyms', () => {
   assert.deepEqual(planSafeSynonymUpserts(old,[{normalizedLabel:'new alias',kind:'hidden'}]), {
-    additions:[{normalizedLabel:'new alias',kind:'hidden'}],retained:1
+    additions:[{normalizedLabel:'new alias',kind:'hidden'}],conflicts:[],retained:1
   });
 });
-test('re-import never rewrites synonym kind without review', () => {
-  assert.throws(()=>planSafeSynonymUpserts(old,[{normalizedLabel:'local alias',kind:'hidden'}]),/requires review/);
+test('re-import never rewrites a synonym kind; the conflict is reported', () => {
+  const r=planSafeSynonymUpserts(old,[{normalizedLabel:'local alias',kind:'hidden'}]);
+  assert.deepEqual(r.additions,[]);
+  assert.deepEqual(r.conflicts,[{normalizedLabel:'local alias',kind:'hidden',existingKind:'alt'}]);
 });
 test('preview token invalidated by concurrent synonym edits', () => {
   const content='externalId,label\nterm-1,One';

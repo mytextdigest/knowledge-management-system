@@ -5,12 +5,13 @@ export function buildApplyPlan(concepts) {
   if (!Array.isArray(concepts) || concepts.length > 10000) throw new Error('Invalid concept count');
   const byId = new Map();
   for (const c of concepts) {
-    if (typeof c?.externalId !== 'string' || !c.externalId.trim() || c.externalId.startsWith('csv:path:')) throw new Error('Stable external IDs required');
+    if (typeof c?.externalId !== 'string' || !c.externalId.trim()) throw new Error('Stable external IDs required');
     const label = cleanLabel(c.label);
-    if (!label) throw new Error(`Invalid label: ${c.externalId}`);
+    if (!label) throw new Error(`Term label missing or longer than 120 characters: ${c.externalId}`);
     if (byId.has(c.externalId)) throw new Error(`Duplicate external ID: ${c.externalId}`);
-    if (c.description != null && String(c.description).length > 1000) throw new Error('Description too long');
-    byId.set(c.externalId, { ...c, label });
+    // Descriptions are kept up to 1,000 characters (Term.description limit in the editor).
+    const description = c.description == null ? null : String(c.description).slice(0, 1000);
+    byId.set(c.externalId, { ...c, label, description });
   }
   const ordered = [], active = new Set(), done = new Set();
   function visit(id) {
@@ -50,10 +51,11 @@ export function calculateHierarchy(concepts, termIds) {
 export function normalizeImportedSynonyms(c) {
   const result = new Map();
   for (const [kind, values] of [['alt', c.synonyms || []], ['hidden', c.hiddenLabels || []]]) {
-    if (!Array.isArray(values) || values.length > 100) throw new Error('Too many synonyms');
-    for (const raw of values) {
+    if (!Array.isArray(values)) throw new Error('Invalid synonyms');
+    // Labels too long for a synonym (over 120 characters) are skipped.
+    for (const raw of values.slice(0, 100)) {
       const label = cleanLabel(raw);
-      if (!label) throw new Error('Invalid synonym');
+      if (!label) continue;
       const normalizedLabel = normalizeLabel(label);
       if (normalizedLabel !== normalizeLabel(c.label) && !result.has(normalizedLabel)) result.set(normalizedLabel, { label, normalizedLabel, kind });
     }

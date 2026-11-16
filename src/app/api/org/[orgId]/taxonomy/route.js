@@ -17,6 +17,29 @@ export async function GET(_req, { params }) {
   const sets = await prisma.termSet.findMany({ where: { orgId }, include: { terms: { select: { id: true, label: true, parentId: true, ancestorIds: true, description: true, status: true, depth: true, sortOrder: true, mergedIntoId: true, synonyms: { select: { id: true, label: true }, orderBy: { label: "asc" } }, _count: { select: { documentTerms: true } } }, orderBy: [{ depth: "asc" }, { sortOrder: "asc" }, { label: "asc" }] } }, orderBy: { name: "asc" } });
   return NextResponse.json({ sets, canEdit: isSuperAdmin(a.role) });
 }
+// Delete a term set that no document is tagged from. Its fields go with it.
+// The Category set stays (classification writes to it).
+export async function DELETE(req, { params }) {
+  const { orgId } = await params;
+  const a = await actor(orgId); if (a.error) return a.error;
+  if (!isSuperAdmin(a.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const id = new URL(req.url).searchParams.get("id");
+  const set = id ? await prisma.termSet.findFirst({ where: { id, orgId }, include: { fields: { select: { id: true, key: true } }, _count: { select: { terms: true } } } }) : null;
+  if (!set) return NextResponse.json({ error: "Term set not found" }, { status: 404 });
+  if (set.fields.some((f) => f.key === "category")) return NextResponse.json({ error: "The Category term set is used by classification and can't be deleted" }, { status: 409 });
+  const tagged = await prisma.documentTerm.count({ where: { term: { termSetId: set.id } } });
+  if (tagged) return NextResponse.json({ error: `${tagged} document tag(s) use this term set; remove them first` }, { status: 409 });
+  await prisma.$transaction(async (tx) => {
+    // Term parent links are RESTRICT; clear them so the terms delete in one go.
+    await tx.term.updateMany({ where: { termSetId: set.id }, data: { parentId: null, mergedIntoId: null } });
+    await tx.term.deleteMany({ where: { termSetId: set.id } });
+    await tx.metadataField.deleteMany({ where: { termSetId: set.id } });
+    await tx.taxonomyImport.updateMany({ where: { termSetId: set.id }, data: { termSetId: null } });
+    await tx.termSet.delete({ where: { id: set.id } });
+  }, { timeout: 60_000 });
+  await logAudit({ orgId, actorUserId: a.user.id, action: "taxonomy.term_set.deleted", entityType: "TermSet", entityId: set.id, before: { name: set.name, source: set.source, terms: set._count.terms, fields: set.fields.map((f) => f.key) } });
+  return NextResponse.json({ deleted: true });
+}
 export async function POST(req, { params }) {
   const { orgId } = await params;
   const a = await actor(orgId); if (a.error) return a.error;

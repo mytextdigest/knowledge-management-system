@@ -27,4 +27,8 @@ test('different term set cannot reuse token', () => {
   assert.throws(() => verifyImportApply({ ...base, termSetId:'set-2', confirmationToken:p.confirmationToken }), /stale/);
 });
 test('invalid token rejected', () => assert.throws(() => verifyImportApply({ ...base, confirmationToken:'bad' }), /token/));
-test('path-derived IDs still blocked', () => assert.throws(() => prepareImportApply({ ...base, content:'path\nA > B\n' }), /CSV|Path|path/));
+test('path CSV previews with a warning about renames', () => {
+  const p = prepareImportApply({ ...base, terms: [], content:'path\nA > B\n' });
+  assert.equal(p.summary.added, 2);
+  assert.match(p.warnings[0], /identified by their path/);
+});

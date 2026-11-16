@@ -15,11 +15,11 @@ test('resolves DB parent IDs into stable external IDs', () => {
   assert.equal(p.safeToApplyAutomatically, false);
 });
 test('blocks local terms without stable IDs', () => assert.throws(() => buildImportPreview({ format:'csv', content:csv, terms:[{ id:'db1', externalId:null }] }), /stable external IDs/));
-test('blocks path-derived IDs on resync', () => assert.throws(() => buildImportPreview({ format:'csv', content:'path\nA > B', terms:[] }), /Path-derived IDs/));
+test('path CSV previews with a warning', () => assert.match(buildImportPreview({ format:'csv', content:'path\nA > B', terms:[] }).warnings[0], /path/));
 test('blocks missing stored parent', () => assert.throws(() => buildImportPreview({ format:'csv', content:csv, terms:[{ id:'db2', externalId:'child', parentId:'missing' }] }), /missing parent/));
 test('blocks oversized imports and unsupported formats', () => {
   assert.throws(() => buildImportPreview({ format:'json', content:csv }), /Unsupported/);
-  assert.throws(() => buildImportPreview({ format:'csv', content:'x'.repeat(2*1024*1024+1) }), /exceeds/);
+  assert.throws(() => buildImportPreview({ format:'csv', content:'x'.repeat(8*1024*1024+1) }), /exceeds/);
 });
 test('reports deprecation without deleting stored terms', () => {
   const p = buildImportPreview({ format:'csv', content:'externalId,label\nroot,Old Root', terms:stored });

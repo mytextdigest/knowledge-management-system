@@ -18,12 +18,15 @@ export function createTaxonomyAwareSourceTagReader({ reader, db, orgId, fieldByS
     async sync(args) {
       const count = await reader.sync(args);
       if (count === null || Object.keys(mapping).length === 0) return count;
-      // Raw tags are persisted by the existing reader before reconciliation.
-      // Failure propagates to the existing per-document catch; raw tags survive.
-      await db.$transaction(tx => reconcileSourceDocumentTerms(tx, {
-        orgId, documentId: args.documentId, fieldBySourceName: mapping,
-        authoritativeSnapshot: true,
-      }));
+      // Raw tags are already stored by the reader. A mapping failure is logged
+      // and never fails the document's sync; the next sync or "Map now" retries.
+      try {
+        await db.$transaction(tx => reconcileSourceDocumentTerms(tx, {
+          orgId, documentId: args.documentId, fieldBySourceName: mapping,
+        }));
+      } catch (error) {
+        console.warn('C-8 tag mapping failed for document', args.documentId, error?.message);
+      }
       return count;
     },
   };

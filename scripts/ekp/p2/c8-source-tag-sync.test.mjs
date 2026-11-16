@@ -18,6 +18,11 @@ test('maps source GUID and writes accepted source_system classification',async()
   const {tx,calls}=fixture(); const r=await reconcileSourceDocumentTerms(tx,{orgId:'o',documentId:'d',fieldBySourceName:{Dept:'f'}});
   assert.equal(r.fields[0].status,'synced');assert.equal(calls.length,1);assert.equal(calls[0][1].data.source,'source_system');
 });
+test('a set imported from SKOS (scheme URI as externalId) still maps tags from a term-store set',async()=>{
+  const {tx,calls}=fixture({externalId:'http://ex.org/scheme',tags:[{fieldName:'Dept',label:'Finance',termGuid:'g9',termSetGuid:'0d3c2a1b-0000-4000-8000-000000000001'}]});
+  const r=await reconcileSourceDocumentTerms(tx,{orgId:'o',documentId:'d',fieldBySourceName:{Dept:'f'}});
+  assert.equal(r.fields[0].status,'synced');assert.equal(calls[0][1].data.termId,'t1');
+});
 test('preserves manual assignment and avoids duplicate',async()=>{
   const {tx,calls}=fixture({existing:[{id:'dt',termId:'t1',source:'manual'}]});
   await reconcileSourceDocumentTerms(tx,{orgId:'o',documentId:'d',fieldBySourceName:{Dept:'f'}});assert.equal(calls.length,0);

@@ -31,7 +31,10 @@ export async function reconcileSourceDocumentTerms(tx, { orgId, documentId, fiel
     const set = await tx.termSet.findFirst({ where: { id: field.termSetId, orgId }, select: { id: true, externalId: true } });
     if (!set) throw new Error('Mapped term set not in organization');
     const terms = await tx.term.findMany({ where: { termSetId: set.id }, select: { id: true, parentId: true, label: true, status: true, termStoreGuid: true } });
-    const plan = planSourceTagMappings({ tags: sourceTags, terms, termSetGuid: set.externalId });
+    // A SKOS import stores its scheme URI as the set's externalId; only a
+    // term-store GUID can be compared with the tag's term-set GUID.
+    const setGuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(set.externalId || '') ? set.externalId : null;
+    const plan = planSourceTagMappings({ tags: sourceTags, terms, termSetGuid: setGuid });
     const uniqueIds = [...new Set(plan.mapped.map(m => m.termId))];
     if (!field.multi && uniqueIds.length > 1) {
       results.push({ fieldId, status: 'review', reason: 'single-value-conflict', mapped: 0 });

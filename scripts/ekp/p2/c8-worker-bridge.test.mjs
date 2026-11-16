@@ -17,8 +17,8 @@ test('missing Graph item cannot trigger destructive reconciliation', async () =>
 test('invalid mappings fail closed before any worker sync', () => {
   assert.throws(() => createTaxonomyAwareSourceTagReader({reader:{sync:async()=>1},db,orgId:'org1',fieldBySourceName:{Category:''}}), /Invalid/);
 });
-test('reconciliation failures propagate without hiding a partially processed document', async () => {
+test('a mapping failure never fails the document sync; raw tags stay stored', async () => {
   const db2 = {$transaction: async () => { throw new Error('mapping transaction failed'); }};
   const reader = createTaxonomyAwareSourceTagReader({reader:{sync:async()=>1},db:db2,orgId:'org1',fieldBySourceName:{Category:'field1'}});
-  await assert.rejects(reader.sync(args), /mapping transaction failed/);
+  assert.equal(await reader.sync(args), 1);
 });

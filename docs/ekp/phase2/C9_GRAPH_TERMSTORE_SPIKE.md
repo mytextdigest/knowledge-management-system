@@ -1,16 +1,28 @@
-# C-9 — Microsoft Graph term-store investigation (November 13)
+# C-9: Reading the SharePoint term store through Microsoft Graph
 
-Status: **research plan only; live tenant access not available in the supplied source snapshot**. Do not mark the tenant spike completed without evidence.
+**Run:** 2026-11-16, test tenant `nextgenerationinnovation.onmicrosoft.com`, the KMS Entra app used by the SharePoint connector (app-only token). Read-only `GET` calls; nothing was written to the tenant.
 
-## Proposed tenant-safe checks
+## Result
 
-1. Verify Graph permissions granted to the existing SharePoint integration. Reading taxonomy may require `TermStore.Read.All` (application or delegated, with tenant admin consent); check Microsoft Graph documentation and the tenant's actual consent before requesting access.
-2. Use a dedicated test tenant and least-privilege token. Test `GET /v1.0/sites/{site-id}/termStore/sets` and `GET /v1.0/sites/{site-id}/termStore/sets/{set-id}/terms` with paging, without writing to the term store.
-3. Record response shape, localized labels, term GUIDs, set GUIDs, and parent relations. Do not log tokens or sensitive tenant data.
-4. Compare Graph term IDs against `DocumentSourceTag.termGuid` and SKOS concept URIs. Do not assume Semaphore exports preserve Graph GUIDs.
-5. If GUIDs differ, report ambiguity and unmatched tags; only allow unique path-based matches with explicit provenance.
-6. Verify 429 handling, throttling, paging, and access-denied behavior before enabling any scheduled import.
+The connector's app **can't read the tenant's term store** with the permissions NYPA is likely to grant (`Sites.Selected`). File import (SKOS/CSV, C-6) stays the supported path, as planned (CQ-4).
 
-## Evidence needed to close C-9
+| Call (v1.0) | Result |
+| --- | --- |
+| Token roles | `Sites.Selected`, `User.Read.All`, `GroupMember.Read.All` (no `TermStore.*`) |
+| `GET /sites/{site}/termStore/groups` (3 granted sites) | 200, **0 groups**: only site-collection term groups are visible, and the tenant's groups aren't |
+| `GET /sites/{site}/termStore/sets` | 404 `itemNotFound` ("TermSet could not be found"): sets are listed under a group |
+| `GET /sites/{site}/termStore` (Engineering site) | 404 `itemNotFound` ("Cannot find termStore") |
+| `GET /termStore/sets` (tenant level) | 400: v1.0 has no tenant-level `termStore` segment; the store is reached through a site |
 
-A sanitized response sample, HTTP status and scopes (without secrets), comparison results for at least one known tagged file, and a recommendation on direct Graph integration vs SKOS/CSV export.
+The synced test file's "NGI Topics" tag (term GUID `1e117ab2-…`) has no term-set GUID in the item's field value, so the set can't be addressed directly either.
+
+## What this means
+
+- **Reading the term store needs `TermStore.Read.All`** (application, admin consent) on top of `Sites.Selected`. That is a tenant-wide read; it is NYPA's M365 governance team's decision (CQ-4).
+- **Matching SharePoint tags to imported terms doesn't depend on it.** C-8 matches a tag by term-store GUID when the imported concept carries it (a GUID inside the concept URI is stored as `Term.termStoreGuid`), and otherwise by label path, never guessing between two candidates. On NGI's test file the tag mapped by GUID (verified on the shared DB inside a rolled-back transaction).
+- **If NYPA grants `TermStore.Read.All` after award**, a `termstore` source (the `TaxonomyImport.format` value already exists) can list `groups → sets → terms` with paging and feed the same preview/apply path as a file import.
+
+## Still to check with NYPA (after award)
+
+1. Whether `TermStore.Read.All` can be granted alongside `Sites.Selected`.
+2. Whether Semaphore's SKOS export keeps term-store GUIDs in concept URIs or in a property (CQ-1). If it uses a property, map it to `Term.termStoreGuid` in the importer.
