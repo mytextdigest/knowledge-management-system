@@ -4,6 +4,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { emailDomain } from "@/lib/sso/entra";
+import { isSamlAvailable } from "@/lib/sso/jackson";
 
 // The enabled Microsoft sign-in config whose allowed domains include this
 // email's domain, or null. A domain belongs to at most one Microsoft tenant,
@@ -30,4 +31,15 @@ export async function isPasswordLoginAllowed(user, { db = prisma } = {}) {
     select: { role: true },
   });
   return membership?.role === "super_admin";
+}
+
+/**
+ * How the sign-in and sign-up pages send this org's users to Microsoft
+ * (E-12): { protocol: "saml", samlTenant } for an org set to SAML, else
+ * { protocol: "oidc" }. The tenant id is the SAML connection's key; it isn't
+ * secret (Microsoft publishes it for any domain).
+ */
+export function microsoftSignInTarget(config, { samlAvailable = isSamlAvailable() } = {}) {
+  if (config?.protocol === "saml" && samlAvailable) return { protocol: "saml", samlTenant: config.tenantId };
+  return { protocol: "oidc" };
 }

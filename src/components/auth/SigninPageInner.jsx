@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Mail, Lock, EyeOff, Eye } from "lucide-react";
+import { startMicrosoftSignIn } from "@/lib/sso/startMicrosoftSignIn";
 
 // Errors NextAuth passes back as ?error=<code>, incl. Microsoft sign-in
 // refusals from src/lib/sso/entra.js.
@@ -19,6 +20,8 @@ const SIGNIN_ERRORS = {
   SsoNoEmail: "Your Microsoft account has no email address KMS can use. Ask your administrator.",
   SsoNotInvited: "Your organization only lets invited people into KMS. Ask your administrator for an invite.",
   SsoFailed: "Microsoft sign-in failed. Please try again.",
+  SamlFailed: "Microsoft sign-in (SAML) failed. Please try again, or ask your administrator to check the KMS SAML app.",
+  SamlStartAtKms: "Start Microsoft sign-in from this page: enter your work email below.",
   USE_MICROSOFT: "Your organization requires Microsoft sign-in for this email.",
   OAuthSignin: "Couldn't start Microsoft sign-in. Please try again.",
   OAuthCallback: "Microsoft sign-in failed. Please try again.",
@@ -38,6 +41,8 @@ export default function SigninPageInner() {
   const [microsoftEnabled, setMicrosoftEnabled] = useState(false);
   // Email-first: the email's domain uses Microsoft sign-in (EKP A-5).
   const [microsoftEmail, setMicrosoftEmail] = useState(false);
+  // E-12: OIDC or the org's SAML app ({ protocol, samlTenant }).
+  const [microsoftTarget, setMicrosoftTarget] = useState(null);
   const [usePasswordAnyway, setUsePasswordAnyway] = useState(false);
   const microsoftMode = microsoftEnabled && microsoftEmail && !usePasswordAnyway;
 
@@ -49,14 +54,19 @@ export default function SigninPageInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: value }),
       });
-      setMicrosoftEmail(Boolean((await res.json()).microsoft));
+      const data = await res.json();
+      setMicrosoftEmail(Boolean(data.microsoft));
+      setMicrosoftTarget(data.microsoft ? data : null);
     } catch {
       setMicrosoftEmail(false);
+      setMicrosoftTarget(null);
     }
   };
 
+  // The plain button (no email typed yet) uses OIDC; an email on a SAML org's
+  // domain goes to that org's SAML app.
   const continueWithMicrosoft = () =>
-    signIn("azure-ad", { callbackUrl }, email ? { login_hint: email } : undefined);
+    startMicrosoftSignIn({ callbackUrl, email, target: microsoftEmail ? microsoftTarget : null });
 
   useEffect(() => {
     getProviders().then((providers) => setMicrosoftEnabled(Boolean(providers?.["azure-ad"]))).catch(() => {});

@@ -4,8 +4,26 @@ import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { serializeSsoConfig, validateSsoSettingsPatch } from "@/lib/sso/ssoSettings";
 import { logAudit } from "@/lib/auditLog";
+import { deleteSamlConnection, describeConnection, getSamlConnection, isSamlAvailable, serviceProviderUrls } from "@/lib/sso/jackson";
 
 // EKP A-5: an org's Microsoft sign-in settings. super_admin only.
+// E-12: also the SAML part (protocol, the org's SAML connection); the
+// metadata upload itself is ./saml/route.js.
+
+// What the page needs to set up SAML: the two values for Entra, and the
+// stored connection (or null). Never fails the page: SAML is optional.
+async function samlStatus(config) {
+  if (!isSamlAvailable()) return { available: false };
+  const status = { available: true, ...serviceProviderUrls(), connection: null };
+  if (!config) return status;
+  try {
+    status.connection = describeConnection(await getSamlConnection(config.tenantId));
+  } catch (err) {
+    console.error("Couldn't read the SAML connection:", err.message);
+    status.error = "Couldn't read the SAML connection.";
+  }
+  return status;
+}
 
 async function requireSuperAdmin(orgId) {
   const session = await getServerSession();
@@ -25,6 +43,7 @@ export async function GET(req, { params }) {
   return NextResponse.json({
     ...serializeSsoConfig(config),
     available: Boolean(process.env.ENTRA_SSO_CLIENT_ID),
+    saml: await samlStatus(config),
   });
 }
 
@@ -40,6 +59,11 @@ export async function PATCH(req, { params }) {
   const departments = await prisma.department.findMany({ where: { orgId }, select: { id: true } });
   const { data, error } = validateSsoSettingsPatch(body, config, { departmentIds: departments.map((d) => d.id) });
   if (error) return NextResponse.json({ error }, { status: 400 });
+  if (data.protocol === "saml") {
+    const saml = await samlStatus(config);
+    if (!saml.available) return NextResponse.json({ error: "SAML sign-in isn't configured on this KMS deployment" }, { status: 400 });
+    if (!saml.connection) return NextResponse.json({ error: "Upload your SAML app's metadata before switching to SAML" }, { status: 400 });
+  }
 
   const updated = await prisma.orgSsoConfig.update({ where: { orgId }, data });
   await logAudit({
@@ -65,6 +89,10 @@ export async function DELETE(req, { params }) {
   // Users and their linked identities are kept: they can sign in with a
   // password (if they have one) and are re-linked on a reconnect.
   await prisma.orgSsoConfig.delete({ where: { orgId } });
+  // E-12: the SAML connection goes with it (it's keyed by this tenant).
+  if (isSamlAvailable()) {
+    await deleteSamlConnection(config.tenantId).catch((err) => console.error("Couldn't remove the SAML connection:", err.message));
+  }
   await logAudit({
     orgId,
     actorUserId: user.id,

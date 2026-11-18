@@ -55,6 +55,7 @@
     "@aws-sdk/lib-storage": "^3.922.0",
     "@aws-sdk/s3-presigned-post": "^3.922.0",
     "@aws-sdk/s3-request-presigner": "^3.932.0",
+    "@boxyhq/saml-jackson": "26.2.0",
     "@dnd-kit/core": "^6.3.1",
     "@headlessui/react": "^2.2.8",
     "@prisma/client": "^6.18.0",
