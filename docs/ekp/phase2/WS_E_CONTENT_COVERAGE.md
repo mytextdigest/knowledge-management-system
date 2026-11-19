@@ -8,7 +8,7 @@
 | **Foundations used**  | F1 document access, F2 audit, F3 scheduled jobs, F5 org settings, F6 workflow engine (E14) |
 | **Phase 2 window**    | Mon 2 Nov – Thu 26 Nov 2026 (code-complete), integration to Mon 30 Nov                 |
 | **Branch**            | `feature/ekp-ws-e` (one branch for the phase, one PR per milestone; see [PHASE2_OVERVIEW.md](PHASE2_OVERVIEW.md) §3) |
-| **Status**            | E-M1 merged to `dev` (PR #36, 2026-11-07). E-M2 (E-6 to E-9) and E-10, E-11 of E-M3 (transcription, chapters) merged to `dev` (PR #39, 2026-11-14). E-12 (SAML), the last E-M3 task, built and verified on localhost with the test tenant (2026-11-19); waiting for the E-M3 PR. E-M4 outlined, detail it before it starts. |
+| **Status**            | E-M1 merged to `dev` (PR #36, 2026-11-07). E-M2 (E-6 to E-9) and E-10, E-11 of E-M3 (transcription, chapters) merged to `dev` (PR #39, 2026-11-14). E-12 (SAML) merged to `dev` (PR #40, 2026-11-19), completing E-M3. E-M4 outlined, detail it before it starts. |
 
 **Source documents (don't copy from them, link to them):**
 
@@ -168,8 +168,8 @@ Each milestone ends with a PR from `feature/ekp-ws-e` into `dev`, opened one wor
 | `E-M2` | **Milestone PR + demo: Video with transcript** (due Fri 13 Nov) | `DONE` | Johurul | `E-6`–`E-9` | #39 | 2026-11-12 | 2026-11-14 |
 | `E-10` | E-M3 · E11.3: transcription fallback (provider interface, F5 setting, ≤ 25 MB pieces, progress, cost log) | `DONE` | Johurul | `E-M2` | #39 | 2026-11-13 | 2026-11-14 |
 | `E-11` | E-M3 · E11.7: topic segments + chapter list | `DONE` | Johurul | `E-8` | #39 | 2026-11-13 | 2026-11-14 |
-| `E-12` | E-M3 · **`A-16`**: SAML 2.0 via embedded SAML Jackson + `BoxyHQSAMLProvider` (RFP §6 S2) | `IN_PROGRESS` | Johurul | `E-1` | | 2026-11-18 | |
-| `E-M3` | **Milestone PR + demo: Transcription, chapters, SAML** (due Fri 20 Nov) | `IN_PROGRESS` | Johurul | `E-10`–`E-12` | | 2026-11-13 | |
+| `E-12` | E-M3 · **`A-16`**: SAML 2.0 via embedded SAML Jackson + `BoxyHQSAMLProvider` (RFP §6 S2) | `DONE` | Johurul | `E-1` | #40 | 2026-11-18 | 2026-11-19 |
+| `E-M3` | **Milestone PR + demo: Transcription, chapters, SAML** (due Fri 20 Nov) | `DONE` | Johurul | `E-10`–`E-12` | #39, #40 | 2026-11-13 | 2026-11-19 |
 | `E-13` | E-M4 · Schema: `thumbnailPath`, `AssetTemplate`, `AssetTemplateVersion`, `Document.templateVersionId`, `assetData` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
 | `E-14` | E-M4 · E11.2: images, OCR + vision caption | `TODO` | Johurul | `E-M3` | | | |
 | `E-15` | E-M4 · E13: thumbnails (PDF, PPTX, image, video) + in-app previews | `TODO` | Johurul | `E-13` | | | |
