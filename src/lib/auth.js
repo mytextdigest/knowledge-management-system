@@ -56,6 +56,10 @@ const samlProviders = isSamlAvailable()
         // issue an ID token and needs JWT signing keys. KMS reads the user
         // from userinfo instead.
         authorization: { params: { scope: "email profile" } },
+        // NextAuth's server calls token and userinfo, each several queries in
+        // Jackson's database (~3.5 s from a laptop far from the database;
+        // NextAuth's default limit is 3.5 s).
+        httpOptions: { timeout: 15_000 },
         token: `${samlInternalBase}/api/oauth/token`,
         userinfo: `${samlInternalBase}/api/oauth/userinfo`,
       }),
