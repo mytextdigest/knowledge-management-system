@@ -154,6 +154,7 @@ test("protocol setting", () => {
 test("sign-in wiring: one signIn path for both protocols, tenant check first", () => {
   const auth = read("src/lib/auth.js");
   assert.match(auth, /BoxyHQSAMLProvider\(/);
+  assert.match(auth, /authorization: \{ params: \{ scope: "email profile" \} \}/, "no openid scope (see the round trip)");
   assert.match(auth, /samlTenantMatches\(profile, claims\)[\s\S]*resolveEntraSignIn\(claims, \{ protocol \}\)/);
   assert.match(auth, /token\.entraOid = claims\.oid/);
 
@@ -250,7 +251,9 @@ test("full SAML round trip: AuthnRequest → signed response → code → token 
   const verifier = crypto.randomBytes(32).toString("base64url");
   const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
   const callback = samlCallbackUrl(ENV);
-  const { redirect_url } = await jackson.oauthController.authorize({
+  // With openid-client's default scope ("openid") Jackson wants JWT signing
+  // keys and sends an error back instead of going to Microsoft.
+  const authorizeReq = {
     client_id: "dummy",
     tenant: TENANT,
     product: SAML_PRODUCT,
@@ -259,7 +262,11 @@ test("full SAML round trip: AuthnRequest → signed response → code → token 
     state: "nextauth-state",
     code_challenge: challenge,
     code_challenge_method: "S256",
-  });
+  };
+  const withOpenid = await jackson.oauthController.authorize({ ...authorizeReq, scope: "openid" });
+  assert.equal(new URL(withOpenid.redirect_url).searchParams.get("error"), "server_error");
+
+  const { redirect_url } = await jackson.oauthController.authorize({ ...authorizeReq, scope: "email profile" });
   const toIdp = new URL(redirect_url);
   assert.equal(toIdp.origin + toIdp.pathname, `https://login.microsoftonline.com/${TENANT}/saml2`);
   const relayState = toIdp.searchParams.get("RelayState");

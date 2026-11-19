@@ -52,6 +52,10 @@ const samlProviders = isSamlAvailable()
         issuer: samlBase,
         clientId: "dummy", // Jackson finds the connection by tenant + product
         clientSecret: process.env.SAML_JACKSON_CLIENT_SECRET_VERIFIER,
+        // No "openid" scope (openid-client's default): with it Jackson would
+        // issue an ID token and needs JWT signing keys. KMS reads the user
+        // from userinfo instead.
+        authorization: { params: { scope: "email profile" } },
         token: `${samlInternalBase}/api/oauth/token`,
         userinfo: `${samlInternalBase}/api/oauth/userinfo`,
       }),
