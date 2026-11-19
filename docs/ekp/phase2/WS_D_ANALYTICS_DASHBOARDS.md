@@ -153,10 +153,10 @@ Each milestone ends with a PR from `feature/ekp-ws-d` into `dev`, opened one wor
 | `D-6` | D-M2 · F3 job `analytics.rollup` into `AnalyticsDaily` (idempotent) | `DONE` | Simran | `D-M1` | #37 | 2026-11-11 | 2026-11-16 |
 | `D-7` | D-M2 · Usage tab: five E29 metrics, by department/role, Performance card, CSV | `DONE` | Simran | `D-6` | #37 | 2026-11-11 | 2026-11-16 |
 | `D-M2` | **Milestone PR + demo: Usage & adoption dashboard** (due Fri 13 Nov) | `DONE` | Simran | `D-6`, `D-7` | #37 | 2026-11-11 | 2026-11-16 |
-| `D-8` | D-M3 · F3 job `links.check` + `DocumentLink`; deleted SharePoint sources count as broken | `TODO` | Simran | `D-M2` | | | |
-| `D-9` | D-M3 · Content health tab (incl. setting `Document.contentUpdatedAt` in upload/replace/restore/sync + back-fill script): recency, ownership, review status, broken links, duplicates, completeness, drill-through | `TODO` | Simran | `D-8` | | | |
-| `D-13` | D-M3 · Offline search evaluation set + runner (with Sandeep, needed by `C-11`) | `TODO` | Simran + Sandeep | `D-3` | | | |
-| `D-M3` | **Milestone PR + demo: Content health dashboard** (due Fri 20 Nov) | `TODO` | Simran | `D-8`, `D-9`, `D-13` | | | |
+| `D-8` | D-M3 · F3 job `links.check` + `DocumentLink`; deleted SharePoint sources count as broken | `IN_PROGRESS` | Simran | `D-M2` | | | |
+| `D-9` | D-M3 · Content health tab (incl. setting `Document.contentUpdatedAt` in upload/replace/restore/sync + back-fill script): recency, ownership, review status, broken links, duplicates, completeness, drill-through | `IN_PROGRESS` | Simran | `D-8` | | | |
+| `D-13` | D-M3 · Offline search evaluation set + runner (with Sandeep, needed by `C-11`) | `IN_PROGRESS` | Simran + Sandeep | `D-3` | | | |
+| `D-M3` | **Milestone PR + demo: Content health dashboard** (due Fri 20 Nov) | `IN_PROGRESS` | Simran | `D-8`, `D-9`, `D-13` | | | |
 | `D-10` | D-M4 · Search quality tab: CTR@k, reformulation, dwell, low-confidence share, feedback; gaps linked to queries | `TODO` | Simran | `D-M3` | | | |
 | `D-11` | D-M4 · Reporting API + org reporting key + `POWER_BI_SETUP.md` (A5) | `TODO` | Simran | `D-6` | | | |
 | `D-12` | D-M4 · Permission tests for all analytics and reporting endpoints | `TODO` | Simran | `D-10`, `D-11` | | | |
@@ -175,3 +175,7 @@ Add a dated note when a task changes the design (e.g. `2026-11-04 · D-3: chat r
 - `2026-11-16 · D-6 (AnalyticsDaily layout):` one row per (date, department or `all`, metric) with `sourceSystem = all`. Additive counts (`events`, `searches`, `questions`, `clickedSearches`, `bouncedSearches`, `timeToAnswerCount`/`SumMs`, `latencyCount`/`SumMs`) can be summed over days and departments, and rates are derived from them; `activeUsers` and the p50/p95 rows are per day only. `dims.byRole` holds the same metric per searcher role, which is how the role filter works without a role column in the unique key. Departments with no activity on a day have no rows. Run-now/back-fill: `node scripts/ekp/p2/d6-analytics-rollup.mjs --org <id> [--days 90] [--apply]`.
 - `2026-11-16 · D-4 items moved from D-M1, now done:` event logging is fire-and-forget (the id is generated up front, the insert runs after the response through Next.js `after()`); chat citation clicks are recorded with their rank among the answer's document citations and the locator as `chunkRef`; dwell time: a repository result opened in the document viewer adds its visible reading time to `SearchClick.dwellSeconds` (capped at 1,200 s; short visits count here, unlike the 15 s floor for `DocumentInteraction`). Chat citations open a side panel, so they have no dwell yet.
 - `2026-11-16 · D-M2 demo data:` `node scripts/ekp/p2/d7-seed-usage-week.mjs --org <id> [--apply | --remove]` adds a deterministic week of searches, questions and clicks by the org's real members (marked `filters.synthetic = "d-m2-demo"`), then rolls the days up; `--remove` takes them out again.
+
+- `2026-11-18 · D-M3 implementation candidate:` Added bounded link-check job, content-health API/UI and offline evaluation runner. Automated tests and reviewer acceptance remain outstanding; no shared database migration executed. Link checks intentionally do not follow redirects and block internal targets.
+
+- `2026-11-18 · D-M3 implementation candidate:` Added bounded link-check job, content-health API/UI and offline evaluation runner. Automated tests and reviewer acceptance remain outstanding; no shared database migration executed. Link checks intentionally do not follow redirects and block internal targets.

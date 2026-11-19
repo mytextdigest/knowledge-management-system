@@ -1,7 +1,7 @@
 // EKP Workstream A, F3: the scheduled job registry. Each entry is one kind of
 // job; the worker's scheduler (worker/scheduler.js) runs it per org on its
-// interval, and Settings → Scheduled jobs lets a super admin turn it on, set
-// the interval and run it now. See WS_A_M365_CONNECTORS.md §3.3.
+// interval, and Settings â†’ Scheduled jobs lets a super admin turn it on, set
+// the interval and run it now. See WS_A_M365_CONNECTORS.md Â§3.3.
 //
 // Imported by both the worker (plain Node) and the web app, so it must only
 // use relative imports, never "@/...".
@@ -25,6 +25,7 @@ import { scanDueReviews } from "../governance/reviewScan.js";
 import { scanStaleContent } from "../governance/staleScan.js";
 import { purgeDeletedDocuments } from "../lifecycle/purgeDeleted.js";
 import { rollupUsageRange } from "../analytics/rollup.mjs";
+import { scanDocumentLinks } from "../analytics/linkHealth.mjs";
 
 // A-22: down to 5 minutes (NFR-6, NYPA Q&A #99: changes within 5 minutes).
 export const INTERVAL_CHOICES = [5, 15, 30, 60, 240, 720, 1440];
@@ -78,6 +79,15 @@ async function queueSync({ prisma, orgId, enqueue, provider, name }) {
 }
 
 export const JOB_DEFINITIONS = {
+  "links.check": {
+    label: "Document link health",
+    description: "Checks external document URLs for broken links; private/internal addresses are never requested.",
+    defaultIntervalMinutes: 1440,
+    minIntervalMinutes: 60,
+    lockMinutes: 60,
+    appliesTo: () => true,
+    run: ({ prisma, orgId }) => scanDocumentLinks(prisma, { orgId }),
+  },
   // D-6: daily usage metrics into AnalyticsDaily. Recomputes the last 3 UTC
   // days each run so late clicks and follow-ups are counted.
   "analytics.rollup": {
@@ -152,7 +162,7 @@ export const JOB_DEFINITIONS = {
   },
 
   // B-9/B-24 (E23.4): permanently remove deleted documents once their
-  // retention period (Settings → Governance, retention.deletedDays) has
+  // retention period (Settings â†’ Governance, retention.deletedDays) has
   // passed. "Never purge" (null) makes this a no-op.
   "documents.purge-deleted": {
     label: "Purge deleted documents",
