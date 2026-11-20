@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { serializeJob, validateJobPatch } from "@/lib/jobs/jobAdmin";
 import { logAudit } from "@/lib/auditLog";
+import { wakeScheduler } from "@/lib/jobs/wakeScheduler";
 
 // EKP F3: turn a scheduled job on/off or change its interval. super_admin only.
 export async function PATCH(req, { params }) {
@@ -21,6 +22,8 @@ export async function PATCH(req, { params }) {
   if (error) return NextResponse.json({ error }, { status: 400 });
 
   const updated = await prisma.scheduledJob.update({ where: { id: job.id }, data });
+  // The worker sleeps until the next job is due: let it see the new schedule.
+  if (updated.enabled) await wakeScheduler();
   await logAudit({
     orgId,
     actorUserId: user.id,

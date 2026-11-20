@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getJackson } from "@/lib/sso/jackson";
+import { getJacksonForSignIn } from "@/lib/sso/jackson";
 import { htmlResponse, readParams, signInError } from "@/lib/sso/jacksonRoutes";
 
 // EKP E-12: the Reply URL (Assertion Consumer Service). Microsoft posts the
@@ -17,7 +17,7 @@ export async function POST(req) {
   if (!SAMLResponse) return signInError(req);
   if (!RelayState) return signInError(req, "SamlStartAtKms");
   try {
-    const { oauthController } = await getJackson();
+    const { oauthController } = await getJacksonForSignIn();
     const { redirect_url, response_form, error } = await oauthController.samlResponse({ SAMLResponse, RelayState });
     if (redirect_url) return NextResponse.redirect(redirect_url, 302);
     if (response_form) return htmlResponse(response_form);

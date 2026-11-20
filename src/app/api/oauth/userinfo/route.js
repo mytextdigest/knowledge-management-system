@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getJackson, jacksonError } from "@/lib/sso/jackson";
+import { getJacksonForSignIn, jacksonError } from "@/lib/sso/jackson";
 
 // EKP E-12: NextAuth's server reads the signed-in user's SAML attributes.
 
@@ -9,7 +9,7 @@ export async function GET(req) {
   const token = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") || "")?.[1];
   if (!token) return NextResponse.json({ error: "invalid_token" }, { status: 401 });
   try {
-    const { oauthController } = await getJackson();
+    const { oauthController } = await getJacksonForSignIn();
     return NextResponse.json(await oauthController.userInfo(token), { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     const { status, message } = jacksonError(err);

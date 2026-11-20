@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { exchangeCode, getJackson, jacksonError } from "@/lib/sso/jackson";
+import { exchangeCode, getJacksonForSignIn, jacksonError } from "@/lib/sso/jackson";
 import { readParams } from "@/lib/sso/jacksonRoutes";
 
 // EKP E-12: NextAuth's server swaps the one-time code for a token (PKCE and
@@ -18,7 +18,7 @@ export async function POST(req) {
       params.client_id ??= decodeURIComponent(decoded.slice(0, i));
       params.client_secret = decodeURIComponent(decoded.slice(i + 1));
     }
-    const { oauthController } = await getJackson();
+    const { oauthController } = await getJacksonForSignIn();
     return NextResponse.json(await exchangeCode(oauthController, params), { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     const { status, message } = jacksonError(err);
