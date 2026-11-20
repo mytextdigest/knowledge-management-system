@@ -129,6 +129,24 @@ export function samlServiceProviderUrls({ baseUrl, audience } = {}) {
  * tables) and a small pool. Needs Neon's direct (unpooled) URL: the pooler
  * rejects the search_path startup option.
  */
+/**
+ * Do two Postgres URLs reach the same database? Neon's pooled host
+ * ("ep-x-pooler.…") and direct host ("ep-x.…") count as one.
+ */
+export function sameDatabase(a, b) {
+  const key = (url) => {
+    try {
+      const u = new URL(url);
+      const host = u.hostname.toLowerCase().replace(/^([^.]+)-pooler\./, "$1.");
+      return `${host}:${u.port || "5432"}${u.pathname}`;
+    } catch {
+      return null;
+    }
+  };
+  const ka = key(a);
+  return Boolean(ka) && ka === key(b);
+}
+
 export function jacksonDatabaseUrl(url, { maxConnections = 2 } = {}) {
   const parsed = new URL(url);
   parsed.searchParams.set("options", "-c search_path=jackson");

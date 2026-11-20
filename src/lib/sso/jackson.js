@@ -16,7 +16,7 @@
 //
 // Relative imports only: also used by the setup script.
 
-import { jacksonDatabaseUrl, samlServiceProviderUrls, SAML_ACS_PATH, SAML_PRODUCT, SAML_PROVIDER_ID } from "./samlClaims.js";
+import { jacksonDatabaseUrl, sameDatabase, samlServiceProviderUrls, SAML_ACS_PATH, SAML_PRODUCT, SAML_PROVIDER_ID } from "./samlClaims.js";
 
 /** SAML isn't configured on this deployment (env missing). */
 export class SamlUnavailable extends Error {}
@@ -31,6 +31,14 @@ export function isSamlAvailable(env = process.env) {
 /** Identifier and Reply URL for this deployment. */
 export function serviceProviderUrls(env = process.env) {
   return samlServiceProviderUrls({ baseUrl: env.NEXTAUTH_URL, audience: env.SAML_AUDIENCE });
+}
+
+/**
+ * Are expired sign-in records removed at each sign-in step instead of by
+ * Jackson's timer? Only when Prisma reaches Jackson's database.
+ */
+export function sweepsOnSignIn(env = process.env) {
+  return sameDatabase(env.SAML_JACKSON_DB_URL, env.DATABASE_URL);
 }
 
 /** Jackson's options. `manualMigration: false` only from the setup script. */
@@ -50,9 +58,16 @@ export function jacksonOptions({ env = process.env, manualMigration = true } = {
       url: jacksonDatabaseUrl(env.SAML_JACKSON_DB_URL),
       encryptionKey: env.SAML_JACKSON_ENCRYPTION_KEY,
       manualMigration,
-      // Sign-in sessions and codes expire; clean up a few at a time.
+      // Sign-in sessions, codes and tokens are valid for 5 minutes. Jackson
+      // never checks expiry when reading them: only deleting expired rows
+      // ends them. Its own sweep runs every `ttl` seconds for the life of the
+      // server, which kept Neon (suspends after 5 idle minutes) awake. So
+      // when Prisma reaches the same database, getJacksonForSignIn deletes
+      // expired rows before each sign-in step and the timer is off (Jackson
+      // logs "ttl cleanup not enabled" once at start). Otherwise its sweep
+      // stays on.
       ttl: 300,
-      cleanupLimit: 100,
+      cleanupLimit: sweepsOnSignIn(env) ? undefined : 100,
     },
     clientSecretVerifier: env.SAML_JACKSON_CLIENT_SECRET_VERIFIER,
     // Only logins started from KMS (SP-initiated). Decided (Johurul, 2026-11-18).
@@ -81,6 +96,36 @@ export async function getJackson() {
       });
   }
   return cache.__kmsJackson;
+}
+
+/**
+ * Delete Jackson's expired records (sign-in sessions, codes, tokens, failed
+ * sign-in traces): the same as Jackson's own sweep, in one statement. Uses
+ * the database clock; Jackson writes expiry from the app's clock.
+ */
+export async function removeExpiredSignInRecords(db) {
+  return db.$executeRaw`
+    WITH expired AS (
+      DELETE FROM jackson.jackson_ttl
+      WHERE "expiresAt" <= (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint
+      RETURNING key
+    )
+    DELETE FROM jackson.jackson_store WHERE key IN (SELECT key FROM expired)
+  `;
+}
+
+/**
+ * Jackson for a sign-in step (/api/oauth/*): expired records are deleted
+ * first, so an expired session, code or token can't be used. Throws if that
+ * fails, so a sign-in never proceeds with expiry unchecked.
+ */
+export async function getJacksonForSignIn() {
+  const jackson = await getJackson();
+  if (sweepsOnSignIn()) {
+    const { prisma } = await import("../prisma.mjs");
+    await removeExpiredSignInRecords(prisma);
+  }
+  return jackson;
 }
 
 /** A Jackson error as { status, message } for a route response. */

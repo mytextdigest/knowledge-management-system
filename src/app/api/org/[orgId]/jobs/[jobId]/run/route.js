@@ -4,9 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { serializeJob } from "@/lib/jobs/jobAdmin";
 import { logAudit } from "@/lib/auditLog";
+import { wakeScheduler } from "@/lib/jobs/wakeScheduler";
 
-// EKP F3: "Run now". The worker's scheduler picks it up at its next tick
-// (within a minute), even if the job is turned off. super_admin only.
+// EKP F3: "Run now". The app wakes the worker's scheduler, which runs it
+// within seconds, even if the job is turned off. super_admin only.
 export async function POST(req, { params }) {
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -19,6 +20,7 @@ export async function POST(req, { params }) {
   if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
 
   const updated = await prisma.scheduledJob.update({ where: { id: job.id }, data: { runRequestedAt: new Date() } });
+  await wakeScheduler();
   await logAudit({ orgId, actorUserId: user.id, action: "jobs.run_requested", metadata: { job: job.name } });
   return NextResponse.json({ job: serializeJob(updated) });
 }

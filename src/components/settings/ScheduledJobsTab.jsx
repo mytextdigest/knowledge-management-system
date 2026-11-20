@@ -145,7 +145,7 @@ export default function ScheduledJobsTab({ orgId }) {
                   className="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
                 >
                   <Play className="h-3.5 w-3.5" />
-                  {job.runRequested ? 'Queued (within a minute)' : 'Run now'}
+                  {job.runRequested ? 'Queued (starts within seconds)' : 'Run now'}
                 </button>
               </div>
               {job.lastStatus === 'failed' && job.lastError && (

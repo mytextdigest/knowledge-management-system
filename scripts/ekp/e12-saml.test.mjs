@@ -15,6 +15,7 @@ import {
   claimsFromSamlProfile,
   entityIdFromMetadata,
   jacksonDatabaseUrl,
+  sameDatabase,
   samlServiceProviderUrls,
   samlTenantMatches,
   tenantIdFromEntraEntityId,
@@ -26,6 +27,7 @@ import {
   getSamlConnection,
   isSamlAvailable,
   jacksonOptions,
+  removeExpiredSignInRecords,
   saveSamlConnection,
   samlCallbackUrl,
   SamlUnavailable,
@@ -142,6 +144,61 @@ test("Jackson's options: SP-initiated only, no analytics, no schema changes from
   assert.equal(opts.samlAudience, "http://localhost:3000");
   assert.equal(opts.ssoTraces.redact, true);
   assert.equal(samlCallbackUrl(ENV), "http://localhost:3000/api/auth/callback/boxyhq-saml");
+});
+
+test("expired sign-in records: swept per sign-in step when Prisma reaches Jackson's database, else Jackson's timer", () => {
+  const neonDirect = "postgresql://u:p@ep-cold-shape-x.c-8.us-east-2.aws.neon.tech/neondb?sslmode=require";
+  const neonPooled = "postgresql://u:p@ep-cold-shape-x-pooler.c-8.us-east-2.aws.neon.tech/neondb?sslmode=require";
+  assert.equal(sameDatabase(neonDirect, neonPooled), true, "Neon pooled and direct hosts are one database");
+  assert.equal(sameDatabase("postgresql://a:b@localhost:5432/kms", "postgresql://c:d@localhost/kms"), true);
+  assert.equal(sameDatabase(neonDirect, neonPooled.replace("/neondb", "/other")), false);
+  assert.equal(sameDatabase(neonDirect, "postgresql://u:p@ep-other.c-8.us-east-2.aws.neon.tech/neondb"), false);
+  assert.equal(sameDatabase(neonDirect, undefined), false);
+  assert.equal(sameDatabase("not a url", "not a url"), false);
+
+  // Same database: no 5-minute timer (it kept Neon awake); expiry unchanged.
+  const shared = jacksonOptions({ env: { ...ENV, SAML_JACKSON_DB_URL: neonDirect, DATABASE_URL: neonPooled } });
+  assert.equal(shared.db.cleanupLimit, undefined);
+  assert.equal(shared.db.ttl, 300);
+  // Prisma elsewhere (or unset): Jackson's own sweep stays on, so codes still expire.
+  const separate = jacksonOptions({ env: ENV });
+  assert.equal(separate.db.cleanupLimit, 100);
+  assert.equal(separate.db.ttl, 300);
+
+  for (const route of ["authorize", "saml", "token", "userinfo"]) {
+    const src = read(`src/app/api/oauth/${route}/route.js`);
+    assert.match(src, /getJacksonForSignIn\(\)/, `${route} sweeps expired records first`);
+    assert.doesNotMatch(src, /getJackson\(\)/, `${route} never skips the sweep`);
+  }
+});
+
+test("removeExpiredSignInRecords against the database (EKP_DB_TESTS=1)", { skip: process.env.EKP_DB_TESTS !== "1" }, async () => {
+  const { PrismaClient } = await import("@prisma/client");
+  const prisma = new PrismaClient();
+  const ROLLBACK = Symbol("rollback");
+  const tag = `e12-sweep-${Date.now()}`;
+  try {
+    await prisma.$transaction(async (db) => {
+      for (const [suffix, expiresAt] of [["old", Date.now() - 60_000], ["live", Date.now() + 300_000]]) {
+        const key = `${tag}-${suffix}`;
+        await db.$executeRaw`INSERT INTO jackson.jackson_store (key, value, namespace) VALUES (${key}, 'x', 'oauth:code')`;
+        await db.$executeRaw`INSERT INTO jackson.jackson_index (key, "storeKey") VALUES (${`${key}-idx`}, ${key})`;
+        await db.$executeRaw`INSERT INTO jackson.jackson_ttl (key, "expiresAt") VALUES (${key}, ${BigInt(expiresAt)})`;
+      }
+      await removeExpiredSignInRecords(db);
+      const left = await db.$queryRaw`SELECT key FROM jackson.jackson_store WHERE key LIKE ${`${tag}%`} ORDER BY key`;
+      assert.deepEqual(left.map((r) => r.key), [`${tag}-live`], "expired record gone, live one kept");
+      const ttl = await db.$queryRaw`SELECT key FROM jackson.jackson_ttl WHERE key LIKE ${`${tag}%`}`;
+      assert.deepEqual(ttl.map((r) => r.key), [`${tag}-live`]);
+      const idx = await db.$queryRaw`SELECT key FROM jackson.jackson_index WHERE key LIKE ${`${tag}%`}`;
+      assert.deepEqual(idx.map((r) => r.key), [`${tag}-live-idx`], "its index rows go with it");
+      throw ROLLBACK;
+    });
+  } catch (err) {
+    if (err !== ROLLBACK) throw err;
+  } finally {
+    await prisma.$disconnect();
+  }
 });
 
 test("protocol setting", () => {
