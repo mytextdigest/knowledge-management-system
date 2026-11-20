@@ -66,10 +66,10 @@ export default function ChangePasswordPage() {
             <Button
               variant=""
               className="flex items-center gap-2 text-sm"
-              onClick={() => router.push("/dashboard")}
+              onClick={() => router.push("/welcome-back")}
             >
               <ArrowLeft className="h-4 w-4" />
-              Back to dashboard
+              Back
             </Button>
           </div>
 

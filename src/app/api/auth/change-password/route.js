@@ -1,5 +1,5 @@
 import { getServerSession } from "next-auth";
-import { authOptions } from "../[...nextauth]/route";
+import { authOptions } from "@/lib/auth";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 

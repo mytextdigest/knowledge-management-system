@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Lock, ShieldCheck } from "lucide-react";
+import { Lock, ShieldCheck, Eye, EyeOff } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -20,6 +20,8 @@ export default function ResetPasswordClient() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const submit = async () => {
     if (password !== confirm) {
@@ -63,22 +65,40 @@ export default function ResetPasswordClient() {
             maxLength={6}
           />
 
-          <div className="relative">
-            <Lock className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-            <Input
-              type="password"
-              className="pl-10"
-              placeholder="New password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
+          <Input
+            type={showPassword ? "text" : "password"}
+            placeholder="New password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            leftIcon={<Lock className="h-5 w-5" />}
+            rightIcon={
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                tabIndex={-1}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
+            }
+          />
 
           <Input
-            type="password"
+            type={showConfirm ? "text" : "password"}
             placeholder="Confirm new password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
+            leftIcon={<Lock className="h-5 w-5" />}
+            rightIcon={
+              <button
+                type="button"
+                onClick={() => setShowConfirm((v) => !v)}
+                tabIndex={-1}
+                aria-label={showConfirm ? "Hide password" : "Show password"}
+              >
+                {showConfirm ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
+            }
           />
 
           {error && <p className="text-red-600 text-sm text-center">{error}</p>}

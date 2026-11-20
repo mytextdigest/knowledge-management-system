@@ -6,6 +6,7 @@ import { Bot, User, X, Sparkles } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/Card"
 import MessageActions from "@/components/chat/MessageActions"
 import { cn } from "@/lib/utils"
+import MarkdownMessage from "@/components/chat/MarkdownMessage"
 
 export default function ExpandedMessageModal({
   open,
@@ -167,6 +168,7 @@ export default function ExpandedMessageModal({
                 <MessageActions
                   content={message.content}
                   showExpand={false}
+                  align="right"
                 />
               </div>
 
@@ -176,9 +178,12 @@ export default function ExpandedMessageModal({
                 {/* Scroll container */}
                 <div className="max-h-[60vh] overflow-y-auto pr-2">
 
-                  <div
+                  <MarkdownMessage
+                    variant="rich"
+                    content={message.content}
+                    citations={message.citations}
                     className={cn(
-                      "whitespace-pre-wrap leading-relaxed text-gray-800 dark:text-gray-200",
+                      "leading-relaxed text-gray-800 dark:text-gray-200",
                       {
                         "text-sm": fontSize === "sm",
                         "text-base": fontSize === "md",
@@ -186,9 +191,7 @@ export default function ExpandedMessageModal({
                         "text-xl": fontSize === "xl",
                       }
                     )}
-                  >
-                    {message.content}
-                  </div>
+                  />
 
                 </div>
 

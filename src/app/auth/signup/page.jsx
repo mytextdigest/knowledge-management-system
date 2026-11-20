@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Mail, Lock, EyeOff, Eye } from "lucide-react";
+import { startMicrosoftSignIn } from "@/lib/sso/startMicrosoftSignIn";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -37,8 +38,19 @@ export default function SignupPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      if (res.status === 201) {
-        router.push(`/auth/verify-otp?email=${encodeURIComponent(email)}`);
+      if (res.status === 409) {
+        // EKP A-5: this email's organization uses Microsoft sign-in.
+        const data = await res.json().catch(() => ({}));
+        if (data.useMicrosoft) {
+          await startMicrosoftSignIn({ callbackUrl: "/welcome-back", email, target: data });
+          return;
+        }
+      }
+
+      if (res.ok) {
+        const data = await res.json();
+        const mode = data.existingAccount ? "existing" : "new";
+        router.push(`/auth/verify-otp?email=${encodeURIComponent(email)}&mode=${mode}`);
       } else {
         const msg = await res.text();
         setError(msg || "Signup failed");

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+import { resolveProjectManagementAccess } from "@/lib/projectManagementPolicy";
 
 const sqs = new SQSClient({ region: process.env.AWS_REGION });
 
@@ -15,12 +16,10 @@ export async function POST(req, { params }) {
 
   const { id: projectId } = await params;
 
-  // Verify project ownership
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, user: { email: session.user.email } },
-    select: { id: true },
-  });
+  const { project, canManage } =
+    await resolveProjectManagementAccess(session.user.email, projectId);
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   // Find ready documents with no topic assignment
   const unassigned = await prisma.document.findMany({

@@ -1,0 +1,7 @@
+Infra Planning Notes
+
+We could use Redis for the session cache, but it's worth comparing against Memcached before committing to anything. Redis would give us more flexibility with data structures, though it's a bit heavier operationally.
+
+Should we move the session store to a managed service instead of running it ourselves? That's still an open question and we don't have enough information yet to say either way.
+
+We might explore a small pilot with Redis in staging at some point, just to get a feel for it, but nothing has been scheduled and this isn't a commitment either way. If the pilot goes well we could reconsider, but for now this is purely exploratory.

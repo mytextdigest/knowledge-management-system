@@ -1,0 +1,87 @@
+================================================================
+ KMS: AN AI-POWERED ENTERPRISE KNOWLEDGE PLATFORM
+ What it is, how it differs from MTD, and the Tier 1 feature set
+================================================================
+
+
+----------------------------------------------------------------
+1. WHAT IS KMS?
+----------------------------------------------------------------
+
+KMS (Knowledge Management System) is an AI-powered Enterprise
+Knowledge Management System — the organization's long-term memory.
+
+  - Search & Ask
+    Employees search and ask natural-language questions across
+    the org's knowledge.
+
+  - Understands Content
+    AI reads and reasons about documents — not just storage
+    and file names.
+
+  - Discovers Expertise
+    Surfaces who knows what, and connects related knowledge
+    automatically.
+
+  - Covers Everything
+    Policies, SOPs, reports, meeting notes, research — knowledge
+    accumulated over years.
+
+
+----------------------------------------------------------------
+2. HOW IS KMS DIFFERENT FROM MTD?
+----------------------------------------------------------------
+
+MTD (My Text Digest)
+  - Per-user document summarization tool
+  - Personal, individual workflow
+  - Manual summarization only
+  - No org structure — no departments, projects, or roles
+  - No cross-document intelligence
+
+KMS
+  - Org-wide Enterprise Knowledge Management System
+  - Multi-tenant: orgs, departments, projects, RBAC roles
+  - Automated ingestion (e.g. SharePoint sync) + auto-classification
+  - Cross-document reasoning, summarization, org-wide AI chat
+  - Relationship/expertise discovery + knowledge health monitoring
+
+Note: Same underlying stack (Next.js, Prisma, AWS) — different
+product direction, built as a greenfield platform.
+
+
+----------------------------------------------------------------
+3. TIER 1 FEATURES — IN ORDER OF IMPORTANCE
+----------------------------------------------------------------
+
+  1. Conversational Knowledge Assistant
+     Org-wide AI chat with streaming, citations & confidence
+     scoring.
+
+  2. Semantic Knowledge Retrieval
+     Vector-based search across all organizational content.
+
+  3. Automated Knowledge Ingestion Pipeline
+     Auto-sync from sources like SharePoint into a unified
+     review queue.
+
+  4. Automatic Knowledge Classification
+     Auto-categorizes documents, flags duplicates & suggests
+     department.
+
+  5. Cross-Document Reasoning
+     Auto-organizes related documents into Topics.
+
+  6. Knowledge Summarization
+     AI-generated summaries for every document.
+
+  7. Enterprise Knowledge Repository
+     Org / department / project structure for all knowledge.
+
+  8. Knowledge Context Engine
+     Related-document & expert discovery across the org.
+
+
+================================================================
+ Knowledge Management System (KMS) — Tier 1 Overview
+================================================================

@@ -1,8 +1,7 @@
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
-import { getUserSubscription, isSubscriptionActive } from "@/lib/subscription";
-import { getUserOpenAIKey } from "@/utils/key_helper";
+import { prisma } from "@/lib/prisma";
 
 export default async function AppLayout({ children }) {
   const session = await getServerSession(authOptions);
@@ -11,15 +10,16 @@ export default async function AppLayout({ children }) {
     redirect("/auth/signin");
   }
 
-  const subscription = await getUserSubscription(session.user.id);
+  const membershipCount = await prisma.organizationMember.count({
+    where: { userId: session.user.id },
+  });
 
-  if (!isSubscriptionActive(subscription)) {
-    redirect("/subscribe");
-  }
-
-  const apiKey = await getUserOpenAIKey(session.user.id);
-  if (!apiKey) {
-    redirect("/setup");
+  // No org yet — every workspace lives inside an organization now, so this
+  // is the mandatory first stop. Subscription/API-key checks are per-org
+  // (see (app)/org/[orgId]/layout.jsx), not global, since one org's lapsed
+  // billing shouldn't lock a user out of their other orgs.
+  if (membershipCount === 0) {
+    redirect("/onboarding/start");
   }
 
   return <>{children}</>;
