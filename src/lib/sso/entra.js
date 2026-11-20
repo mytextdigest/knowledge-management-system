@@ -19,6 +19,8 @@ export const SSO_ERRORS = {
   NO_EMAIL: "SsoNoEmail",
   DOMAIN_NOT_ALLOWED: "SsoDomainNotAllowed",
   NOT_INVITED: "SsoNotInvited",
+  // E-12 follow-up: the org signs in only through its own SAML app.
+  USE_SAML: "SsoUseSaml",
 };
 
 export class SsoError extends Error {
@@ -59,6 +61,10 @@ export async function resolveEntraSignIn(
   // Only tenants an org has connected may sign in.
   const config = await db.orgSsoConfig.findUnique({ where: { tenantId } });
   if (!config || !config.enabled) throw new SsoError(SSO_ERRORS.NOT_CONFIGURED);
+  // Decided (Johurul, 2026-11-20): an org set to SAML signs in only through
+  // its SAML app, so its Conditional Access on that app can't be bypassed
+  // through the KMS Sign-in app (OIDC).
+  if (config.protocol === "saml" && protocol !== "saml") throw new SsoError(SSO_ERRORS.USE_SAML);
 
   const email = emailFromClaims(claims);
   if (!email) throw new SsoError(SSO_ERRORS.NO_EMAIL);

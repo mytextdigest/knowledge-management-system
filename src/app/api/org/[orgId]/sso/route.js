@@ -5,10 +5,13 @@ import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 import { serializeSsoConfig, validateSsoSettingsPatch } from "@/lib/sso/ssoSettings";
 import { logAudit } from "@/lib/auditLog";
 import { deleteSamlConnection, describeConnection, getSamlConnection, isSamlAvailable, serviceProviderUrls } from "@/lib/sso/jackson";
+import { hasSignInAppConsent } from "@/lib/sso/entraGraph";
 
 // EKP A-5: an org's Microsoft sign-in settings. super_admin only.
 // E-12: also the SAML part (protocol, the org's SAML connection); the
-// metadata upload itself is ./saml/route.js.
+// metadata upload itself is ./saml/route.js. An org can also be set up with
+// SAML only (no consent to the KMS Sign-in app); `signInAppConsent` tells the
+// page whether OIDC and group search are available.
 
 // What the page needs to set up SAML: the two values for Entra, and the
 // stored connection (or null). Never fails the page: SAML is optional.
@@ -40,10 +43,15 @@ export async function GET(req, { params }) {
   if (response) return response;
 
   const config = await prisma.orgSsoConfig.findUnique({ where: { orgId } });
+  const [saml, signInAppConsent] = await Promise.all([
+    samlStatus(config),
+    config ? hasSignInAppConsent(config.tenantId) : false,
+  ]);
   return NextResponse.json({
     ...serializeSsoConfig(config),
     available: Boolean(process.env.ENTRA_SSO_CLIENT_ID),
-    saml: await samlStatus(config),
+    signInAppConsent,
+    saml,
   });
 }
 
@@ -63,6 +71,10 @@ export async function PATCH(req, { params }) {
     const saml = await samlStatus(config);
     if (!saml.available) return NextResponse.json({ error: "SAML sign-in isn't configured on this KMS deployment" }, { status: 400 });
     if (!saml.connection) return NextResponse.json({ error: "Upload your SAML app's metadata before switching to SAML" }, { status: 400 });
+  }
+  // OIDC goes through the KMS Sign-in app, which a SAML-only org never approved.
+  if (data.protocol === "oidc" && !(await hasSignInAppConsent(config.tenantId))) {
+    return NextResponse.json({ error: "Connect Microsoft (approve the KMS Sign-in app) before switching to it" }, { status: 400 });
   }
 
   const updated = await prisma.orgSsoConfig.update({ where: { orgId }, data });

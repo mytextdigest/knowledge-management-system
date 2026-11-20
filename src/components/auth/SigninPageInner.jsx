@@ -20,6 +20,7 @@ const SIGNIN_ERRORS = {
   SsoNoEmail: "Your Microsoft account has no email address KMS can use. Ask your administrator.",
   SsoNotInvited: "Your organization only lets invited people into KMS. Ask your administrator for an invite.",
   SsoFailed: "Microsoft sign-in failed. Please try again.",
+  SsoUseSaml: "Your organization signs in through its own Microsoft SAML app. Enter your work email above and continue.",
   SamlFailed: "Microsoft sign-in (SAML) failed. Please try again, or ask your administrator to check the KMS SAML app.",
   SamlStartAtKms: "Start Microsoft sign-in from this page: enter your work email below.",
   USE_MICROSOFT: "Your organization requires Microsoft sign-in for this email.",
