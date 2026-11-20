@@ -5,6 +5,9 @@ import { validateGroupRoleMap } from "@/lib/sso/groupMapping";
 
 export const PROVISIONING = ["auto", "invite_only"];
 export const PASSWORD_LOGIN = ["admins_only", "all"];
+// E-12: how the org's users are sent to Microsoft. "saml" needs the org's
+// SAML connection (checked by the route, which can see Jackson).
+export const PROTOCOLS = ["oidc", "saml"];
 
 // State older than this can't complete a connect (Microsoft round-trip).
 export const CONNECT_STATE_MAX_AGE_MS = 10 * 60 * 1000;
@@ -37,6 +40,10 @@ export function validateSsoSettingsPatch(body, config, { departmentIds = [] } = 
     const { map, error } = validateGroupRoleMap(body.groupRoleMap, { departmentIds });
     if (error) return { error };
     data.groupRoleMap = map;
+  }
+  if (body.protocol !== undefined) {
+    if (!PROTOCOLS.includes(body.protocol)) return { error: "Invalid protocol" };
+    if (body.protocol !== config.protocol) data.protocol = body.protocol;
   }
   if (body.enabled !== undefined) {
     if (typeof body.enabled !== "boolean") return { error: "enabled must be true or false" };

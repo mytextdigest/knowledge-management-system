@@ -82,7 +82,13 @@ export async function GET(req) {
 
   await prisma.orgSsoConfig.upsert({
     where: { orgId: state.orgId },
-    update: { ...tenant, allowedDomains, enabled: allowedDomains.length > 0 },
+    // E-12: a different tenant can't use the old tenant's SAML app: back to OIDC.
+    update: {
+      ...tenant,
+      allowedDomains,
+      enabled: allowedDomains.length > 0,
+      ...(existing && !sameTenant ? { protocol: "oidc" } : {}),
+    },
     create: { orgId: state.orgId, ...tenant, allowedDomains, enabled: allowedDomains.length > 0 },
   });
 
