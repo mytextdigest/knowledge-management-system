@@ -58,7 +58,7 @@ export async function POST(req, { params }) {
     await tx.document.update({
       where: { id },
       data: {
-        filename, filePath: s3Key, content: null, summary: null, status: "queued",
+        filename, filePath: s3Key, contentUpdatedAt: new Date(), content: null, summary: null, status: "queued",
         category: null, categoryConfidence: null,
         classificationStatus: "pending_classification",
         suggestedDepartmentId: null, departmentSuggestionConfidence: null,

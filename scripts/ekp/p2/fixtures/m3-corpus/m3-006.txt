@@ -1,0 +1,1 @@
+Asset Management: asset inventory and replacement planning. This operational note covers equipment asset lifecycle inventory. Record 6 contains safe, fictional example information for enterprise knowledge retrieval.  The restoration schedule overlaps an earlier draft, forming a near-duplicate example.

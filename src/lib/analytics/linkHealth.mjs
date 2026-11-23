@@ -34,39 +34,74 @@ export async function isSafePublicUrl(raw, resolver = lookup) {
     return records.length > 0 && records.every(r => publicAddress(r.address));
   } catch { return false; }
 }
-export async function checkLink(url, { fetcher = fetch, safe = isSafePublicUrl } = {}) {
-  if (!await safe(url)) return {status:'unknown', httpStatus:null};
+// Each redirect is validated independently to prevent SSRF through Location headers.
+export async function checkLink(url, { fetcher = fetch, safe = isSafePublicUrl, timeoutMs = 4000 } = {}) {
+  if (!await safe(url)) return { status: 'unknown', httpStatus: null };
   for (const method of ['HEAD', 'GET']) {
-    try {
-      const response = await fetcher(url, {method, redirect:'manual', signal:AbortSignal.timeout(10000), headers:{'User-Agent':'KMS-LinkHealth/1.0'}});
-      // Redirects are deliberately not followed (redirect target could be internal).
-      if (response.status >= 300 && response.status < 400) return {status:'unknown', httpStatus:response.status};
-      if (method === 'HEAD' && [403,405,501].includes(response.status)) continue;
-      return {status:response.status === 404 || response.status === 410 ? 'broken' : response.ok ? 'ok' : 'unknown', httpStatus:response.status};
-    } catch { if (method === 'GET') return {status:'unknown',httpStatus:null}; }
-  }
-  return {status:'unknown',httpStatus:null};
-}
-export async function scanDocumentLinks(prisma, {orgId, maxDocuments=100, check=checkLink, now=new Date()} = {}) {
-  if (!orgId) throw new Error('orgId required');
-  const docs = await prisma.document.findMany({where:{orgId,deletedAt:null},select:{id:true,content:true,externalUrl:true,sourceProvider:true},take:Math.min(maxDocuments,500),orderBy:{id:'asc'}});
-  let scanned=0,broken=0,unknown=0;
-  const hostLast = new Map();
-  for (const doc of docs) {
-    const urls = extractDocumentUrls(doc.content);
-    if (doc.externalUrl && ['sharepoint','servicenow'].includes(doc.sourceProvider)) urls.push(doc.externalUrl);
-    for (const url of [...new Set(urls)].slice(0,200)) {
-      const hash=urlHash(url);
-      const old=await prisma.documentLink.findUnique({where:{documentId_urlHash:{documentId:doc.id,urlHash:hash}}});
-      const host=new URL(url).hostname;
-      const wait=Math.max(0,(hostLast.get(host)||0)+250-Date.now());
-      if (wait) await new Promise(resolve=>setTimeout(resolve,wait));
-      hostLast.set(host,Date.now());
-      const result=await check(url);
-      const firstBrokenAt=result.status==='broken' ? old?.firstBrokenAt || now : null;
-      await prisma.documentLink.upsert({where:{documentId_urlHash:{documentId:doc.id,urlHash:hash}},create:{documentId:doc.id,url,urlHash,...result,checkedAt:now,firstBrokenAt},update:{url,...result,checkedAt:now,firstBrokenAt}});
-      scanned++; if(result.status==='broken') broken++; if(result.status==='unknown') unknown++;
+    let current = url;
+    for (let redirects = 0; redirects <= 5; redirects++) {
+      if (!await safe(current)) return { status: 'unknown', httpStatus: null };
+      let response;
+      try {
+        response = await fetcher(current, { method, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs), headers: { 'User-Agent': 'KMS-LinkHealth/1.0' } });
+      } catch { break; }
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers?.get('location');
+        if (!location || redirects === 5) return { status: 'unknown', httpStatus: response.status };
+        try { current = new URL(location, current).toString(); } catch { return { status: 'unknown', httpStatus: response.status }; }
+        continue;
+      }
+      if (method === 'HEAD' && [403, 405, 501].includes(response.status)) break;
+      return { status: [404, 410].includes(response.status) ? 'broken' : response.ok ? 'ok' : 'unknown', httpStatus: response.status };
     }
   }
-  return {documents:docs.length,links:scanned,broken,unknown,partial:docs.length===Math.min(maxDocuments,500)};
+  return { status: 'unknown', httpStatus: null };
+}
+const externalSource = doc => ['sharepoint', 'servicenow'].includes(String(doc.sourceProvider || '').toLowerCase());
+const isSourceLink = (doc, url) => {
+  try { const host = new URL(url).hostname.toLowerCase();
+    return (externalSource(doc) && url === doc.externalUrl) || host.endsWith('.sharepoint.com') || host.endsWith('.service-now.com') || host.endsWith('.servicenow.com');
+  } catch { return false; }
+};
+export async function scanDocumentLinks(prisma, { orgId, maxDocuments = 100, maxLinks = 250, maxRuntimeMs = 45 * 60_000, check = checkLink, now = new Date() } = {}) {
+  if (!orgId) throw new Error('orgId required');
+  const start = Date.now();
+  // Persistent per-org cursor guarantees eventual coverage, even for documents
+  // containing zero links. Avoid loading the entire tenant into memory.
+  const key = 'links.check.cursor';
+  const saved = await prisma.orgSetting.findUnique({ where: { orgId_key: { orgId, key } }, select: { value: true } });
+  const cursor = typeof saved?.value === 'string' ? saved.value : '';
+  const limit = Math.max(1, Math.min(maxDocuments, 500));
+  const select = { id: true, content: true, externalUrl: true, sourceProvider: true, links: { select: { urlHash: true, url: true, checkedAt: true, firstBrokenAt: true, status: true, httpStatus: true } } };
+  const later = await prisma.document.findMany({ where: { orgId, deletedAt: null, id: { gt: cursor } }, select, take: limit, orderBy: { id: 'asc' } });
+  const earlier = later.length < limit ? await prisma.document.findMany({ where: { orgId, deletedAt: null, id: { lte: cursor } }, select, take: limit - later.length, orderBy: { id: 'asc' } }) : [];
+  const docs = [...later, ...earlier];
+  let scanned = 0, broken = 0, unknown = 0, processed = 0, lastId = cursor;
+  for (const doc of docs) {
+    if (scanned >= maxLinks || Date.now() - start > maxRuntimeMs) break;
+    const urls = extractDocumentUrls(doc.content);
+    if (doc.externalUrl && externalSource(doc)) urls.push(doc.externalUrl);
+    const current = [...new Set(urls)].slice(0, 200);
+    const existing = new Map(doc.links.map(link => [link.urlHash, link]));
+    // Remove stale link rows, but preserve source-deletion evidence from sync.
+    const activeHashes = new Set(current.map(urlHash));
+    await prisma.documentLink.deleteMany({ where: { documentId: doc.id, urlHash: { notIn: [...activeHashes] }, NOT: { status: 'broken', url: doc.externalUrl || '' } } });
+    for (const url of current) {
+      if (scanned >= maxLinks || Date.now() - start > maxRuntimeMs) break;
+      const hash = urlHash(url);
+      const old = existing.get(hash);
+      // Authenticated external sources are checked by sync, never public HTTP HEAD.
+      const result = isSourceLink(doc, url) ? { status: old?.status || 'unknown', httpStatus: old?.httpStatus || null } : await check(url);
+      const firstBrokenAt = result.status === 'broken' ? old?.firstBrokenAt || now : null;
+      await prisma.documentLink.upsert({ where: { documentId_urlHash: { documentId: doc.id, urlHash: hash } }, create: { documentId: doc.id, url, urlHash: hash, ...result, checkedAt: now, firstBrokenAt }, update: { url, ...result, checkedAt: now, firstBrokenAt } });
+      scanned++;
+      if (result.status === 'broken') broken++;
+      if (result.status === 'unknown') unknown++;
+    }
+    processed++;
+    lastId = doc.id;
+  }
+  if (processed) await prisma.orgSetting.upsert({ where: { orgId_key: { orgId, key } },
+    create: { orgId, key, value: lastId }, update: { value: lastId } });
+  return { documents: processed, links: scanned, broken, unknown, partial: processed < docs.length || docs.length === limit };
 }

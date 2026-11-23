@@ -1,0 +1,275 @@
+{
+  "version": 1,
+  "documents": [
+    {
+      "externalId": "m3-001",
+      "filename": "m3-001.txt",
+      "title": "Transformer Maintenance",
+      "topic": "transformer-maintenance",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-002",
+      "filename": "m3-002.txt",
+      "title": "Grid Reliability",
+      "topic": "grid-reliability",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-003",
+      "filename": "m3-003.txt",
+      "title": "Hydro Generation",
+      "topic": "hydro-generation",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-004",
+      "filename": "m3-004.txt",
+      "title": "Cybersecurity",
+      "topic": "cybersecurity",
+      "contentDate": "2023-01-10",
+      "ownerRequired": false,
+      "categoryRequired": false
+    },
+    {
+      "externalId": "m3-005",
+      "filename": "m3-005.txt",
+      "title": "Safety Compliance",
+      "topic": "safety-compliance",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-006",
+      "filename": "m3-006.txt",
+      "title": "Asset Management",
+      "topic": "asset-management",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-007",
+      "filename": "m3-007.txt",
+      "title": "Billing Operations",
+      "topic": "billing-operations",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-008",
+      "filename": "m3-008.txt",
+      "title": "Vegetation Management",
+      "topic": "vegetation-management",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-009",
+      "filename": "m3-009.txt",
+      "title": "Renewable Integration",
+      "topic": "renewable-integration",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-010",
+      "filename": "m3-010.txt",
+      "title": "Emergency Response",
+      "topic": "emergency-response",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-011",
+      "filename": "m3-011.txt",
+      "title": "Transformer Maintenance",
+      "topic": "transformer-maintenance",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-012",
+      "filename": "m3-012.txt",
+      "title": "Grid Reliability",
+      "topic": "grid-reliability",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-013",
+      "filename": "m3-013.txt",
+      "title": "Hydro Generation",
+      "topic": "hydro-generation",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-014",
+      "filename": "m3-014.txt",
+      "title": "Cybersecurity",
+      "topic": "cybersecurity",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-015",
+      "filename": "m3-015.txt",
+      "title": "Safety Compliance",
+      "topic": "safety-compliance",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-016",
+      "filename": "m3-016.txt",
+      "title": "Asset Management",
+      "topic": "asset-management",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-017",
+      "filename": "m3-017.txt",
+      "title": "Billing Operations",
+      "topic": "billing-operations",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-018",
+      "filename": "m3-018.txt",
+      "title": "Vegetation Management",
+      "topic": "vegetation-management",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-019",
+      "filename": "m3-019.txt",
+      "title": "Renewable Integration",
+      "topic": "renewable-integration",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-020",
+      "filename": "m3-020.txt",
+      "title": "Emergency Response",
+      "topic": "emergency-response",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-021",
+      "filename": "m3-021.txt",
+      "title": "Transformer Maintenance",
+      "topic": "transformer-maintenance",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-022",
+      "filename": "m3-022.txt",
+      "title": "Grid Reliability",
+      "topic": "grid-reliability",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-023",
+      "filename": "m3-023.txt",
+      "title": "Hydro Generation",
+      "topic": "hydro-generation",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-024",
+      "filename": "m3-024.txt",
+      "title": "Cybersecurity",
+      "topic": "cybersecurity",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-025",
+      "filename": "m3-025.txt",
+      "title": "Safety Compliance",
+      "topic": "safety-compliance",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-026",
+      "filename": "m3-026.txt",
+      "title": "Asset Management",
+      "topic": "asset-management",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-027",
+      "filename": "m3-027.txt",
+      "title": "Billing Operations",
+      "topic": "billing-operations",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-028",
+      "filename": "m3-028.txt",
+      "title": "Vegetation Management",
+      "topic": "vegetation-management",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-029",
+      "filename": "m3-029.txt",
+      "title": "Renewable Integration",
+      "topic": "renewable-integration",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-030",
+      "filename": "m3-030.txt",
+      "title": "Emergency Response",
+      "topic": "emergency-response",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    }
+  ]
+}

@@ -42,6 +42,7 @@ import { renderPptxToPdf, SlideRenderUnavailable } from "./renderSlides.js";
 import { createSourceTagReader } from "../src/lib/connectors/sharepointSourceTags.js";
 import { createTaxonomyAwareSourceTagReader } from "../src/lib/taxonomy/import/sharepointWorkerBridge.mjs";
 import { getFieldMap } from "../src/lib/taxonomy/import/sourceTagMap.mjs";
+import { urlHash } from "../src/lib/analytics/linkHealth.mjs";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
@@ -1007,6 +1008,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
       filePath: null,
       status: "queued",
       externalModifiedAt: new Date(change.modifiedAt),
+      contentUpdatedAt: new Date(change.modifiedAt),
       ...sourceFields,
     };
     const [doc] = await prisma.$transaction([
@@ -1079,6 +1081,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
             filePath: s3Key,
             status: "queued",
             externalModifiedAt: new Date(change.modifiedAt),
+      contentUpdatedAt: new Date(change.modifiedAt),
             ...sourceFields,
             ...(aclRows ? aclWriteData(aclRows) : {}),
           },
@@ -1088,6 +1091,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
             filePath: s3Key,
             status: "queued",
             externalModifiedAt: new Date(change.modifiedAt),
+      contentUpdatedAt: new Date(change.modifiedAt),
             ...sourceFields,
             ...(aclRows ? aclWriteData(aclRows, { create: true }) : {}),
             ...newDocumentFields(change, integration, site, connectedByUserId, await siteOwnerId(integration, site, connectedByUserId)),
@@ -1231,6 +1235,7 @@ async function syncOnePage({ item, modernPage, library, site, integration, conne
     filePath: null,
     status: "queued",
     externalModifiedAt: modifiedAt,
+    contentUpdatedAt: modifiedAt,
     externalUrl: modernPage?.webUrl || item.webUrl || null,
   };
   const doc = existing
@@ -1407,7 +1412,24 @@ async function processSharePointSyncJob(job) {
       const taggedDocIds = new Set(); // A-23: documents whose tags this run already read
       let tagsFailed = 0;
       for (const change of changes) {
-        if (change.deleted) continue; // FR-2 MVP: no orphan/archive handling yet (Open Question #4)
+        if (change.deleted) {
+          // D-8: a source deletion is authoritative; unauthenticated HEAD cannot
+          // determine whether an authenticated SharePoint item still exists.
+          const doc = await prisma.document.findFirst({
+            where: { orgId: integration.orgId, sourceProvider: 'sharepoint', externalId: change.externalId },
+            select: { id: true, externalUrl: true },
+          });
+          if (doc?.externalUrl) {
+            const now = new Date();
+            const hash = urlHash(doc.externalUrl);
+            await prisma.documentLink.upsert({
+              where: { documentId_urlHash: { documentId: doc.id, urlHash: hash } },
+              create: { documentId: doc.id, url: doc.externalUrl, urlHash: hash, status: 'broken', httpStatus: 404, checkedAt: now, firstBrokenAt: now },
+              update: { status: 'broken', httpStatus: 404, checkedAt: now, firstBrokenAt: now },
+            });
+          }
+          continue;
+        }
         // E11.4: a format KMS can't read is never downloaded; it's listed with the reason.
         const format = checkFileFormat(change.name);
         if (!format.ok) {

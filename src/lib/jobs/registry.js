@@ -1,7 +1,7 @@
 // EKP Workstream A, F3: the scheduled job registry. Each entry is one kind of
 // job; the worker's scheduler (worker/scheduler.js) runs it per org on its
-// interval, and Settings â†’ Scheduled jobs lets a super admin turn it on, set
-// the interval and run it now. See WS_A_M365_CONNECTORS.md Â§3.3.
+// interval, and Settings → Scheduled jobs lets a super admin turn it on, set
+// the interval and run it now. See WS_A_M365_CONNECTORS.md §3.3.
 //
 // Imported by both the worker (plain Node) and the web app, so it must only
 // use relative imports, never "@/...".
@@ -162,7 +162,7 @@ export const JOB_DEFINITIONS = {
   },
 
   // B-9/B-24 (E23.4): permanently remove deleted documents once their
-  // retention period (Settings â†’ Governance, retention.deletedDays) has
+  // retention period (Settings → Governance, retention.deletedDays) has
   // passed. "Never purge" (null) makes this a no-op.
   "documents.purge-deleted": {
     label: "Purge deleted documents",

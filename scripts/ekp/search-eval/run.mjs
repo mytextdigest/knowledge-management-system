@@ -1,13 +1,48 @@
-import {readFileSync} from 'node:fs';
-import {fileURLToPath} from 'node:url';
-const fixture=JSON.parse(readFileSync(process.argv[2]||fileURLToPath(new URL('./fixture.json',import.meta.url)),'utf8'));
-export function evaluate(cases,k=10){
-  const rows=cases.map(c=>{const relevant=new Set(c.relevantIds);const returned=c.returnedIds.slice(0,k);const hits=returned.filter(x=>relevant.has(x)).length;
-    const first=returned.findIndex(x=>relevant.has(x));return {id:c.id,precision:hits/k,recall:relevant.size?hits/relevant.size:1,reciprocalRank:first<0?0:1/(first+1)};});
-  const avg=key=>rows.length?rows.reduce((n,r)=>n+r[key],0)/rows.length:0;
-  return {count:rows.length,k,precisionAtK:avg('precision'),recallAtK:avg('recall'),mrr:avg('reciprocalRank'),rows};
+// D-13: real F7-backed evaluation; requires an authenticated session and a
+// seeded fixture corpus. Never treats prefilled rankings as search results.
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const fixturePath = fileURLToPath(new URL('../p2/fixtures/m3-corpus/queries.json', import.meta.url));
+const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
+export function ndcgAt10(ranking, relevant) {
+  const wanted = new Set(relevant);
+  if (!wanted.size) return 0;
+  const dcg = ranking.slice(0, 10).reduce((sum, id, i) => sum + (wanted.has(id) ? 1 / Math.log2(i + 2) : 0), 0);
+  const ideal = Array.from({ length: Math.min(10, wanted.size) }, (_, i) => 1 / Math.log2(i + 2)).reduce((a,b) => a+b,0);
+  return dcg / ideal;
 }
-if(process.argv[1]&&fileURLToPath(import.meta.url)===process.argv[1]){
-  if(!Array.isArray(fixture.cases)||fixture.cases.some(c=>!c.id||!c.query||!Array.isArray(c.relevantIds)||!Array.isArray(c.returnedIds)))throw Error('Invalid evaluation fixture');
-  console.log(JSON.stringify(evaluate(fixture.cases),null,2));
+export function evaluate(rows) {
+  const count = rows.length;
+  if (!count) throw Error('No evaluated queries');
+  const scores = rows.map(row => ({ id: row.id, query: row.query, baselineNdcg10: ndcgAt10(row.baseline, row.relevant), ontologyNdcg10: ndcgAt10(row.ontology, row.relevant) }));
+  const avg = name => scores.reduce((sum, r) => sum + r[name], 0) / count;
+  return { count, baselineNdcg10: avg('baselineNdcg10'), ontologyNdcg10: avg('ontologyNdcg10'), rows: scores };
 }
+function arg(name, fallback = null) { const at = process.argv.indexOf(`--${name}`); return at < 0 ? fallback : process.argv[at+1]; }
+function stableKey(filename) { return /^m3-\d{3}\.txt$/.test(filename || '') ? filename.slice(0, -4) : null; }
+async function main() {
+  const org = arg('org'), base = arg('base-url'), output = arg('out'), cookieName = arg('cookie-env', 'KMS_EVAL_COOKIE');
+  const cookie = process.env[cookieName];
+  if (!org || !base || !output || !cookie) throw Error('Usage: --org <id> --base-url <url> --out <json> [--cookie-env KMS_EVAL_COOKIE]. Provide session cookie via environment only.');
+  const rows = [];
+  for (const q of fixture.queries) {
+    const row = { id: q.id, query: q.query, relevant: q.relevant };
+    for (const mode of ['baseline','ontology']) {
+      const response = await fetch(`${base.replace(/\/$/,'')}/api/org/${encodeURIComponent(org)}/search`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ query: q.query, scope: 'organization', limit: 20, ontologyEnabled: mode === 'ontology' }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw Error(`${mode} search failed (${response.status}): ${payload.error || 'unknown error'}`);
+      row[mode] = [...new Set((payload.results || []).map(r => stableKey(r.filename)).filter(Boolean))].slice(0, 10);
+    }
+    rows.push(row);
+  }
+  const result = { format: 'kms-search-eval-v1', org, generatedAt: new Date().toISOString(), queries: rows };
+  writeFileSync(resolve(output), JSON.stringify(result, null, 2) + '\n');
+  const scores = rows.map(row => ({ baseline: ndcgAt10(row.baseline, row.relevant), ontology: ndcgAt10(row.ontology, row.relevant) }));
+  const average = key => scores.reduce((sum,row) => sum + row[key],0) / scores.length;
+  console.log(JSON.stringify({ count: rows.length, baselineNdcg10: average('baseline'), ontologyNdcg10: average('ontology'), delta: average('ontology') - average('baseline') }, null, 2));
+}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e.message); process.exitCode = 1; });

@@ -1,4 +1,6 @@
-export function summarizeContentHealth(docs, {now=new Date(), requiredFields=['ownerId','category','summary']}={}) {
+import { evaluateCompleteness } from '../governance/completeness.mjs';
+import { csvEscape } from './usageMetrics.mjs';
+export function summarizeContentHealth(docs, {now=new Date(), requiredFields=null, metadataRules=[]}={}) {
   const buckets={under30:0,days30to90:0,over90:0};
   const counts={total:docs.length,stale:0,owned:0,reviewCurrent:0,reviewDue:0,reviewOverdue:0,brokenLinks:0,duplicates:0,complete:0};
   const rows=[];
@@ -9,7 +11,7 @@ export function summarizeContentHealth(docs, {now=new Date(), requiredFields=['o
     const due=!overdue && doc.reviewRecords?.some(r=>r.status==='pending');
     const broken=(doc.links||[]).filter(l=>l.status==='broken').length;
     const duplicate=[...(doc.duplicatesAsDocument||[]),...(doc.duplicatesAsOriginal||[])].filter(d=>!['dismissed','resolved','rejected'].includes(d.status)).length;
-    const missing=requiredFields.filter(f=>!doc[f] || typeof doc[f]==='string' && !doc[f].trim());
+    const missing=Array.isArray(requiredFields) ? requiredFields.filter(f=>!doc[f] || typeof doc[f]==='string' && !doc[f].trim()) : evaluateCompleteness(doc, metadataRules).missing;
     const flags={stale:doc.lifecycleSuggestion==='archived',unowned:!doc.ownerId,reviewOverdue:!!overdue,reviewDue:!!due,broken:broken>0,duplicate:duplicate>0,incomplete:missing.length>0};
     if(flags.stale) counts.stale++;
     if(!flags.unowned) counts.owned++;
@@ -21,6 +23,6 @@ export function summarizeContentHealth(docs, {now=new Date(), requiredFields=['o
   return {counts,buckets,documents:rows};
 }
 export function contentHealthCsv(rows) {
-  const cell=v=>'"'+String(v??'').replaceAll('"','""')+'"';
+  const cell=csvEscape;
   return [['documentId','filename','departmentId','sourceProvider','ageDays','brokenLinks','missing','flags'],...rows.map(d=>[d.id,d.filename,d.departmentId,d.sourceProvider,d.ageDays,d.brokenLinks,d.missing.join(';'),Object.entries(d.flags).filter(([,v])=>v).map(([k])=>k).join(';')])].map(r=>r.map(cell).join(',')).join('\r\n');
 }
