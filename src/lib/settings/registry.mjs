@@ -14,6 +14,7 @@ export const SETTINGS_REGISTRY = Object.freeze({
  'retention.deletedDays': { label:'Deleted document retention (days)', default:30, validate:x => x === null || (positiveInt(x) && x <= 36500) },
  'stale.rules': { label:'Stale document rules', default:{noUpdateDays:365,noViewDays:180}, validate:staleRules },
  'classification.categoryThreshold': { label:'Category classification threshold', default:Number(process.env.CLASSIFICATION_CATEGORY_THRESHOLD || 0.72), validate:x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1 },
+ 'classification.taxonomyThreshold': { label:'Taxonomy auto-tag confidence threshold', default:0.78, validate:x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1 },
  'classification.departmentThreshold': { label:'Department classification threshold', default:Number(process.env.CLASSIFICATION_DEPARTMENT_THRESHOLD || 0.78), validate:x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1 },
  'duplicates.threshold': { label:'Duplicate similarity threshold', default:Number(process.env.CLASSIFICATION_DUPLICATE_THRESHOLD || 0.92), validate:x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1 },
  'sharepoint.storeOriginals': { label:'Store SharePoint originals', default:false, validate:boolean },

@@ -1,6 +1,9 @@
-import { orgSearch, orgKeywordSearch, orgFallbackTextSearch, orgExactTermSearch } from "@/lib/vectorSearch";
+import { orgSearch, orgKeywordSearch, orgFallbackTextSearch, orgExactTermSearch, scopeSql } from "@/lib/vectorSearch";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import { searchAccessSql } from "@/lib/access/documentAccess";
 import { expandWithRelatedDocuments } from "@/lib/knowledgeContext";
+import { ontologyContext, rerankTaggedRows, orgTaggedChunkSearch } from "@/lib/taxonomy/ontologySearch.mjs";
 import { filterCurrentKnowledge } from "@/lib/governance/retrievalEligibility.mjs";
 
 function normalizeDistance(distance) {
@@ -196,6 +199,11 @@ export async function hybridOrgSearch({
   exactTermQuestion = null,
 }) {
   const safeQueries = Array.isArray(queries) ? queries.filter(Boolean) : [];
+  // Ontology is additive; failure must never disable existing search.
+  let ontology = null;
+  try { ontology = await ontologyContext(prisma, orgId, safeQueries); }
+  catch (error) { console.warn('Ontology search unavailable:', error?.message); }
+  const keywordQueries = ontology ? [...new Set([...safeQueries, ...ontology.expandedQueries])] : safeQueries;
   const safeEmbeddings = Array.isArray(embeddings) ? embeddings.filter(Boolean) : [];
   // A small fixed buffer (not the full 3x widen) lets us detect when a
   // question is *naturally* cross-project — i.e. the top-ranked chunks
@@ -223,7 +231,7 @@ export async function hybridOrgSearch({
     allRows.push(...rows);
   }
 
-  for (const query of safeQueries) {
+  for (const query of keywordQueries) {
     const rows = await orgKeywordSearch(query, {
       userId,
       orgId,
@@ -235,6 +243,12 @@ export async function hybridOrgSearch({
     allRows.push(...rows);
   }
 
+  if (ontology?.weights.size) {
+    try {
+      allRows.push(...await orgTaggedChunkSearch({ prisma, Prisma, searchAccessSql, scopeSql,
+        termIds: [...ontology.weights.keys()], userId, orgId, scope, departmentId, isSuperAdmin, limit: candidateLimit }));
+    } catch (error) { console.warn('Ontology tag retrieval unavailable:', error?.message); }
+  }
   let ranked = mergeRows(allRows);
 
   if (ranked.length === 0 && safeQueries.length > 0) {
@@ -255,6 +269,15 @@ export async function hybridOrgSearch({
     queries: safeQueries,
   });
   ranked = applyFeedbackWeights(ranked, feedbackWeights);
+  if (ontology?.weights.size && ranked.length) {
+    // Only boost documents already returned by F1-filtered vector/keyword SQL.
+    const ids = [...new Set(ranked.map(row => row.document_id).filter(Boolean))];
+    const tags = await prisma.documentTerm.findMany({ where: {
+      documentId: { in: ids }, termId: { in: [...ontology.weights.keys()] }, status: 'accepted',
+      term: { termSet: { orgId } },
+    }, select: { documentId: true, termId: true, status: true } });
+    ranked = rerankTaggedRows(ranked, tags, ontology.weights);
+  }
 
   let effectiveDiversify = diversify;
   if (naturalDiversityCheck) {
