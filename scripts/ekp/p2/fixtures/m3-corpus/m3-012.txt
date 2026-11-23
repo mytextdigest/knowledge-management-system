@@ -1,0 +1,1 @@
+Grid Reliability: outage restoration and reliability metrics. This operational note covers distribution grid SAIDI SAIFI outage restoration. Record 12 contains safe, fictional example information for enterprise knowledge retrieval.

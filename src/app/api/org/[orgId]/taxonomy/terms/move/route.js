@@ -1,3 +1,4 @@
+import { invalidateOntologyCache } from '@/lib/taxonomy/ontologySearch.mjs';
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
@@ -36,6 +37,7 @@ export async function POST(req, { params }) {
     // Renumber the level so equal sort orders from older data can't tie.
     await prisma.$transaction(siblings.map((s, i) => prisma.term.update({ where: { id: s.id }, data: { sortOrder: i } })));
     await logAudit({ orgId, actorUserId: a.user.id, action: "taxonomy.term.reordered", entityType: "Term", entityId: term.id, after: { direction: b.direction } });
+    invalidateOntologyCache(orgId);
     return NextResponse.json({ moved: true });
   }
 
@@ -61,5 +63,6 @@ export async function POST(req, { params }) {
     }
   }, { timeout: 60_000 });
   await logAudit({ orgId, actorUserId: a.user.id, action: "taxonomy.term.moved", entityType: "Term", entityId: term.id, before: { parentId: term.parentId }, after: { parentId: parent?.id ?? null, descendants: descendants.length } });
+  invalidateOntologyCache(orgId);
   return NextResponse.json({ moved: true });
 }

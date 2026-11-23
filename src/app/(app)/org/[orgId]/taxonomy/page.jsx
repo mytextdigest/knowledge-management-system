@@ -484,6 +484,55 @@ function SourceMappingPanel({ base, fields, busy, setBusy, onDone }) {
   );
 }
 
+function ReviewPanels({ base, sets }) {
+  const [candidates, setCandidates] = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
+  const [target, setTarget] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const refresh = useCallback(async () => {
+    const [c, s] = await Promise.all([fetch(`${base}/candidates`, { cache: 'no-store' }), fetch(`${base}/review-queue`, { cache: 'no-store' })]);
+    if (!c.ok || !s.ok) throw new Error('Unable to load taxonomy review queues');
+    setCandidates((await c.json()).candidates || []);
+    setSuggestions((await s.json()).suggestions || []);
+  }, [base]);
+  useEffect(() => { refresh().catch(e => setError(e.message)); }, [refresh]);
+  async function action(path, method, body) {
+    setBusy(true); setError('');
+    try {
+      const response = await fetch(`${base}/${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!response.ok) throw new Error((await response.json()).error || 'Request failed');
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  return <section className={`${card} space-y-4 p-4`}>
+    <h2 className="text-lg font-semibold">Taxonomy review</h2>
+    {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
+    <div className="flex flex-wrap items-center gap-2">
+      <label htmlFor="candidate-set" className="text-sm">Propose terms from organization topics</label>
+      <select id="candidate-set" className={control} value={target} onChange={e => setTarget(e.target.value)}>
+        <option value="">Choose editable term set</option>
+        {sets.filter(s => !s.readOnly).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+      </select>
+      <button className={secondaryBtn} type="button" disabled={!target || busy} onClick={() => action('candidates', 'POST', { termSetId: target })}>Propose from topics</button>
+    </div>
+    <h3 className="font-medium">Topic candidates ({candidates.filter(c => c.status === 'pending').length} pending)</h3>
+    {candidates.filter(c => c.status === 'pending').map(c => <div key={c.id} className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="flex-1">{c.label}</span>
+      <button className={secondaryBtn} disabled={busy} onClick={() => action('candidates', 'PATCH', { id: c.id, action: 'accept' })}>Accept</button>
+      <button className={secondaryBtn} disabled={busy} onClick={() => action('candidates', 'PATCH', { id: c.id, action: 'dismiss' })}>Dismiss</button>
+    </div>)}
+    <h3 className="font-medium">Suggestions to review ({suggestions.length}{suggestions.length === 100 ? '+' : ''})</h3>
+    {!suggestions.length ? <p className="text-sm text-gray-500">No pending suggestions.</p> : null}
+    {suggestions.map(t => <div key={t.id} className="flex flex-wrap items-center gap-2 rounded border border-amber-200 bg-amber-50 p-2 text-sm dark:bg-amber-950/30 dark:border-amber-800">
+      <span className="flex-1">{t.document?.filename} · {t.field?.name} · {t.term?.label} ({Math.round((t.confidence || 0) * 100)}%)</span>
+      <button className={secondaryBtn} disabled={busy} onClick={() => action('review-queue', 'PATCH', { id: t.id, action: 'accept' })}>Accept</button>
+      <button className={secondaryBtn} disabled={busy} onClick={() => action('review-queue', 'PATCH', { id: t.id, action: 'dismiss' })}>Dismiss</button>
+    </div>)}
+  </section>;
+}
+
 export default function TaxonomyPage() {
   const { orgId } = useParams();
   const base = `/api/org/${encodeURIComponent(orgId)}/taxonomy`;
@@ -578,6 +627,7 @@ export default function TaxonomyPage() {
                 onApplied={(message) => { setError(""); refresh().then(() => setNotice(message)).catch((e) => setError(e.message)); }}
               />
             ) : null}
+            {canEdit ? <ReviewPanels base={base} sets={sets} /> : null}
             {sets.map((s) => (
               <TermSetCard
                 key={s.id} set={s} canEdit={canEdit} busy={busy} actions={actions}

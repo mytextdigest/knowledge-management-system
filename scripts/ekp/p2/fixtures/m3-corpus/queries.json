@@ -1,0 +1,230 @@
+{
+  "version": 1,
+  "queries": [
+    {
+      "id": "q01",
+      "query": "transformer maintenance",
+      "relevant": [
+        "m3-001",
+        "m3-011",
+        "m3-021"
+      ]
+    },
+    {
+      "id": "q02",
+      "query": "grid reliability",
+      "relevant": [
+        "m3-002",
+        "m3-012",
+        "m3-022"
+      ]
+    },
+    {
+      "id": "q03",
+      "query": "hydro generation",
+      "relevant": [
+        "m3-003",
+        "m3-013",
+        "m3-023"
+      ]
+    },
+    {
+      "id": "q04",
+      "query": "cybersecurity",
+      "relevant": [
+        "m3-004",
+        "m3-014",
+        "m3-024"
+      ]
+    },
+    {
+      "id": "q05",
+      "query": "safety compliance",
+      "relevant": [
+        "m3-005",
+        "m3-015",
+        "m3-025"
+      ]
+    },
+    {
+      "id": "q06",
+      "query": "asset management",
+      "relevant": [
+        "m3-006",
+        "m3-016",
+        "m3-026"
+      ]
+    },
+    {
+      "id": "q07",
+      "query": "billing operations",
+      "relevant": [
+        "m3-007",
+        "m3-017",
+        "m3-027"
+      ]
+    },
+    {
+      "id": "q08",
+      "query": "vegetation management",
+      "relevant": [
+        "m3-008",
+        "m3-018",
+        "m3-028"
+      ]
+    },
+    {
+      "id": "q09",
+      "query": "renewable integration",
+      "relevant": [
+        "m3-009",
+        "m3-019",
+        "m3-029"
+      ]
+    },
+    {
+      "id": "q10",
+      "query": "emergency response",
+      "relevant": [
+        "m3-010",
+        "m3-020",
+        "m3-030"
+      ]
+    },
+    {
+      "id": "q11",
+      "query": "dielectric fluid condition",
+      "relevant": [
+        "m3-001",
+        "m3-011",
+        "m3-021"
+      ]
+    },
+    {
+      "id": "q12",
+      "query": "restoration grid reliability",
+      "relevant": [
+        "m3-002",
+        "m3-012",
+        "m3-022"
+      ]
+    },
+    {
+      "id": "q13",
+      "query": "vibration hydro generation",
+      "relevant": [
+        "m3-003",
+        "m3-013",
+        "m3-023"
+      ]
+    },
+    {
+      "id": "q14",
+      "query": "authentication cybersecurity",
+      "relevant": [
+        "m3-004",
+        "m3-014",
+        "m3-024"
+      ]
+    },
+    {
+      "id": "q15",
+      "query": "safety safety compliance",
+      "relevant": [
+        "m3-005",
+        "m3-015",
+        "m3-025"
+      ]
+    },
+    {
+      "id": "q16",
+      "query": "inventory asset management",
+      "relevant": [
+        "m3-006",
+        "m3-016",
+        "m3-026"
+      ]
+    },
+    {
+      "id": "q17",
+      "query": "meter billing operations",
+      "relevant": [
+        "m3-007",
+        "m3-017",
+        "m3-027"
+      ]
+    },
+    {
+      "id": "q18",
+      "query": "clearance vegetation management",
+      "relevant": [
+        "m3-008",
+        "m3-018",
+        "m3-028"
+      ]
+    },
+    {
+      "id": "q19",
+      "query": "wind renewable integration",
+      "relevant": [
+        "m3-009",
+        "m3-019",
+        "m3-029"
+      ]
+    },
+    {
+      "id": "q20",
+      "query": "dispatch emergency response",
+      "relevant": [
+        "m3-010",
+        "m3-020",
+        "m3-030"
+      ]
+    },
+    {
+      "id": "q21",
+      "query": "analysis transformer maintenance",
+      "relevant": [
+        "m3-001",
+        "m3-011",
+        "m3-021"
+      ]
+    },
+    {
+      "id": "q22",
+      "query": "SAIFI grid reliability",
+      "relevant": [
+        "m3-002",
+        "m3-012",
+        "m3-022"
+      ]
+    },
+    {
+      "id": "q23",
+      "query": "vibration hydro generation",
+      "relevant": [
+        "m3-003",
+        "m3-013",
+        "m3-023"
+      ]
+    },
+    {
+      "id": "q24",
+      "query": "authentication cybersecurity",
+      "relevant": [
+        "m3-004",
+        "m3-014",
+        "m3-024"
+      ]
+    },
+    {
+      "id": "q25",
+      "query": "safety safety compliance",
+      "relevant": [
+        "m3-005",
+        "m3-015",
+        "m3-025"
+      ]
+    }
+  ]
+}

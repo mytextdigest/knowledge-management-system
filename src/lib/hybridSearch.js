@@ -194,6 +194,7 @@ export async function hybridOrgSearch({
   isSuperAdmin = false,
   diversify = false,
   feedbackQuestion = null,
+  ontologyEnabled = true,
   // The user's own question: its distinctive words (code names, IDs) keep a
   // place in the results even when broader matches outrank them.
   exactTermQuestion = null,
@@ -201,9 +202,17 @@ export async function hybridOrgSearch({
   const safeQueries = Array.isArray(queries) ? queries.filter(Boolean) : [];
   // Ontology is additive; failure must never disable existing search.
   let ontology = null;
-  try { ontology = await ontologyContext(prisma, orgId, safeQueries); }
+  try { if (ontologyEnabled) ontology = await ontologyContext(prisma, orgId, safeQueries); }
   catch (error) { console.warn('Ontology search unavailable:', error?.message); }
-  const keywordQueries = ontology ? [...new Set([...safeQueries, ...ontology.expandedQueries])] : safeQueries;
+  // Send each expansion as a standalone query: keyword search truncates to eight tokens.
+  const keywordQueries = ontology ? [...new Set([
+    ...safeQueries,
+    ...ontology.expandedQueries.flatMap((expanded, i) => {
+      const original = safeQueries[i] || '';
+      const suffix = expanded.startsWith(original) ? expanded.slice(original.length).trim() : expanded;
+      return suffix.match(/.{1,120}(?:\s|$)/g)?.map(x => x.trim()).filter(Boolean) || [];
+    }),
+  ])] : safeQueries;
   const safeEmbeddings = Array.isArray(embeddings) ? embeddings.filter(Boolean) : [];
   // A small fixed buffer (not the full 3x widen) lets us detect when a
   // question is *naturally* cross-project — i.e. the top-ranked chunks

@@ -107,17 +107,17 @@ export default function DocumentTaggingPanel({ orgId, documentId }) {
                 </button>
               </div>
             ) : (
-              <p className="text-xs text-gray-700 dark:text-gray-300">{field.documentTerms.map((t) => t.term?.label).filter(Boolean).join(", ") || "—"}</p>
+              <p className="text-xs text-gray-700 dark:text-gray-300">{field.documentTerms.filter((t) => t.status === "accepted").map((t) => t.term?.label).filter(Boolean).join(", ") || "—"}</p>
             )}
             {suggestions.length ? (
-              <div className="space-y-1 rounded border border-amber-200 p-2 text-xs dark:border-amber-800">
+              <div className="space-y-1 rounded border border-amber-200 bg-amber-50 p-2 text-xs dark:border-amber-800 dark:bg-amber-950/30">
                 <p className="font-medium">AI suggestions awaiting review</p>
                 {suggestions.map(tag => (
                   <div key={tag.id} className="flex items-center gap-2">
                     <span className="flex-1">{tag.term?.label} ({Math.round((tag.confidence || 0) * 100)}%)</span>
                     {canEdit ? <>
-                      <button type="button" disabled={!!busy} onClick={() => review(tag.id, 'accept')} className="underline">Accept</button>
-                      <button type="button" disabled={!!busy} onClick={() => review(tag.id, 'dismiss')} className="underline">Dismiss</button>
+                      <button type="button" disabled={!!busy} onClick={() => review(tag.id, 'accept')} className="rounded border border-amber-400 px-2 py-0.5 hover:bg-amber-100 dark:hover:bg-amber-900">Accept</button>
+                      <button type="button" disabled={!!busy} onClick={() => review(tag.id, 'dismiss')} className="rounded border border-amber-400 px-2 py-0.5 hover:bg-amber-100 dark:hover:bg-amber-900">Dismiss</button>
                     </> : null}
                   </div>
                 ))}

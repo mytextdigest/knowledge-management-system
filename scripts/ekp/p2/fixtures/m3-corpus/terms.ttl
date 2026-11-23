@@ -1,0 +1,14 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix ex: <https://example.org/kms-m3/> .
+ex:scheme a skos:ConceptScheme ; skos:prefLabel "M3 Evaluation Terms"@en .
+ex:transformer-maintenance a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Transformer Maintenance"@en ; skos:altLabel "substation transformer oil testing"@en .
+ex:grid-reliability a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Grid Reliability"@en ; skos:altLabel "outage restoration"@en .
+ex:hydro-generation a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Hydro Generation"@en ; skos:altLabel "hydroelectric turbine inspection"@en .
+ex:cybersecurity a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Cybersecurity"@en ; skos:altLabel "identity access"@en .
+ex:safety-compliance a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Safety Compliance"@en ; skos:altLabel "field safety audits"@en .
+ex:asset-management a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Asset Management"@en ; skos:altLabel "asset inventory"@en .
+ex:billing-operations a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Billing Operations"@en ; skos:altLabel "meter billing"@en .
+ex:vegetation-management a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Vegetation Management"@en ; skos:altLabel "right of way tree trimming inspections"@en .
+ex:renewable-integration a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Renewable Integration"@en ; skos:altLabel "solar"@en .
+ex:emergency-response a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Emergency Response"@en ; skos:altLabel "storm response"@en .
+ex:dielectric-fluid a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Dielectric Fluid"@en ; skos:altLabel "insulating oil"@en ; skos:broader ex:transformer-maintenance .

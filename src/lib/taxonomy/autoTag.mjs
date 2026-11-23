@@ -73,11 +73,13 @@ export async function classifyTaxonomyTerms({ prisma, openai, orgId, documentId,
   if (!applicable.length) return { skipped: 'no_taxonomy_fields' };
   const terms = await prisma.term.findMany({ where: { termSetId: { in: applicable.map(f => f.termSetId) }, status: 'active' }, select: { id: true, label: true, description: true, termSetId: true, updatedAt: true, embeddedAt: true, synonyms: { select: { label: true } } } });
   if (!terms.length) return { skipped: 'no_active_terms' };
-  await ensureTermEmbeddings(prisma, openai, terms);
-  const rows = await prisma.$queryRaw`SELECT id, embedding_vec::text AS embedding FROM "Term" WHERE id = ANY(${terms.map(t => t.id)}::text[]) AND embedding_vec IS NOT NULL`;
-  const vectors = new Map(rows.map(r => [r.id, JSON.parse(r.embedding)]));
+  // pgvector performs top-k selection in PostgreSQL; never deserialize all vectors per document.
   const documentVector = await embed(openai, [filename, summary, String(text || '').slice(0, 12000)].filter(Boolean).join('\n'));
-  const candidates = shortlistTerms(terms.map(t => ({ ...t, embedding: vectors.get(t.id) })), documentVector);
+  const ranked = await prisma.$queryRaw`SELECT id FROM "Term"
+    WHERE id = ANY(${terms.map(t => t.id)}::text[]) AND embedding_vec IS NOT NULL
+    ORDER BY embedding_vec <=> ${vectorSql(documentVector)}::vector LIMIT ${SHORTLIST_SIZE}`;
+  const byId = new Map(terms.map(t => [t.id, t]));
+  const candidates = ranked.map(row => byId.get(row.id)).filter(Boolean);
   if (!candidates.length) return { skipped: 'no_candidate_vectors' };
   const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', response_format: { type: 'json_object' }, temperature: 0, max_tokens: 650, messages: [
     { role: 'system', content: 'Choose ONLY termId values from the supplied candidates. Return JSON {"tags":[{"termId":"...","confidence":0.0}]}. If no match, return empty tags. Do not invent terms.' },
@@ -85,12 +87,17 @@ export async function classifyTaxonomyTerms({ prisma, openai, orgId, documentId,
   ] });
   let parsed;
   try { parsed = JSON.parse(completion.choices?.[0]?.message?.content || '{}'); } catch { parsed = {}; }
-  const tags = decideTags(parsed.tags, candidates, applicable, { threshold });
+  const sourceTaggedBeforeWrite = await prisma.documentTerm.count({ where: { documentId, source: 'source_system', status: 'accepted' } }) > 0;
+  const tags = decideTags(parsed.tags, candidates, applicable, { threshold, sourceTagged: sourceTaggedBeforeWrite });
   let suggested = 0;
   await prisma.$transaction(async tx => {
     // Serialize classifier and reviewer writes for the same document.
     await tx.$queryRaw`SELECT id FROM "Document" WHERE id = ${documentId} FOR UPDATE`;
     const existing = await tx.documentTerm.findMany({ where: { documentId }, select: { id: true, fieldId: true, termId: true, source: true, status: true } });
+    const sourceTagged = existing.some(t => t.source === 'source_system' && t.status === 'accepted');
+    if (sourceTagged) {
+      await tx.documentTerm.updateMany({ where: { documentId, source: 'auto', status: 'accepted' }, data: { status: 'suggested', acceptedById: null, acceptedAt: null } });
+    }
     const protectedFields = new Set(existing.filter(t => t.source === 'manual' || t.source === 'source_system').map(t => t.fieldId));
     const occupiedSingleFields = new Set(existing.filter(t => t.status === 'accepted').map(t => t.fieldId));
     await tx.documentTerm.deleteMany({ where: { documentId, source: 'auto', status: 'suggested', fieldId: { in: applicable.map(f => f.id) } } });
@@ -98,7 +105,7 @@ export async function classifyTaxonomyTerms({ prisma, openai, orgId, documentId,
       const field = applicable.find(f => f.id === tag.fieldId);
       const previous = existing.find(t => t.fieldId === tag.fieldId && t.termId === tag.termId);
       if (previous && !(previous.source === 'auto' && previous.status === 'suggested')) continue;
-      const status = protectedFields.has(tag.fieldId) || (field && !field.multi && occupiedSingleFields.has(tag.fieldId)) ? 'suggested' : tag.status;
+      const status = sourceTagged || protectedFields.has(tag.fieldId) || (field && !field.multi && occupiedSingleFields.has(tag.fieldId)) ? 'suggested' : tag.status;
       if (status === 'suggested') suggested++;
       if (status === 'accepted' && field && !field.multi) occupiedSingleFields.add(tag.fieldId);
       await tx.documentTerm.create({ data: { documentId, fieldId: tag.fieldId, termId: tag.termId, confidence: tag.confidence, status, source: 'auto' } });

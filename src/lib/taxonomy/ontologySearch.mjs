@@ -54,12 +54,23 @@ export function rerankTaggedRows(rows, tags, weights) {
     hybridScore: Number(row.hybridScore || 0) + (byDocument.get(row.document_id) || 0) }))
     .sort((a, b) => b.hybridScore - a.hybridScore);
 }
+const ontologyCache = new Map();
+const ONTOLOGY_TTL_MS = 60_000;
+export function invalidateOntologyCache(orgId) {
+  if (orgId) ontologyCache.delete(orgId);
+  else ontologyCache.clear();
+}
 export async function ontologyContext(prisma, orgId, queries) {
   if (!orgId || !queries.length) return null;
-  const terms = await prisma.term.findMany({ where: { termSet: { orgId }, status: 'active' }, select: {
+  const cached = ontologyCache.get(orgId);
+  const terms = cached && cached.expires > Date.now() ? cached.terms : await prisma.term.findMany({ where: { termSet: { orgId }, status: 'active' }, select: {
     id: true, label: true, ancestorIds: true, synonyms: { select: { label: true } },
     relationsFrom: { select: { toTermId: true } }, relationsTo: { select: { fromTermId: true } },
   } });
+  if (!cached || cached.expires <= Date.now()) {
+    if (ontologyCache.size >= 100) ontologyCache.delete(ontologyCache.keys().next().value);
+    ontologyCache.set(orgId, { terms, expires: Date.now() + ONTOLOGY_TTL_MS });
+  }
   const matches = matchingTerms(queries.join(' '), terms);
   if (!matches.length) return null;
   return { terms, matches, weights: ontologyBoosts(matches, terms),

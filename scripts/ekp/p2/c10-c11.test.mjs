@@ -42,3 +42,10 @@ test('C10 configurable threshold controls suggestion status', () => {
   assert.equal(decideTags([{termId:'t1',confidence:.8}],c,f,{threshold:.85})[0].status,'suggested');
   assert.equal(decideTags([{termId:'t1',confidence:.8}],c,f,{threshold:.75})[0].status,'accepted');
 });
+
+test('CQ-3: any SharePoint source tag forces suggestions in every field',()=>{
+  const fields=[{id:'f1',termSetId:'s1',key:'business',multi:true},{id:'f2',termSetId:'s2',key:'location',multi:true}];
+  const candidates=[{id:'t1',termSetId:'s1'},{id:'t2',termSetId:'s2'}];
+  const picks=[{termId:'t1',confidence:0.99},{termId:'t2',confidence:0.99}];
+  assert.deepEqual(decideTags(picks,candidates,fields,{sourceTagged:true}).map(t=>t.status),['suggested','suggested']);
+});

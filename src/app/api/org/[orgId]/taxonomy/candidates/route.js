@@ -1,3 +1,4 @@
+import { invalidateOntologyCache } from '@/lib/taxonomy/ontologySearch.mjs';
 // C-10: organizational topics proposed as taxonomy terms, reviewed by super_admin.
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
@@ -68,5 +69,6 @@ export async function PATCH(req, { params }) {
     throw error;
   }
   await logAudit({ orgId, actorUserId: a.user.id, action: `taxonomy.candidate.${b.action}`, entityType: 'TermCandidate', entityId: candidate.id, after: { termId } });
+  invalidateOntologyCache(orgId);
   return NextResponse.json({ reviewed: true, termId });
 }

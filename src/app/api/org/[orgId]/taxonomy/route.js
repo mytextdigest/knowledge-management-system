@@ -1,3 +1,4 @@
+import { invalidateOntologyCache } from '@/lib/taxonomy/ontologySearch.mjs';
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
@@ -38,6 +39,7 @@ export async function DELETE(req, { params }) {
     await tx.termSet.delete({ where: { id: set.id } });
   }, { timeout: 60_000 });
   await logAudit({ orgId, actorUserId: a.user.id, action: "taxonomy.term_set.deleted", entityType: "TermSet", entityId: set.id, before: { name: set.name, source: set.source, terms: set._count.terms, fields: set.fields.map((f) => f.key) } });
+  invalidateOntologyCache(orgId);
   return NextResponse.json({ deleted: true });
 }
 export async function POST(req, { params }) {
@@ -50,6 +52,7 @@ export async function POST(req, { params }) {
   try {
     const set = await prisma.termSet.create({ data: { orgId, name, description: typeof body.description === "string" ? body.description.slice(0, 1000) : null, createdById: a.user.id } });
     await logAudit({ orgId, actorUserId: a.user.id, action: "taxonomy.term_set.created", entityType: "TermSet", entityId: set.id, after: { name } });
+    invalidateOntologyCache(orgId);
     return NextResponse.json({ set }, { status: 201 });
   } catch (e) { if (e.code === "P2002") return NextResponse.json({ error: "Name already exists" }, { status: 409 }); throw e; }
 }
