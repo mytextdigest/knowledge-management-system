@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowLeft, KeyRound, Loader2, CheckCircle2, AlertCircle, Unplug, Search, Trash2, Plus } from 'lucide-react';
+import { ArrowLeft, KeyRound, Loader2, CheckCircle2, AlertCircle, Unplug, Search, Trash2, Plus, Copy, Upload, FileCheck2 } from 'lucide-react';
 import Layout from '@/components/layout/Layout';
 import { cn } from '@/lib/utils';
 
@@ -10,6 +10,9 @@ import { cn } from '@/lib/utils';
 // Connect runs Microsoft's admin approval for the KMS Sign-in app; the
 // tenant's verified domains come back from Microsoft and are the only
 // domains that can be enabled.
+// E-12: optionally, sign-in through the org's own Entra SAML app instead of
+// the KMS Sign-in app (OIDC). Connecting stays the same: it proves the tenant
+// and its domains.
 
 const PROVISIONING_OPTIONS = [
   { value: 'auto', label: 'Anyone in the Microsoft organization', hint: 'They join this org as Employee on first sign-in (or with their invite\'s role).' },
@@ -55,6 +58,7 @@ export default function MicrosoftSignInPage() {
         provisioning: data.provisioning,
         passwordLogin: data.passwordLogin,
         enabled: data.enabled,
+        protocol: data.protocol,
         groupRoleMap: data.groupRoleMap || [],
       } : null);
     } catch (err) {
@@ -86,6 +90,7 @@ export default function MicrosoftSignInPage() {
     draft.provisioning !== config.provisioning ||
     draft.passwordLogin !== config.passwordLogin ||
     draft.enabled !== config.enabled ||
+    draft.protocol !== config.protocol ||
     JSON.stringify(draft.groupRoleMap) !== JSON.stringify(config.groupRoleMap || []) ||
     [...draft.allowedDomains].sort().join() !== [...config.allowedDomains].sort().join()
   );
@@ -222,6 +227,19 @@ export default function MicrosoftSignInPage() {
                 ))}
               </div>
             </section>
+
+            <SamlSetup
+              orgId={orgId}
+              saml={config.saml}
+              protocol={draft.protocol}
+              onProtocol={(protocol) => setDraft((prev) => ({ ...prev, protocol }))}
+              onChanged={(patch) => {
+                setConfig((prev) => ({ ...prev, ...patch.config, saml: { ...prev.saml, ...patch.saml } }));
+                if (patch.config?.protocol) setDraft((prev) => ({ ...prev, protocol: patch.config.protocol }));
+              }}
+              setError={setError}
+              setNotice={setNotice}
+            />
 
             <GroupRoleMapping
               orgId={orgId}
@@ -438,6 +456,144 @@ function GroupRoleMapping({ orgId, departments, map, onChange, connectHref }) {
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+// E-12: SAML 2.0 through the org's own Microsoft Entra enterprise app.
+function SamlSetup({ orgId, saml, protocol, onProtocol, onChanged, setError, setNotice }) {
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState('');
+  if (!saml?.available) return null;
+  const connection = saml.connection;
+
+  const copy = async (label, value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(label);
+      setTimeout(() => setCopied(''), 1500);
+    } catch {}
+  };
+
+  const upload = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const metadataXml = await file.text();
+      const res = await fetch(`/api/org/${orgId}/sso/saml`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ metadataXml }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed.');
+      onChanged({ saml: { connection: data.connection } });
+      setNotice('SAML app saved. Choose SAML below and save to use it.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!window.confirm('Remove the SAML app? People will sign in with Microsoft through the KMS Sign-in app (OIDC) again.')) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const res = await fetch(`/api/org/${orgId}/sso/saml`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to remove.');
+      onChanged({ saml: { connection: null }, config: { protocol: 'oidc' } });
+      setNotice('SAML app removed.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const validTo = connection?.certificateValidTo ? new Date(connection.certificateValidTo) : null;
+
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">How people sign in</h2>
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
+        <label className="flex items-start gap-3 px-4 py-3 text-sm cursor-pointer">
+          <input type="radio" checked={protocol !== 'saml'} onChange={() => onProtocol('oidc')} className="h-4 w-4 mt-0.5" />
+          <span>
+            <span className="block text-gray-900 dark:text-gray-100">KMS Sign-in app (OpenID Connect)</span>
+            <span className="block text-xs text-gray-500">Nothing more to set up in Microsoft.</span>
+          </span>
+        </label>
+        <label className={cn('flex items-start gap-3 px-4 py-3 text-sm', connection ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed')}>
+          <input type="radio" checked={protocol === 'saml'} disabled={!connection} onChange={() => onProtocol('saml')} className="h-4 w-4 mt-0.5" />
+          <span>
+            <span className="block text-gray-900 dark:text-gray-100">Your own SAML app (SAML 2.0)</span>
+            <span className="block text-xs text-gray-500">
+              {connection ? 'People who enter their work email are sent to your Entra SAML app.' : 'Set up the SAML app below first.'}
+            </span>
+          </span>
+        </label>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">SAML app</p>
+        <ol className="text-xs text-gray-600 dark:text-gray-400 list-decimal pl-5 space-y-1">
+          <li>In Microsoft Entra, create an Enterprise application (&quot;Create your own application&quot;, non-gallery) and choose SAML single sign-on.</li>
+          <li>Under Basic SAML Configuration, paste the two values below.</li>
+          <li>Assign the users or groups who may use KMS. To map roles from groups, add a group claim (Group ID).</li>
+          <li>Download <strong>Federation Metadata XML</strong> and upload it here.</li>
+        </ol>
+        {[['Identifier (Entity ID)', saml.entityId], ['Reply URL (Assertion Consumer Service URL)', saml.acsUrl]].map(([label, value]) => (
+          <div key={label}>
+            <p className="text-xs text-gray-500">{label}</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 min-w-0 truncate px-2 py-1.5 rounded bg-gray-100 dark:bg-gray-800 text-xs text-gray-900 dark:text-gray-100">{value}</code>
+              <button onClick={() => copy(label, value)} className="p-1.5 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100" title="Copy">
+                {copied === label ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {saml.error && <p className="text-xs text-red-700 dark:text-red-300">{saml.error}</p>}
+        {connection && (
+          <div className="flex items-start gap-2 text-xs text-gray-700 dark:text-gray-300">
+            <FileCheck2 className="h-4 w-4 text-green-600 flex-shrink-0" />
+            <span className="min-w-0">
+              <span className="block truncate">Metadata from {connection.idpEntityId}</span>
+              {validTo && (
+                <span className={cn('block', validTo < new Date(Date.now() + 30 * 864e5) && 'text-amber-700 dark:text-amber-300')}>
+                  Signing certificate valid until {validTo.toLocaleDateString()}
+                </span>
+              )}
+            </span>
+          </div>
+        )}
+
+        <div className="flex items-center gap-3">
+          <label className={cn('inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-medium', busy ? 'opacity-50' : 'cursor-pointer')}>
+            <Upload className="h-4 w-4" />
+            {busy ? 'Working…' : connection ? 'Replace metadata' : 'Upload metadata XML'}
+            <input
+              type="file"
+              accept=".xml,application/xml,text/xml"
+              className="hidden"
+              disabled={busy}
+              onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ''; }}
+            />
+          </label>
+          {connection && (
+            <button onClick={remove} disabled={busy} className="text-sm text-red-700 dark:text-red-300 hover:underline disabled:opacity-50">
+              Remove SAML app
+            </button>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

@@ -3,8 +3,10 @@
 // member of the org that connected that tenant. Design and rules:
 // docs/ekp/phase1/WS_A_M365_CONNECTORS.md, A1 step 5.
 //
-// Called from the NextAuth signIn callback (src/lib/auth.js). The token's
-// signature, audience and issuer are already checked by openid-client.
+// Called from the NextAuth signIn callback (src/lib/auth.js), for OIDC and
+// for SAML (E-12, claims from src/lib/sso/samlClaims.js). The OIDC token's
+// signature, audience and issuer are checked by openid-client; the SAML
+// response's signature by SAML Jackson against the org's uploaded metadata.
 
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/auditLog";
@@ -48,7 +50,7 @@ export function emailDomain(email) {
  */
 export async function resolveEntraSignIn(
   claims,
-  { db = prisma, audit = logAudit, fetchGroupIds = getUserGroupIds } = {}
+  { db = prisma, audit = logAudit, fetchGroupIds = getUserGroupIds, protocol = "oidc" } = {}
 ) {
   const tenantId = claims.tid;
   const objectId = claims.oid;
@@ -168,7 +170,8 @@ export async function resolveEntraSignIn(
     orgId: config.orgId,
     actorUserId: user.id,
     action: created ? "auth.sso_user_created" : "auth.sso_login",
-    metadata: { provider: "entra", tenantId, protocol: config.protocol, joined: !membership },
+    // `protocol`: how this sign-in came (OIDC or SAML), not the org's setting.
+    metadata: { provider: "entra", tenantId, protocol, joined: !membership },
   });
 
   return { user, orgId: config.orgId, created };

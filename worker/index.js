@@ -1724,6 +1724,8 @@ async function processJob(job) {
   }
   if (job.type === "sharepoint_sync") return processSharePointSyncJob(job);
   if (job.type === "servicenow_sync") return processServiceNowSyncJob(job);
+  // A scheduled job was turned on, rescheduled or "Run now" was clicked.
+  if (job.type === "scheduler_wake") return scheduler.wake();
 
   throw new Error("Unknown job type: " + job.type);
 }
@@ -1820,8 +1822,9 @@ async function mainLoop() {
   }
 }
 
-// F3 scheduled jobs: handlers enqueue SQS work for the loop above.
-startScheduler(prisma, {
+// F3 scheduled jobs: handlers enqueue SQS work for the loop above, and the
+// app wakes the scheduler through the queue ("scheduler_wake").
+const scheduler = startScheduler(prisma, {
   enqueue: (body) =>
     sqs.send(new SendMessageCommand({ QueueUrl: QUEUE_URL, MessageBody: JSON.stringify(body) })),
 });
