@@ -1,11 +1,35 @@
 {
-  "version": 1,
+  "version": 2,
+  "notes": "Per topic: m3-0NN names the topic label, m3-1NN only its narrower term, m3-2NN neither (found by meaning or by its auto-tag). No synonym appears in any document. m3-030 is a near-duplicate of m3-010.",
   "documents": [
     {
       "externalId": "m3-001",
       "filename": "m3-001.txt",
-      "title": "Transformer Maintenance",
       "topic": "transformer-maintenance",
+      "variant": "label",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true,
+      "stale": true,
+      "review": "overdue"
+    },
+    {
+      "externalId": "m3-011",
+      "filename": "m3-011.txt",
+      "topic": "transformer-maintenance",
+      "variant": "narrower",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-021",
+      "filename": "m3-021.txt",
+      "topic": "transformer-maintenance",
+      "variant": "related",
+      "department": "M3 Operations [fixture]",
       "contentDate": "2023-01-10",
       "ownerRequired": true,
       "categoryRequired": true
@@ -13,179 +37,20 @@
     {
       "externalId": "m3-002",
       "filename": "m3-002.txt",
-      "title": "Grid Reliability",
       "topic": "grid-reliability",
+      "variant": "label",
+      "department": "M3 Operations [fixture]",
       "contentDate": "2026-10-10",
       "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-003",
-      "filename": "m3-003.txt",
-      "title": "Hydro Generation",
-      "topic": "hydro-generation",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-004",
-      "filename": "m3-004.txt",
-      "title": "Cybersecurity",
-      "topic": "cybersecurity",
-      "contentDate": "2023-01-10",
-      "ownerRequired": false,
-      "categoryRequired": false
-    },
-    {
-      "externalId": "m3-005",
-      "filename": "m3-005.txt",
-      "title": "Safety Compliance",
-      "topic": "safety-compliance",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-006",
-      "filename": "m3-006.txt",
-      "title": "Asset Management",
-      "topic": "asset-management",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-007",
-      "filename": "m3-007.txt",
-      "title": "Billing Operations",
-      "topic": "billing-operations",
-      "contentDate": "2023-01-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-008",
-      "filename": "m3-008.txt",
-      "title": "Vegetation Management",
-      "topic": "vegetation-management",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-009",
-      "filename": "m3-009.txt",
-      "title": "Renewable Integration",
-      "topic": "renewable-integration",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-010",
-      "filename": "m3-010.txt",
-      "title": "Emergency Response",
-      "topic": "emergency-response",
-      "contentDate": "2023-01-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-011",
-      "filename": "m3-011.txt",
-      "title": "Transformer Maintenance",
-      "topic": "transformer-maintenance",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
+      "categoryRequired": true,
+      "review": "due"
     },
     {
       "externalId": "m3-012",
       "filename": "m3-012.txt",
-      "title": "Grid Reliability",
       "topic": "grid-reliability",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-013",
-      "filename": "m3-013.txt",
-      "title": "Hydro Generation",
-      "topic": "hydro-generation",
-      "contentDate": "2023-01-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-014",
-      "filename": "m3-014.txt",
-      "title": "Cybersecurity",
-      "topic": "cybersecurity",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-015",
-      "filename": "m3-015.txt",
-      "title": "Safety Compliance",
-      "topic": "safety-compliance",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-016",
-      "filename": "m3-016.txt",
-      "title": "Asset Management",
-      "topic": "asset-management",
-      "contentDate": "2023-01-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-017",
-      "filename": "m3-017.txt",
-      "title": "Billing Operations",
-      "topic": "billing-operations",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-018",
-      "filename": "m3-018.txt",
-      "title": "Vegetation Management",
-      "topic": "vegetation-management",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-019",
-      "filename": "m3-019.txt",
-      "title": "Renewable Integration",
-      "topic": "renewable-integration",
-      "contentDate": "2023-01-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-020",
-      "filename": "m3-020.txt",
-      "title": "Emergency Response",
-      "topic": "emergency-response",
-      "contentDate": "2026-10-10",
-      "ownerRequired": true,
-      "categoryRequired": true
-    },
-    {
-      "externalId": "m3-021",
-      "filename": "m3-021.txt",
-      "title": "Transformer Maintenance",
-      "topic": "transformer-maintenance",
+      "variant": "narrower",
+      "department": "M3 Operations [fixture]",
       "contentDate": "2026-10-10",
       "ownerRequired": true,
       "categoryRequired": true
@@ -193,26 +58,90 @@
     {
       "externalId": "m3-022",
       "filename": "m3-022.txt",
-      "title": "Grid Reliability",
       "topic": "grid-reliability",
-      "contentDate": "2023-01-10",
+      "variant": "related",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-003",
+      "filename": "m3-003.txt",
+      "topic": "hydro-generation",
+      "variant": "label",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-08-15",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-013",
+      "filename": "m3-013.txt",
+      "topic": "hydro-generation",
+      "variant": "narrower",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-08-15",
       "ownerRequired": true,
       "categoryRequired": true
     },
     {
       "externalId": "m3-023",
       "filename": "m3-023.txt",
-      "title": "Hydro Generation",
       "topic": "hydro-generation",
+      "variant": "related",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-08-15",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-004",
+      "filename": "m3-004.txt",
+      "topic": "cybersecurity",
+      "variant": "label",
+      "department": "M3 Corporate [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": false,
+      "categoryRequired": false
+    },
+    {
+      "externalId": "m3-014",
+      "filename": "m3-014.txt",
+      "topic": "cybersecurity",
+      "variant": "narrower",
+      "department": "M3 Corporate [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": false,
+      "categoryRequired": false
+    },
+    {
+      "externalId": "m3-024",
+      "filename": "m3-024.txt",
+      "topic": "cybersecurity",
+      "variant": "related",
+      "department": "M3 Corporate [fixture]",
       "contentDate": "2026-10-10",
       "ownerRequired": true,
       "categoryRequired": true
     },
     {
-      "externalId": "m3-024",
-      "filename": "m3-024.txt",
-      "title": "Cybersecurity",
-      "topic": "cybersecurity",
+      "externalId": "m3-005",
+      "filename": "m3-005.txt",
+      "topic": "safety-compliance",
+      "variant": "label",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true,
+      "review": "overdue"
+    },
+    {
+      "externalId": "m3-015",
+      "filename": "m3-015.txt",
+      "topic": "safety-compliance",
+      "variant": "narrower",
+      "department": "M3 Operations [fixture]",
       "contentDate": "2026-10-10",
       "ownerRequired": true,
       "categoryRequired": true
@@ -220,17 +149,60 @@
     {
       "externalId": "m3-025",
       "filename": "m3-025.txt",
-      "title": "Safety Compliance",
       "topic": "safety-compliance",
-      "contentDate": "2023-01-10",
+      "variant": "related",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-006",
+      "filename": "m3-006.txt",
+      "topic": "asset-management",
+      "variant": "label",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true,
+      "review": "due"
+    },
+    {
+      "externalId": "m3-016",
+      "filename": "m3-016.txt",
+      "topic": "asset-management",
+      "variant": "narrower",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
       "ownerRequired": true,
       "categoryRequired": true
     },
     {
       "externalId": "m3-026",
       "filename": "m3-026.txt",
-      "title": "Asset Management",
       "topic": "asset-management",
+      "variant": "related",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-007",
+      "filename": "m3-007.txt",
+      "topic": "billing-operations",
+      "variant": "label",
+      "department": "M3 Corporate [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-017",
+      "filename": "m3-017.txt",
+      "topic": "billing-operations",
+      "variant": "narrower",
+      "department": "M3 Corporate [fixture]",
       "contentDate": "2026-10-10",
       "ownerRequired": true,
       "categoryRequired": true
@@ -238,8 +210,30 @@
     {
       "externalId": "m3-027",
       "filename": "m3-027.txt",
-      "title": "Billing Operations",
       "topic": "billing-operations",
+      "variant": "related",
+      "department": "M3 Corporate [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-008",
+      "filename": "m3-008.txt",
+      "topic": "vegetation-management",
+      "variant": "label",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2023-01-10",
+      "ownerRequired": true,
+      "categoryRequired": true,
+      "stale": true
+    },
+    {
+      "externalId": "m3-018",
+      "filename": "m3-018.txt",
+      "topic": "vegetation-management",
+      "variant": "narrower",
+      "department": "M3 Operations [fixture]",
       "contentDate": "2026-10-10",
       "ownerRequired": true,
       "categoryRequired": true
@@ -247,17 +241,59 @@
     {
       "externalId": "m3-028",
       "filename": "m3-028.txt",
-      "title": "Vegetation Management",
       "topic": "vegetation-management",
-      "contentDate": "2023-01-10",
+      "variant": "related",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-009",
+      "filename": "m3-009.txt",
+      "topic": "renewable-integration",
+      "variant": "label",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-019",
+      "filename": "m3-019.txt",
+      "topic": "renewable-integration",
+      "variant": "narrower",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
       "ownerRequired": true,
       "categoryRequired": true
     },
     {
       "externalId": "m3-029",
       "filename": "m3-029.txt",
-      "title": "Renewable Integration",
       "topic": "renewable-integration",
+      "variant": "related",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-010",
+      "filename": "m3-010.txt",
+      "topic": "emergency-response",
+      "variant": "label",
+      "department": "M3 Operations [fixture]",
+      "contentDate": "2026-10-10",
+      "ownerRequired": true,
+      "categoryRequired": true
+    },
+    {
+      "externalId": "m3-020",
+      "filename": "m3-020.txt",
+      "topic": "emergency-response",
+      "variant": "narrower",
+      "department": "M3 Operations [fixture]",
       "contentDate": "2026-10-10",
       "ownerRequired": true,
       "categoryRequired": true
@@ -265,11 +301,13 @@
     {
       "externalId": "m3-030",
       "filename": "m3-030.txt",
-      "title": "Emergency Response",
       "topic": "emergency-response",
+      "variant": "related",
+      "department": "M3 Operations [fixture]",
       "contentDate": "2026-10-10",
       "ownerRequired": true,
-      "categoryRequired": true
+      "categoryRequired": true,
+      "duplicateOf": "m3-010"
     }
   ]
 }

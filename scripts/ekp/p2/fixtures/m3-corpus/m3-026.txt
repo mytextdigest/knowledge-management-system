@@ -1,1 +1,1 @@
-Asset Management: asset inventory and replacement planning. This operational note covers equipment asset lifecycle inventory. Record 26 contains safe, fictional example information for enterprise knowledge retrieval.
+Spare parts stocking levels for breakers and relays at the central warehouse.

@@ -30,3 +30,26 @@ test('CSV escapes spreadsheet formulas',async()=>{
  const csv=contentHealthCsv([{id:'1',filename:'=1+1',departmentId:'',sourceProvider:'manual',ageDays:1,brokenLinks:0,missing:[],flags:{}}]);
  assert.ok(csv.includes("'=1+1"));
 });
+
+// D-13 fixture integrity: the shared C-M3/D-M3 corpus must keep testing what
+// the ontology adds, so no synonym may leak into a document.
+test('D13 fixture: 20-30 queries, known documents, synonyms absent from text, planted links', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const dir = new URL('./fixtures/m3-corpus/', import.meta.url);
+  const read = (f) => readFileSync(new URL(f, dir), 'utf8');
+  const manifest = JSON.parse(read('manifest.json'));
+  const { queries } = JSON.parse(read('queries.json'));
+  const keys = new Set(manifest.documents.map((d) => d.externalId));
+  assert.ok(queries.length >= 20 && queries.length <= 30);
+  assert.equal(new Set(queries.map((q) => q.query.toLowerCase())).size, queries.length, 'no duplicate queries');
+  for (const q of queries) for (const id of q.relevant) assert.ok(keys.has(id), `${q.id}: unknown ${id}`);
+  const files = readdirSync(dir).filter((f) => /^m3-\d{3}\.txt$/.test(f));
+  assert.equal(files.length, manifest.documents.length);
+  const corpus = files.map(read).join(' ').toLowerCase();
+  for (const [, alt] of read('terms.ttl').matchAll(/altLabel "([^"]+)"/g)) {
+    for (const word of alt.toLowerCase().match(/[a-z0-9]+/g)) if (word.length > 2) assert.ok(!corpus.includes(word), `synonym "${alt}" leaks into the corpus`);
+  }
+  assert.ok(corpus.includes('https://example.com/m3-fixture-not-found-2026'), 'dead link planted');
+  assert.ok(manifest.documents.some((d) => d.review === 'overdue') && manifest.documents.some((d) => d.review === 'due'));
+  assert.ok(new Set(manifest.documents.map((d) => d.department)).size >= 2, 'two departments for dept-admin scoping');
+});

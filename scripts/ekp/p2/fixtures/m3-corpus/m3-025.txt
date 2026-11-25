@@ -1,1 +1,1 @@
-Safety Compliance: field safety audits and compliance. This operational note covers lockout tagout PPE electrical safety. Record 25 contains safe, fictional example information for enterprise knowledge retrieval.
+Arc flash PPE requirements and glove testing intervals for line workers.

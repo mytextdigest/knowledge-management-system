@@ -1,1 +1,1 @@
-Grid Reliability: outage restoration and reliability metrics. This operational note covers distribution grid SAIDI SAIFI outage restoration. Record 2 contains safe, fictional example information for enterprise knowledge retrieval.  A deliberately broken test reference is https://example.com/m3-fixture-not-found-2026.
+Grid reliability report for the third quarter: interruption counts, feeder performance and reliability targets. A deliberately broken test reference is https://example.com/m3-fixture-not-found-2026.
