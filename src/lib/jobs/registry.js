@@ -25,6 +25,7 @@ import { scanDueReviews } from "../governance/reviewScan.js";
 import { scanStaleContent } from "../governance/staleScan.js";
 import { purgeDeletedDocuments } from "../lifecycle/purgeDeleted.js";
 import { rollupUsageRange } from "../analytics/rollup.mjs";
+import { scanDocumentLinks } from "../analytics/linkHealth.mjs";
 
 // A-22: down to 5 minutes (NFR-6, NYPA Q&A #99: changes within 5 minutes).
 export const INTERVAL_CHOICES = [5, 15, 30, 60, 240, 720, 1440];
@@ -78,6 +79,15 @@ async function queueSync({ prisma, orgId, enqueue, provider, name }) {
 }
 
 export const JOB_DEFINITIONS = {
+  "links.check": {
+    label: "Document link health",
+    description: "Checks external document URLs for broken links; private/internal addresses are never requested.",
+    defaultIntervalMinutes: 1440,
+    minIntervalMinutes: 60,
+    lockMinutes: 60,
+    appliesTo: () => true,
+    run: ({ prisma, orgId }) => scanDocumentLinks(prisma, { orgId }),
+  },
   // D-6: daily usage metrics into AnalyticsDaily. Recomputes the last 3 UTC
   // days each run so late clicks and follow-ups are counted.
   "analytics.rollup": {
