@@ -28,7 +28,7 @@ export default function DocumentTaggingPanel({ orgId, documentId }) {
     const list = body.fields || [];
     setFields(list);
     setCanEdit(!!body.canEdit);
-    setSelected(Object.fromEntries(list.map((f) => [f.id, f.documentTerms.map((t) => t.termId)])));
+    setSelected(Object.fromEntries(list.map((f) => [f.id, f.documentTerms.filter(t => t.status === "accepted").map((t) => t.termId)])));
   }, [endpoint]);
 
   useEffect(() => {
@@ -54,6 +54,16 @@ export default function DocumentTaggingPanel({ orgId, documentId }) {
     }
   }
 
+  async function review(tagId, action) {
+    setBusy(tagId); setError(''); setMessage('');
+    try {
+      const res = await fetch(endpoint, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tagId, action }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Review failed');
+      await load(); setMessage(`Suggestion ${action === 'accept' ? 'accepted' : 'dismissed'}.`);
+    } catch (e) { setError(e.message); } finally { setBusy(''); }
+  }
+
   if (loading) {
     return <p className="flex items-center gap-2 text-xs text-gray-500"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading tags…</p>;
   }
@@ -66,7 +76,8 @@ export default function DocumentTaggingPanel({ orgId, documentId }) {
       {fields.map((field) => {
         const terms = (field.termSet?.terms || []).filter((t) => t.status === "active" || (selected[field.id] || []).includes(t.id));
         const chosen = selected[field.id] || [];
-        const other = field.documentTerms.filter((t) => t.source !== "manual");
+        const other = field.documentTerms.filter((t) => t.source !== "manual" && t.status === "accepted");
+        const suggestions = field.documentTerms.filter(t => t.status === "suggested" && t.source === "auto");
         const editable = canEdit && !field.termSet?.readOnly;
         return (
           <div key={field.id} className="space-y-1.5">
@@ -96,8 +107,22 @@ export default function DocumentTaggingPanel({ orgId, documentId }) {
                 </button>
               </div>
             ) : (
-              <p className="text-xs text-gray-700 dark:text-gray-300">{field.documentTerms.map((t) => t.term?.label).filter(Boolean).join(", ") || "—"}</p>
+              <p className="text-xs text-gray-700 dark:text-gray-300">{field.documentTerms.filter((t) => t.status === "accepted").map((t) => t.term?.label).filter(Boolean).join(", ") || "—"}</p>
             )}
+            {suggestions.length ? (
+              <div className="space-y-1 rounded border border-amber-200 bg-amber-50 p-2 text-xs dark:border-amber-800 dark:bg-amber-950/30">
+                <p className="font-medium">AI suggestions awaiting review</p>
+                {suggestions.map(tag => (
+                  <div key={tag.id} className="flex items-center gap-2">
+                    <span className="flex-1">{tag.term?.label} ({Math.round((tag.confidence || 0) * 100)}%)</span>
+                    {canEdit ? <>
+                      <button type="button" disabled={!!busy} onClick={() => review(tag.id, 'accept')} className="rounded border border-amber-400 px-2 py-0.5 hover:bg-amber-100 dark:hover:bg-amber-900">Accept</button>
+                      <button type="button" disabled={!!busy} onClick={() => review(tag.id, 'dismiss')} className="rounded border border-amber-400 px-2 py-0.5 hover:bg-amber-100 dark:hover:bg-amber-900">Dismiss</button>
+                    </> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
             {editable && other.length ? (
               <p className="text-xs text-gray-500">
                 {other.map((t) => `${t.term?.label} (from ${SOURCE_LABELS[t.source] || t.source})`).join(", ")}

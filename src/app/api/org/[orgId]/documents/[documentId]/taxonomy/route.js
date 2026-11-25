@@ -38,7 +38,7 @@ export async function GET(_req, { params }) {
       where: { orgId },
       include: {
         termSet: { select: { id: true, name: true, readOnly: true, terms: { select: { id: true, label: true, status: true, depth: true }, orderBy: [{ sortOrder: "asc" }, { label: "asc" }] } } },
-        documentTerms: { where: { documentId, status: "accepted" }, include: { term: { select: { id: true, label: true, status: true } } } },
+        documentTerms: { where: { documentId }, include: { term: { select: { id: true, label: true, status: true } } } },
       },
       orderBy: [{ facetOrder: "asc" }, { name: "asc" }],
     }),
@@ -73,6 +73,8 @@ export async function PUT(req, { params }) {
   let result;
   try {
     result = await prisma.$transaction(async (tx) => {
+      // Serialize manual tagging with automatic classification and suggestion review.
+      await tx.$queryRaw`SELECT id FROM "Document" WHERE id = ${documentId} FOR UPDATE`;
       const current = await tx.documentTerm.findMany({ where: { documentId, fieldId: field.id }, select: { id: true, termId: true, source: true, status: true } });
       if (!field.multi && current.some((t) => t.source === "source_system" && t.status === "accepted" && !ids.includes(t.termId))) {
         throw new Error("TAXONOMY_SOURCE_CONFLICT");
@@ -108,4 +110,41 @@ export async function PUT(req, { params }) {
     before: { fieldId: field.id, tags: result.before }, after: { fieldId: field.id, termIds: ids },
   });
   return NextResponse.json({ termIds: ids });
+}
+
+// C-10 review: document managers can accept or dismiss a classifier suggestion.
+export async function PATCH(req, { params }) {
+  const { orgId, documentId } = await params;
+  const a = await context(orgId, documentId);
+  if (a.error) return a.error;
+  if (!(await canManageDocument(a.document, { userId: a.user.id, role: a.role }))) return fail("Not permitted to review tags", 403);
+  const body = await req.json().catch(() => ({}));
+  if (typeof body.tagId !== 'string' || !['accept', 'dismiss'].includes(body.action)) return fail('Invalid review action');
+  const tag = await prisma.documentTerm.findFirst({ where: { id: body.tagId, documentId, status: 'suggested', source: 'auto', field: { orgId } }, include: { field: true, term: true } });
+  if (!tag) return fail('Suggestion not found', 404);
+  try {
+    await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "Document" WHERE id = ${documentId} FOR UPDATE`;
+      const current = await tx.documentTerm.findFirst({ where: { id: tag.id, documentId, status: 'suggested', source: 'auto' } });
+      if (!current) throw new Error('ALREADY_REVIEWED');
+      if (body.action === 'dismiss') {
+        const deleted = await tx.documentTerm.deleteMany({ where: { id: tag.id, status: 'suggested', source: 'auto' } });
+        if (!deleted.count) throw new Error('ALREADY_REVIEWED');
+        return;
+      }
+      if (!tag.field.multi) {
+        const conflicts = await tx.documentTerm.findMany({ where: { documentId, fieldId: tag.fieldId, status: 'accepted', termId: { not: tag.termId } } });
+        if (conflicts.some(t => t.source === 'source_system' || t.source === 'manual')) throw new Error('TAG_CONFLICT');
+        await tx.documentTerm.deleteMany({ where: { id: { in: conflicts.filter(t => t.source === 'auto' || t.source === 'import').map(t => t.id) } } });
+      }
+      const updated = await tx.documentTerm.updateMany({ where: { id: tag.id, status: 'suggested', source: 'auto' }, data: { status: 'accepted', acceptedById: a.user.id, acceptedAt: new Date() } });
+      if (!updated.count) throw new Error('ALREADY_REVIEWED');
+    });
+  } catch (error) {
+    if (error?.message === 'TAG_CONFLICT') return fail('A manual or SharePoint tag already controls this single-value field', 409);
+    if (error?.message === 'ALREADY_REVIEWED') return fail('Suggestion already reviewed', 409);
+    throw error;
+  }
+  await logAudit({ orgId, actorUserId: a.user.id, action: `taxonomy.suggestion.${body.action}`, entityType: 'DocumentTerm', entityId: tag.id, after: { documentId, fieldId: tag.fieldId, termId: tag.termId } });
+  return NextResponse.json({ reviewed: true });
 }

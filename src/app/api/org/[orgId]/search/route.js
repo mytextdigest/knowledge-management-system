@@ -59,6 +59,7 @@ export async function POST(req, { params }) {
     departmentId,
     isSuperAdmin: isSuperAdmin(role),
     exactTermQuestion: query,
+    ontologyEnabled: body.ontologyEnabled === false && isSuperAdmin(role) ? false : true,
   });
 
   return NextResponse.json({

@@ -1,0 +1,24 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix ex: <https://example.org/kms-m3/> .
+ex:scheme a skos:ConceptScheme ; skos:prefLabel "M3 Evaluation Terms"@en .
+ex:transformer-maintenance a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Transformer Maintenance"@en ; skos:altLabel "GSU upkeep"@en .
+ex:dissolved-gas-analysis a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Dissolved Gas Analysis"@en ; skos:altLabel "DGA"@en ; skos:broader ex:transformer-maintenance .
+ex:grid-reliability a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Grid Reliability"@en ; skos:altLabel "SAIFI"@en .
+ex:outage-restoration a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Outage Restoration"@en ; skos:altLabel "CAIDI"@en ; skos:broader ex:grid-reliability .
+ex:hydro-generation a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Hydro Generation"@en ; skos:altLabel "hydropower"@en .
+ex:turbine-inspection a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Turbine Inspection"@en ; skos:altLabel "Kaplan teardown"@en ; skos:broader ex:hydro-generation .
+ex:cybersecurity a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Cybersecurity"@en ; skos:altLabel "infosec"@en .
+ex:multifactor-authentication a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Multifactor Authentication"@en ; skos:altLabel "MFA"@en ; skos:broader ex:cybersecurity .
+ex:safety-compliance a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Safety Compliance"@en ; skos:altLabel "OSHA readiness"@en .
+ex:lockout-tagout a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Lockout Tagout"@en ; skos:altLabel "LOTO"@en ; skos:broader ex:safety-compliance .
+ex:asset-management a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Asset Management"@en ; skos:altLabel "CMMS"@en .
+ex:condition-assessment a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Condition Assessment"@en ; skos:altLabel "groundline treatment"@en ; skos:broader ex:asset-management .
+ex:billing-operations a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Billing Operations"@en ; skos:altLabel "invoicing"@en .
+ex:meter-reading a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Meter Reading"@en ; skos:altLabel "AMI reads"@en ; skos:broader ex:billing-operations .
+ex:vegetation-management a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Vegetation Management"@en ; skos:altLabel "brush clearing"@en .
+ex:tree-trimming a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Tree Trimming"@en ; skos:altLabel "arborist"@en ; skos:broader ex:vegetation-management .
+ex:renewable-integration a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Renewable Integration"@en ; skos:altLabel "distributed energy"@en .
+ex:solar-interconnection a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Solar Interconnection"@en ; skos:altLabel "photovoltaic hookup"@en ; skos:broader ex:renewable-integration .
+ex:emergency-response a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Emergency Response"@en ; skos:altLabel "incident command"@en .
+ex:storm-response a skos:Concept ; skos:inScheme ex:scheme ; skos:prefLabel "Storm Response"@en ; skos:altLabel "mutual aid"@en ; skos:broader ex:emergency-response .
+ex:grid-reliability skos:related ex:emergency-response .

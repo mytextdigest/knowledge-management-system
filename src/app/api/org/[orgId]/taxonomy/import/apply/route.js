@@ -1,4 +1,8 @@
 import { NextResponse } from 'next/server';
+import OpenAI from 'openai';
+import { getOrgOpenAIKey } from '@/utils/key_helper';
+import { ensureTermEmbeddings } from '@/lib/taxonomy/autoTag.mjs';
+import { invalidateOntologyCache } from '@/lib/taxonomy/ontologySearch.mjs';
 import { getServerSession } from 'next-auth';
 import { prisma } from '@/lib/prisma';
 import { resolveOrgRole, isSuperAdmin } from '@/lib/orgGuard';
@@ -44,6 +48,7 @@ export async function POST(req, { params }) {
     return fail('Import failed; nothing was changed', 500);
   }
 
+  invalidateOntologyCache(orgId);
   await logAudit({
     orgId, actorUserId: actor.user.id, action: 'taxonomy.external_import.applied', entityType: 'TermSet', entityId: result.termSetId,
     after: { importId: result.importId, format: body.format, created: result.created, summary: result.summary },
@@ -61,5 +66,24 @@ export async function POST(req, { params }) {
   } catch (error) {
     console.warn('C-8 mapping after import failed:', error?.message);
   }
-  return NextResponse.json({ applied: true, ...result, tagMapping });
+  // Import-time embedding refresh (C-10): the first classified document must
+  // not trigger thousands of term embeddings. If the org has no key, surface
+  // an explicit incomplete state rather than silently claiming readiness.
+  let embeddingRefresh = { ready: false, reason: 'not_attempted' };
+  try {
+    const apiKey = await getOrgOpenAIKey(orgId);
+    if (!apiKey) embeddingRefresh = { ready: false, reason: 'org_openai_key_missing' };
+    else {
+      const terms = await prisma.term.findMany({ where: { termSetId: result.termSetId, status: 'active' }, select: {
+        id: true, label: true, description: true, updatedAt: true, embeddedAt: true,
+        synonyms: { select: { label: true } },
+      } });
+      await ensureTermEmbeddings(prisma, new OpenAI({ apiKey }), terms);
+      embeddingRefresh = { ready: true, termCount: terms.length };
+    }
+  } catch (error) {
+    console.error('C-M3 import-time embeddings unavailable', error);
+    embeddingRefresh = { ready: false, reason: 'embedding_refresh_failed' };
+  }
+  return NextResponse.json({ applied: true, ...result, tagMapping, embeddingRefresh });
 }

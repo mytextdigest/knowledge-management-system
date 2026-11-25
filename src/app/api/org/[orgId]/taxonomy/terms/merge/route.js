@@ -1,3 +1,4 @@
+import { invalidateOntologyCache } from '@/lib/taxonomy/ontologySearch.mjs';
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
@@ -86,5 +87,6 @@ export async function POST(req, { params }) {
     before: { label: source.label, status: source.status },
     after: { status: "deprecated", mergedIntoId: target.id, mergedIntoLabel: target.label, ...result },
   });
+  invalidateOntologyCache(orgId);
   return NextResponse.json({ merged: true, ...result });
 }

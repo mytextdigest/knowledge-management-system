@@ -1,3 +1,4 @@
+import { invalidateOntologyCache } from '@/lib/taxonomy/ontologySearch.mjs';
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
@@ -67,6 +68,7 @@ export async function POST(req, { params }) {
     },
   });
   await logAudit({ orgId, actorUserId: a.user.id, action: "taxonomy.term.created", entityType: "Term", entityId: term.id, after: { label, termSetId: set.id, parentId: term.parentId, synonyms: synonyms.map((s) => s.label) } });
+  invalidateOntologyCache(orgId);
   return NextResponse.json({ term }, { status: 201 });
 }
 
@@ -106,5 +108,6 @@ export async function PATCH(req, { params }) {
     before: { label: old.label, status: old.status, synonyms: old.synonyms.map((s) => s.label) },
     after: { label, status, synonyms: synonyms ? synonyms.map((s) => s.label) : old.synonyms.map((s) => s.label) },
   });
+  invalidateOntologyCache(orgId);
   return NextResponse.json({ term });
 }

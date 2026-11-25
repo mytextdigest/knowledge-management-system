@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { classifyTaxonomyTerms } from "../src/lib/taxonomy/autoTag.mjs";
 import { syncDocumentCategory } from "../src/lib/taxonomy/defaultCategory.mjs";
 import { getSetting } from "../src/lib/settings/index.js";
 
@@ -193,6 +194,15 @@ export async function classifyDocument({ prisma, openai, documentId, filename, t
     }
   }
 
+  // C-10: non-fatal additive taxonomy classification; existing category logic stays intact.
+  try {
+    if (effectiveOrgId) {
+      const threshold = await getSetting(effectiveOrgId, "classification.taxonomyThreshold");
+      await classifyTaxonomyTerms({ prisma, openai, orgId: effectiveOrgId, documentId, filename, summary, text, threshold });
+    }
+  } catch (error) {
+    console.warn(`[classify] taxonomy suggestions unavailable for ${documentId}: ${error?.message}`);
+  }
   return {
     category: acceptedCategory,
     categoryConfidence,
