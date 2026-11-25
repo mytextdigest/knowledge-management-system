@@ -48,6 +48,7 @@ async function syncOneArticle(db, { change, integration, kb, enqueueChunk }) {
     filePath: null,
     status: "queued",
     externalModifiedAt: modifiedAt,
+    contentUpdatedAt: modifiedAt,
     externalUrl: change.webUrl,
     departmentId: kb.departmentId,
     // Published again after being retired: back through Needs Review.

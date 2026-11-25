@@ -192,6 +192,7 @@ export async function POST(req) {
       prisma.document.create({
         data: {
           filename,
+          contentUpdatedAt: new Date(),
           filePath: s3Key,
           status: "queued",
           lifecycle,

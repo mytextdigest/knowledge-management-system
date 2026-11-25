@@ -1,0 +1,246 @@
+{
+  "version": 2,
+  "notes": "label: topic name (keyword search finds only m3-0NN). synonym: a SKOS altLabel found in no document. narrower_synonym: altLabel of a narrower term; only m3-1NN is relevant.",
+  "queries": [
+    {
+      "id": "q01",
+      "kind": "label",
+      "query": "transformer maintenance",
+      "relevant": [
+        "m3-001",
+        "m3-011",
+        "m3-021"
+      ]
+    },
+    {
+      "id": "q02",
+      "kind": "label",
+      "query": "grid reliability",
+      "relevant": [
+        "m3-002",
+        "m3-012",
+        "m3-022"
+      ]
+    },
+    {
+      "id": "q03",
+      "kind": "label",
+      "query": "hydro generation",
+      "relevant": [
+        "m3-003",
+        "m3-013",
+        "m3-023"
+      ]
+    },
+    {
+      "id": "q04",
+      "kind": "label",
+      "query": "cybersecurity",
+      "relevant": [
+        "m3-004",
+        "m3-014",
+        "m3-024"
+      ]
+    },
+    {
+      "id": "q05",
+      "kind": "label",
+      "query": "safety compliance",
+      "relevant": [
+        "m3-005",
+        "m3-015",
+        "m3-025"
+      ]
+    },
+    {
+      "id": "q06",
+      "kind": "label",
+      "query": "asset management",
+      "relevant": [
+        "m3-006",
+        "m3-016",
+        "m3-026"
+      ]
+    },
+    {
+      "id": "q07",
+      "kind": "label",
+      "query": "billing operations",
+      "relevant": [
+        "m3-007",
+        "m3-017",
+        "m3-027"
+      ]
+    },
+    {
+      "id": "q08",
+      "kind": "label",
+      "query": "vegetation management",
+      "relevant": [
+        "m3-008",
+        "m3-018",
+        "m3-028"
+      ]
+    },
+    {
+      "id": "q09",
+      "kind": "label",
+      "query": "renewable integration",
+      "relevant": [
+        "m3-009",
+        "m3-019",
+        "m3-029"
+      ]
+    },
+    {
+      "id": "q10",
+      "kind": "label",
+      "query": "emergency response",
+      "relevant": [
+        "m3-010",
+        "m3-020",
+        "m3-030"
+      ]
+    },
+    {
+      "id": "q11",
+      "kind": "synonym",
+      "query": "GSU upkeep",
+      "relevant": [
+        "m3-001",
+        "m3-011",
+        "m3-021"
+      ]
+    },
+    {
+      "id": "q12",
+      "kind": "synonym",
+      "query": "SAIFI",
+      "relevant": [
+        "m3-002",
+        "m3-012",
+        "m3-022"
+      ]
+    },
+    {
+      "id": "q13",
+      "kind": "synonym",
+      "query": "hydropower",
+      "relevant": [
+        "m3-003",
+        "m3-013",
+        "m3-023"
+      ]
+    },
+    {
+      "id": "q14",
+      "kind": "synonym",
+      "query": "infosec",
+      "relevant": [
+        "m3-004",
+        "m3-014",
+        "m3-024"
+      ]
+    },
+    {
+      "id": "q15",
+      "kind": "synonym",
+      "query": "OSHA readiness",
+      "relevant": [
+        "m3-005",
+        "m3-015",
+        "m3-025"
+      ]
+    },
+    {
+      "id": "q16",
+      "kind": "synonym",
+      "query": "CMMS",
+      "relevant": [
+        "m3-006",
+        "m3-016",
+        "m3-026"
+      ]
+    },
+    {
+      "id": "q17",
+      "kind": "synonym",
+      "query": "invoicing",
+      "relevant": [
+        "m3-007",
+        "m3-017",
+        "m3-027"
+      ]
+    },
+    {
+      "id": "q18",
+      "kind": "synonym",
+      "query": "brush clearing",
+      "relevant": [
+        "m3-008",
+        "m3-018",
+        "m3-028"
+      ]
+    },
+    {
+      "id": "q19",
+      "kind": "synonym",
+      "query": "distributed energy",
+      "relevant": [
+        "m3-009",
+        "m3-019",
+        "m3-029"
+      ]
+    },
+    {
+      "id": "q20",
+      "kind": "synonym",
+      "query": "incident command",
+      "relevant": [
+        "m3-010",
+        "m3-020",
+        "m3-030"
+      ]
+    },
+    {
+      "id": "q21",
+      "kind": "narrower_synonym",
+      "query": "DGA",
+      "relevant": [
+        "m3-011"
+      ]
+    },
+    {
+      "id": "q22",
+      "kind": "narrower_synonym",
+      "query": "MFA",
+      "relevant": [
+        "m3-014"
+      ]
+    },
+    {
+      "id": "q23",
+      "kind": "narrower_synonym",
+      "query": "LOTO",
+      "relevant": [
+        "m3-015"
+      ]
+    },
+    {
+      "id": "q24",
+      "kind": "narrower_synonym",
+      "query": "photovoltaic hookup",
+      "relevant": [
+        "m3-019"
+      ]
+    },
+    {
+      "id": "q25",
+      "kind": "narrower_synonym",
+      "query": "mutual aid",
+      "relevant": [
+        "m3-020"
+      ]
+    }
+  ]
+}

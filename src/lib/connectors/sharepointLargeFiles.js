@@ -21,6 +21,7 @@ export function tooLargeFileWrites(db, { existing, modifiedAt, sourceFields, acl
     content: null,
     status: TOO_LARGE,
     externalModifiedAt: new Date(modifiedAt),
+    contentUpdatedAt: new Date(modifiedAt),
     ...sourceFields,
   };
   return [

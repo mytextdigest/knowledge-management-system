@@ -22,7 +22,7 @@ export async function POST(_req, { params }) {
     await prisma.$transaction(async (tx) => {
       const changed = await tx.document.updateMany({
         where: { id, deletedAt: { not: null } },
-        data: { deletedAt: null, deletedById: null, purgeAfter: null },
+        data: { deletedAt: null, deletedById: null, purgeAfter: null, contentUpdatedAt: new Date() },
       });
       if (changed.count !== 1) throw new Error("NOT_DELETED");
       // Deleting cancelled any running workflow, so a document deleted while
