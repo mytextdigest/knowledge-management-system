@@ -1,1 +1,1 @@
-Billing Operations: meter billing and customer account workflows. This operational note covers meter reading invoice payment. Record 27 contains safe, fictional example information for enterprise knowledge retrieval.
+Late payment notices and payment plan options for residential customers.

@@ -1,1 +1,1 @@
-Asset Management: asset inventory and replacement planning. This operational note covers equipment asset lifecycle inventory. Record 16 contains safe, fictional example information for enterprise knowledge retrieval.
+Condition assessment of wood poles using resistograph testing and visual inspection.

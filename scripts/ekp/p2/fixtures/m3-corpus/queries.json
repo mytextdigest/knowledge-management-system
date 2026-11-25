@@ -1,8 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
+  "notes": "label: topic name (keyword search finds only m3-0NN). synonym: a SKOS altLabel found in no document. narrower_synonym: altLabel of a narrower term; only m3-1NN is relevant.",
   "queries": [
     {
       "id": "q01",
+      "kind": "label",
       "query": "transformer maintenance",
       "relevant": [
         "m3-001",
@@ -12,6 +14,7 @@
     },
     {
       "id": "q02",
+      "kind": "label",
       "query": "grid reliability",
       "relevant": [
         "m3-002",
@@ -21,6 +24,7 @@
     },
     {
       "id": "q03",
+      "kind": "label",
       "query": "hydro generation",
       "relevant": [
         "m3-003",
@@ -30,6 +34,7 @@
     },
     {
       "id": "q04",
+      "kind": "label",
       "query": "cybersecurity",
       "relevant": [
         "m3-004",
@@ -39,6 +44,7 @@
     },
     {
       "id": "q05",
+      "kind": "label",
       "query": "safety compliance",
       "relevant": [
         "m3-005",
@@ -48,6 +54,7 @@
     },
     {
       "id": "q06",
+      "kind": "label",
       "query": "asset management",
       "relevant": [
         "m3-006",
@@ -57,6 +64,7 @@
     },
     {
       "id": "q07",
+      "kind": "label",
       "query": "billing operations",
       "relevant": [
         "m3-007",
@@ -66,6 +74,7 @@
     },
     {
       "id": "q08",
+      "kind": "label",
       "query": "vegetation management",
       "relevant": [
         "m3-008",
@@ -75,6 +84,7 @@
     },
     {
       "id": "q09",
+      "kind": "label",
       "query": "renewable integration",
       "relevant": [
         "m3-009",
@@ -84,6 +94,7 @@
     },
     {
       "id": "q10",
+      "kind": "label",
       "query": "emergency response",
       "relevant": [
         "m3-010",
@@ -93,7 +104,8 @@
     },
     {
       "id": "q11",
-      "query": "dielectric fluid condition",
+      "kind": "synonym",
+      "query": "GSU upkeep",
       "relevant": [
         "m3-001",
         "m3-011",
@@ -102,7 +114,8 @@
     },
     {
       "id": "q12",
-      "query": "restoration grid reliability",
+      "kind": "synonym",
+      "query": "SAIFI",
       "relevant": [
         "m3-002",
         "m3-012",
@@ -111,7 +124,8 @@
     },
     {
       "id": "q13",
-      "query": "vibration hydro generation",
+      "kind": "synonym",
+      "query": "hydropower",
       "relevant": [
         "m3-003",
         "m3-013",
@@ -120,7 +134,8 @@
     },
     {
       "id": "q14",
-      "query": "authentication cybersecurity",
+      "kind": "synonym",
+      "query": "infosec",
       "relevant": [
         "m3-004",
         "m3-014",
@@ -129,7 +144,8 @@
     },
     {
       "id": "q15",
-      "query": "safety safety compliance",
+      "kind": "synonym",
+      "query": "OSHA readiness",
       "relevant": [
         "m3-005",
         "m3-015",
@@ -138,7 +154,8 @@
     },
     {
       "id": "q16",
-      "query": "inventory asset management",
+      "kind": "synonym",
+      "query": "CMMS",
       "relevant": [
         "m3-006",
         "m3-016",
@@ -147,7 +164,8 @@
     },
     {
       "id": "q17",
-      "query": "meter billing operations",
+      "kind": "synonym",
+      "query": "invoicing",
       "relevant": [
         "m3-007",
         "m3-017",
@@ -156,7 +174,8 @@
     },
     {
       "id": "q18",
-      "query": "clearance vegetation management",
+      "kind": "synonym",
+      "query": "brush clearing",
       "relevant": [
         "m3-008",
         "m3-018",
@@ -165,7 +184,8 @@
     },
     {
       "id": "q19",
-      "query": "wind renewable integration",
+      "kind": "synonym",
+      "query": "distributed energy",
       "relevant": [
         "m3-009",
         "m3-019",
@@ -174,7 +194,8 @@
     },
     {
       "id": "q20",
-      "query": "dispatch emergency response",
+      "kind": "synonym",
+      "query": "incident command",
       "relevant": [
         "m3-010",
         "m3-020",
@@ -183,47 +204,42 @@
     },
     {
       "id": "q21",
-      "query": "analysis transformer maintenance",
+      "kind": "narrower_synonym",
+      "query": "DGA",
       "relevant": [
-        "m3-001",
-        "m3-011",
-        "m3-021"
+        "m3-011"
       ]
     },
     {
       "id": "q22",
-      "query": "SAIFI grid reliability",
+      "kind": "narrower_synonym",
+      "query": "MFA",
       "relevant": [
-        "m3-002",
-        "m3-012",
-        "m3-022"
+        "m3-014"
       ]
     },
     {
       "id": "q23",
-      "query": "vibration hydro generation",
+      "kind": "narrower_synonym",
+      "query": "LOTO",
       "relevant": [
-        "m3-003",
-        "m3-013",
-        "m3-023"
+        "m3-015"
       ]
     },
     {
       "id": "q24",
-      "query": "authentication cybersecurity",
+      "kind": "narrower_synonym",
+      "query": "photovoltaic hookup",
       "relevant": [
-        "m3-004",
-        "m3-014",
-        "m3-024"
+        "m3-019"
       ]
     },
     {
       "id": "q25",
-      "query": "safety safety compliance",
+      "kind": "narrower_synonym",
+      "query": "mutual aid",
       "relevant": [
-        "m3-005",
-        "m3-015",
-        "m3-025"
+        "m3-020"
       ]
     }
   ]

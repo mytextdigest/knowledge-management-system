@@ -1,1 +1,1 @@
-Transformer Maintenance: substation transformer oil testing and preventive maintenance. This operational note covers power transformer dielectric oil dissolved gas analysis. Record 1 contains safe, fictional example information for enterprise knowledge retrieval.  A working public reference is https://example.com/.
+Transformer maintenance plan for substation units: oil sampling, bushing checks and preventive maintenance intervals. A working public reference is https://example.com/.

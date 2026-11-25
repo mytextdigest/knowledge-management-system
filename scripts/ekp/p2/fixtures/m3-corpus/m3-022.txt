@@ -1,1 +1,1 @@
-Grid Reliability: outage restoration and reliability metrics. This operational note covers distribution grid SAIDI SAIFI outage restoration. Record 22 contains safe, fictional example information for enterprise knowledge retrieval.
+Hardening proposal: recloser upgrades and sectionalizing to shorten customer interruptions.
