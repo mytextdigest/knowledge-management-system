@@ -7,6 +7,7 @@
 | **Phase milestone**| **Mon 30 Nov:** taxonomy-driven search, admin dashboards, and PowerPoint/video ingestion live on `dev`, cross-tested by role, RTM re-scored |
 | **Reviewer**       | Johurul reviews Sandeep's and Simran's PRs. Sandeep or Simran reviews Johurul's.             |
 | **Created**        | 2026-10-29                                                                                   |
+| **Status**         | **M2 merged for all three workstreams** (16 Nov): C-M2 #38, D-M2 #37, E-M2 #39. M3 in progress (E-10 and E-11 of E-M3 already merged in #39). See §2. |
 
 **Source documents:** [EKP_IMPLEMENTATION_PLAN.md](../EKP_IMPLEMENTATION_PLAN.md) (workflow, RTM, database rules) · [KMS_EKP_PRODUCT_REQUIREMENTS_SPECIFICATION.md](../KMS_EKP_PRODUCT_REQUIREMENTS_SPECIFICATION.md) (FRs, acceptance) · [KMS_EKP_IMPLEMENTATION_SPECIFICATION.md](../KMS_EKP_IMPLEMENTATION_SPECIFICATION.md) (§4 foundations, §5.3–5.5 designs) · [KMS_EKP_Status_Update_2026-10-20.pdf](../KMS_EKP_Status_Update_2026-10-20.pdf) (phase dates).
 
@@ -32,6 +33,25 @@ Every milestone is **demoable**: it ends with a merged PR into `dev` and a short
 | **Tue 24 Nov** | **C-M4** Taxonomy facets (E4), search weights | | |
 | **Thu 26 Nov** | | **D-M4** Search quality (E30) + Power BI (A5) | **E-M4** Images, thumbnails/previews, templates (part 2) |
 | **Fri 27 – Mon 30 Nov** | **P2-INT** Phase 2 integration and cross-testing (all roles), RTM re-score, gap analysis update | ← | ← |
+
+### Progress
+
+Updated 2026-11-16. Merge dates are local (IST).
+
+| Milestone | WS-C (Sandeep) | WS-D (Simran) | WS-E (Johurul) |
+| --- | --- | --- | --- |
+| **M1** (due 6 Nov) | ✅ #35, merged 10 Nov | ✅ #34, merged 10 Nov | ✅ #36, merged 7 Nov |
+| **M2** (due 13 Nov) | ✅ #38, merged 16 Nov | ✅ #37, merged 16 Nov | ✅ #39, merged 14 Nov |
+| **M3** (due 20 Nov) | Not started | Not started | In progress: E-10 and E-11 merged in #39; E-12 (SAML) left |
+| **M4** (due 24 / 26 Nov) | Not started | Not started | Not started |
+
+- **C-M2 and D-M2 were fixed in review before merge** (Johurul, 16 Nov). The notes are dated 2026-11-16 in each workstream document §8.
+  - C-M2 added the first import and the import UI, a SKOS parser that reads real exports, batched apply (2,601 terms in 9.2 s on the shared DB), and SharePoint column mapping stored in `OrgSetting`.
+  - D-M2 added time to answer, the DS-3 bounce definition, a Usage tab that reads `AnalyticsDaily`, logging that doesn't block the search, chat citation clicks and dwell time.
+  - The C-4/C-5 and D-4 items moved from M1 are done.
+- **Worker on EC2:** #37 (`analytics.rollup` runs in the worker's scheduler) and #38 (tag mapping after each SharePoint sync) only take effect after the EC2 worker pulls `dev` and restarts (`DEV_SETUP.md` §7). The `analytics.rollup` job starts switched off.
+- **Before the D-M2 demo:** run `scripts/ekp/p2/d7-seed-usage-week.mjs --org <id> --apply` for a week of demo activity (`--remove` takes it out), or back-fill with `scripts/ekp/p2/d6-analytics-rollup.mjs`.
+- **Open from C-M2:** C-9 found that `Sites.Selected` can't read the tenant term store; reading it needs `TermStore.Read.All` (CQ-4, [C9_GRAPH_TERMSTORE_SPIKE.md](C9_GRAPH_TERMSTORE_SPIKE.md)). File import is the supported path.
 
 **If a milestone is late:** demo what is merged, move the unfinished tasks to the next milestone, and don't move the date. Unfinished Phase 2 tasks move to the start of Phase 3, the same rule as Phase 1.
 

@@ -3,8 +3,9 @@
 // Run: EKP_DB_TESTS=1 npm run ekp:f3:test
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { PrismaClient } from "@prisma/client";
-import { claimDueJobs, runJob } from "../../worker/scheduler.js";
+import { claimDueJobs, msUntilNextDue, runJob, sleepAfterPass, startScheduler } from "../../worker/scheduler.js";
 import { JOB_DEFINITIONS, ensureOrgJobs, jobKey, INTERVAL_CHOICES } from "../../src/lib/jobs/registry.js";
 import { validateJobPatch, serializeJob } from "../../src/lib/jobs/jobAdmin.js";
 
@@ -140,6 +141,84 @@ test("sharepoint.sync: job row only for connected orgs, starts off; queues a sch
 
       throw ROLLBACK;
     }, { timeout: 60_000, maxWait: 20_000 });
+  } catch (err) {
+    if (err !== ROLLBACK) throw err;
+  } finally {
+    await prisma.$disconnect();
+  }
+});
+
+// Neon: the scheduler sleeps until the next job is due instead of querying
+// every minute, so the database can suspend between runs.
+test("sleep after a pass: until the next due job, capped, never busy-looping", () => {
+  const max = 360 * MIN;
+  assert.equal(sleepAfterPass(null, { maxMs: max }), max, "nothing scheduled: longest sleep");
+  assert.equal(sleepAfterPass(90 * MIN, { maxMs: max }), 90 * MIN);
+  assert.equal(sleepAfterPass(3 * 24 * 60 * MIN, { maxMs: max }), max, "a far-off job: still checks at the cap");
+  assert.equal(sleepAfterPass(-5_000, { maxMs: max }), 1_000, "overdue (more than one batch): soon, not a tight loop");
+  assert.equal(sleepAfterPass(Number.NaN, { maxMs: max }), max);
+});
+
+test("scheduler: no fixed one-minute check; a wake runs a pass now; a wake during a pass runs one more", async () => {
+  const src = fs.readFileSync(new URL("../../worker/scheduler.js", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /setInterval\(/, "no fixed-interval polling");
+  assert.match(fs.readFileSync(new URL("../../worker/index.js", import.meta.url), "utf8"), /"scheduler_wake"\) return scheduler\.wake\(\)/);
+  for (const route of ["src/app/api/org/[orgId]/jobs/[jobId]/route.js", "src/app/api/org/[orgId]/jobs/[jobId]/run/route.js"]) {
+    assert.match(fs.readFileSync(new URL(`../../${route}`, import.meta.url), "utf8"), /await wakeScheduler\(\)/, `${route} wakes the scheduler`);
+  }
+
+  let claims = 0;
+  let release;
+  const db = {
+    $queryRaw: async (strings) => {
+      if (strings.join("").includes("UPDATE \"ScheduledJob\"")) {
+        claims += 1;
+        if (claims === 2) await new Promise((r) => { release = r; }); // hold the woken pass open
+        return [];
+      }
+      return [{ ms: null }]; // nothing scheduled
+    },
+  };
+  const scheduler = startScheduler(db, { enqueue: async () => {} });
+  try {
+    await new Promise((r) => setTimeout(r, 5_300)); // first pass after 5 s
+    assert.equal(claims, 1);
+    scheduler.wake();
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(claims, 2, "woken: ran a pass straight away");
+    scheduler.wake(); // arrives while that pass is running
+    release();
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(claims, 3, "the wake during the pass got its own pass");
+  } finally {
+    scheduler.stop();
+  }
+});
+
+test("msUntilNextDue: enabled jobs and Run now; not before a lock expires", { skip: !RUN_DB_TESTS }, async () => {
+  const prisma = new PrismaClient();
+  const tag = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+  try {
+    await prisma.$transaction(async (db) => {
+      await db.$executeRaw`UPDATE "ScheduledJob" SET enabled = false, run_requested_at = NULL`; // rolled back
+      assert.equal(await msUntilNextDue(db), null, "nothing enabled: nothing due");
+      const org = await db.organization.create({ data: { name: `f3n-${tag}` } });
+      const now = Date.now();
+      const mk = (name, data) => db.scheduledJob.create({
+        data: { key: jobKey(`${name}-${tag}`, org.id), name: `${name}-${tag}`, orgId: org.id, intervalMinutes: 60, enabled: true, nextRunAt: new Date(now + 90 * MIN), ...data },
+      });
+      await mk("later", {});
+      await mk("off", { enabled: false, nextRunAt: new Date(now - MIN) });
+      const ms = await msUntilNextDue(db);
+      assert.ok(Math.abs(ms - 90 * MIN) < MIN, `next due in ~90 min, got ${ms}`);
+      const locked = await mk("locked", { nextRunAt: new Date(now - MIN), lockedUntil: new Date(now + 20 * MIN) });
+      const msLocked = await msUntilNextDue(db);
+      assert.ok(Math.abs(msLocked - 20 * MIN) < MIN, `due but locked: when the lock expires, got ${msLocked}`);
+      await db.scheduledJob.update({ where: { id: locked.id }, data: { lockedUntil: null } });
+      await mk("runnow", { enabled: false, runRequestedAt: new Date() });
+      assert.ok((await msUntilNextDue(db)) <= 0, "overdue or Run now: due now");
+      throw ROLLBACK;
+    });
   } catch (err) {
     if (err !== ROLLBACK) throw err;
   } finally {

@@ -224,7 +224,7 @@ The owner details these entries in their workstream document under `docs/ekp/pha
 
 | # | Done when | Phase |
 |---|---|---|
-| **S2** single sign-on | Users sign in with Entra ID via SAML 2.0/OIDC. APIs accept OAuth/token auth. | 1 (OIDC, Workstream A) · 2 (SAML, `A-16` in Workstream E) |
+| **S2** single sign-on | Users sign in with Entra ID via SAML 2.0/OIDC. APIs accept OAuth/token auth. | 1 (OIDC, Workstream A, done) · 2 (SAML, `A-16` as `E-12` in Workstream E, done in #40). API OAuth/token auth not started. |
 | **S5** encryption | The org API key is encrypted with `src/lib/crypto.js`. Encryption at rest and in transit is documented. | TBD |
 | **S7** no caching | All authenticated pages and APIs return `Cache-Control: no-store`. | TBD |
 | **A2** test before prod | Separate Dev/Test and Production environments with a documented promotion process. | TBD |

@@ -150,9 +150,9 @@ Each milestone ends with a PR from `feature/ekp-ws-d` into `dev`, opened one wor
 | `D-4` | D-M1 · Search/question/click/dwell logging with latency and reformulation link | `DONE` | Simran | `D-2`, `D-3` | #34 | 2026-11-02 | 2026-11-10 |
 | `D-5` | D-M1 · Analytics section shell; Search activity tab (no-results, top queries); Governance tab moved in | `DONE` | Simran | `D-4` | #34 | 2026-11-02 | 2026-11-10 |
 | `D-M1` | **Milestone PR + demo: Searches are measured** (due Fri 6 Nov) | `DONE` | Simran | `D-3`–`D-5` | #34 | 2026-11-02 | 2026-11-10 |
-| `D-6` | D-M2 · F3 job `analytics.rollup` into `AnalyticsDaily` (idempotent) | `DONE` | Simran | `D-M1` | #37 | 2026-11-11 | 2026-11-16 |
-| `D-7` | D-M2 · Usage tab: five E29 metrics, by department/role, Performance card, CSV | `DONE` | Simran | `D-6` | #37 | 2026-11-11 | 2026-11-16 |
-| `D-M2` | **Milestone PR + demo: Usage & adoption dashboard** (due Fri 13 Nov) | `DONE` | Simran | `D-6`, `D-7` | #37 | 2026-11-11 | 2026-11-16 |
+| `D-6` | D-M2 · F3 job `analytics.rollup` into `AnalyticsDaily` (idempotent) | `DONE` | Simran | `D-M1` | #37 | 2026-11-12 | 2026-11-16 |
+| `D-7` | D-M2 · Usage tab: five E29 metrics, by department/role, Performance card, CSV | `DONE` | Simran | `D-6` | #37 | 2026-11-12 | 2026-11-16 |
+| `D-M2` | **Milestone PR + demo: Usage & adoption dashboard** (due Fri 13 Nov) | `DONE` | Simran | `D-6`, `D-7` | #37 | 2026-11-12 | 2026-11-16 |
 | `D-8` | D-M3 · F3 job `links.check` + `DocumentLink`; deleted SharePoint sources count as broken | `TODO` | Simran | `D-M2` | | | |
 | `D-9` | D-M3 · Content health tab (incl. setting `Document.contentUpdatedAt` in upload/replace/restore/sync + back-fill script): recency, ownership, review status, broken links, duplicates, completeness, drill-through | `TODO` | Simran | `D-8` | | | |
 | `D-13` | D-M3 · Offline search evaluation set + runner (with Sandeep, needed by `C-11`) | `TODO` | Simran + Sandeep | `D-3` | | | |

@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { signIn } from "next-auth/react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Mail, Lock, EyeOff, Eye } from "lucide-react";
+import { startMicrosoftSignIn } from "@/lib/sso/startMicrosoftSignIn";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -42,7 +42,7 @@ export default function SignupPage() {
         // EKP A-5: this email's organization uses Microsoft sign-in.
         const data = await res.json().catch(() => ({}));
         if (data.useMicrosoft) {
-          await signIn("azure-ad", { callbackUrl: "/welcome-back" }, { login_hint: email });
+          await startMicrosoftSignIn({ callbackUrl: "/welcome-back", email, target: data });
           return;
         }
       }

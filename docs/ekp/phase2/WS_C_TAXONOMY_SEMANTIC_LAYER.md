@@ -168,11 +168,11 @@ Each milestone ends with a PR from `feature/ekp-ws-c` into `dev`, opened one wor
 | `C-4` | C-M1 · Taxonomy admin: lazy tree editor, synonyms, deprecate/merge, search, audit | `DONE` | Sandeep | `C-2` | #35 | 2026-11-02 | 2026-11-10 |
 | `C-5` | C-M1 · Metadata fields + manual tagging on the document page | `DONE` | Sandeep | `C-2` | #35 | 2026-11-02 | 2026-11-10 |
 | `C-M1` | **Milestone PR + demo: Taxonomy exists** (due Fri 6 Nov) | `DONE` | Sandeep | `C-3`–`C-5` | #35 | 2026-11-02 | 2026-11-10 |
-| `C-6` | C-M2 · SKOS (RDF/XML, TTL) + CSV importers behind `TaxonomySource`; read-only external sets | `DONE` | Sandeep | `C-M1` | #38 | 2026-11-11 | 2026-11-16 |
-| `C-7` | C-M2 · Re-sync diff by `externalId` with dry run; deprecate removed terms without losing tags | `DONE` | Sandeep | `C-6` | #38 | 2026-11-11 | 2026-11-16 |
-| `C-8` | C-M2 · Map `A-23` SharePoint tags (`DocumentSourceTag`) to terms, on import and after each sync | `DONE` | Sandeep | `C-6`, `E-3` | #38 | 2026-11-11 | 2026-11-16 |
-| `C-9` | C-M2 · Spike: SharePoint term store via Graph in the test tenant | `DONE` | Sandeep | `C-6` | #38 | 2026-11-11 | 2026-11-16 |
-| `C-M2` | **Milestone PR + demo: Semaphore import** (due Fri 13 Nov) | `DONE` | Sandeep | `C-6`–`C-8` | #38 | 2026-11-11 | 2026-11-16 |
+| `C-6` | C-M2 · SKOS (RDF/XML, TTL) + CSV importers behind `TaxonomySource`; read-only external sets | `DONE` | Sandeep | `C-M1` | #38 | 2026-11-12 | 2026-11-16 |
+| `C-7` | C-M2 · Re-sync diff by `externalId` with dry run; deprecate removed terms without losing tags | `DONE` | Sandeep | `C-6` | #38 | 2026-11-12 | 2026-11-16 |
+| `C-8` | C-M2 · Map `A-23` SharePoint tags (`DocumentSourceTag`) to terms, on import and after each sync | `DONE` | Sandeep | `C-6`, `E-3` | #38 | 2026-11-12 | 2026-11-16 |
+| `C-9` | C-M2 · Spike: SharePoint term store via Graph in the test tenant | `DONE` | Sandeep | `C-6` | #38 | 2026-11-12 | 2026-11-16 |
+| `C-M2` | **Milestone PR + demo: Semaphore import** (due Fri 13 Nov) | `DONE` | Sandeep | `C-6`–`C-8` | #38 | 2026-11-12 | 2026-11-16 |
 | `C-10` | C-M3 · Term-set classification with candidate shortlist; suggestions + review; topics as candidate terms; throughput test | `IN_PROGRESS` | Sandeep | `C-M2` | #42 | 2026-11-19 | |
 | `C-11` | C-M3 · E3 query expansion + term boost in F7; evaluation set and nDCG report (with `D-13`) | `IN_PROGRESS` | Sandeep | `C-M2`, `D-3` | #42 | 2026-11-19 | |
 | `C-M3` | **Milestone PR + demo: Auto-tagging + ontology search** (due Fri 20 Nov) | `IN_PROGRESS` | Sandeep | `C-10`, `C-11` | #42 | 2026-11-19 | |
