@@ -49,3 +49,48 @@ test('CQ-3: any SharePoint source tag forces suggestions in every field',()=>{
   const picks=[{termId:'t1',confidence:0.99},{termId:'t2',confidence:0.99}];
   assert.deepEqual(decideTags(picks,candidates,fields,{sourceTagged:true}).map(t=>t.status),['suggested','suggested']);
 });
+
+// Review fix: a document that gains a SharePoint tag keeps its earlier
+// auto-accepted tags, as suggestions, instead of losing them.
+test('C10 SharePoint tag demotes earlier auto tags to suggestions without deleting them', async () => {
+  const { classifyTaxonomyTerms } = await import('../../../src/lib/taxonomy/autoTag.mjs');
+  const stamp = new Date('2026-11-01T00:00:00Z');
+  let rows = [
+    { id: 'auto1', documentId: 'd1', fieldId: 'f1', termId: 't1', source: 'auto', status: 'accepted' },
+    { id: 'sp1', documentId: 'd1', fieldId: 'f2', termId: 't9', source: 'source_system', status: 'accepted' },
+    { id: 'old', documentId: 'd1', fieldId: 'f1', termId: 't3', source: 'auto', status: 'suggested' },
+  ];
+  const match = (r, w) => Object.entries(w).every(([k, v]) => {
+    if (k === 'id' && v?.in) return v.in.includes(r.id);
+    if (k === 'id' && v?.notIn) return !v.notIn.includes(r.id);
+    if (k === 'fieldId' && v?.in) return v.in.includes(r.fieldId);
+    return r[k] === v;
+  });
+  const tx = {
+    $queryRaw: async () => [],
+    documentTerm: {
+      findMany: async ({ where }) => rows.filter((r) => match(r, where)),
+      updateMany: async ({ where, data }) => { rows = rows.map((r) => (match(r, where) ? { ...r, ...data } : r)); },
+      deleteMany: async ({ where }) => { rows = rows.filter((r) => !match(r, where)); },
+      create: async ({ data }) => { rows.push({ id: `new-${data.termId}`, ...data }); },
+    },
+  };
+  const prisma = {
+    metadataField: { findMany: async () => [{ id: 'f1', key: 'topic', multi: true, termSetId: 's1' }] },
+    term: { findMany: async () => ['t1', 't2', 't3'].map((id) => ({ id, label: id, termSetId: 's1', updatedAt: stamp, embeddedAt: stamp, synonyms: [] })) },
+    $queryRaw: async () => [{ id: 't1' }, { id: 't2' }, { id: 't3' }],
+    documentTerm: { count: async () => 1 },
+    $transaction: async (fn) => fn(tx),
+  };
+  const openai = {
+    embeddings: { create: async () => ({ data: [{ index: 0, embedding: Array(1536).fill(0.1) }] }) },
+    chat: { completions: { create: async () => ({ choices: [{ message: { content: JSON.stringify({ tags: [{ termId: 't1', confidence: 0.95 }, { termId: 't2', confidence: 0.9 }] }) } }] }) } },
+  };
+  await classifyTaxonomyTerms({ prisma, openai, orgId: 'o1', documentId: 'd1', filename: 'a.txt', summary: '', text: 'x' });
+  const byTerm = Object.fromEntries(rows.map((r) => [r.termId, r]));
+  assert.equal(byTerm.t1?.status, 'suggested', 'earlier auto tag kept, now a suggestion');
+  assert.equal(byTerm.t1?.id, 'auto1', 'same row, not recreated');
+  assert.equal(byTerm.t2?.status, 'suggested', 'new tag is a suggestion (CQ-3)');
+  assert.equal(byTerm.t3, undefined, 'stale unreviewed suggestion replaced');
+  assert.equal(byTerm.t9?.status, 'accepted', 'SharePoint tag untouched');
+});

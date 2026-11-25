@@ -57,13 +57,22 @@ export async function ensureTermEmbeddings(prisma, openai, terms) {
     const batch = stale.slice(offset, offset + 96);
     const response = await openai.embeddings.create({ model: EMBEDDING_MODEL, input: batch.map(termText) });
     const vectors = new Map(response.data.map(row => [row.index, row.embedding]));
+    const ids = [], texts = [], stamps = [];
     for (let i = 0; i < batch.length; i++) {
       const vector = vectors.get(i);
       if (!Array.isArray(vector) || vector.length !== 1536) throw new Error('Expected 1536-dimensional term embedding');
-      const term = batch[i];
-      await prisma.$executeRaw`UPDATE "Term" SET embedding_vec = ${vectorSql(vector)}::vector, embedded_at = NOW() WHERE id = ${term.id} AND updated_at = ${term.updatedAt}`;
+      ids.push(batch[i].id); texts.push(vectorSql(vector)); stamps.push(new Date(batch[i].updatedAt).toISOString());
     }
+    // One UPDATE per batch (about 27 for 2,600 terms) instead of one per term.
+    // embedded_at records the version embedded (its updated_at), not the time:
+    // updated_at comes from the app server's clock and NOW() from the
+    // database's, so comparing the two would re-embed or miss edits. A term
+    // edited since it was read fails the updated_at check and is embedded next run.
+    await prisma.$executeRaw`UPDATE "Term" AS t SET embedding_vec = v.vec::vector, embedded_at = t.updated_at
+      FROM unnest(${ids}::text[], ${texts}::text[], ${stamps}::text[]) AS v(id, vec, stamp)
+      WHERE t.id = v.id AND t.updated_at = v.stamp::timestamp(3)`;
   }
+  return { embedded: stale.length };
 }
 export async function classifyTaxonomyTerms({ prisma, openai, orgId, documentId, filename, summary, text, threshold = TAG_THRESHOLD }) {
   if (!orgId) return { skipped: 'no_org' };
@@ -73,6 +82,9 @@ export async function classifyTaxonomyTerms({ prisma, openai, orgId, documentId,
   if (!applicable.length) return { skipped: 'no_taxonomy_fields' };
   const terms = await prisma.term.findMany({ where: { termSetId: { in: applicable.map(f => f.termSetId) }, status: 'active' }, select: { id: true, label: true, description: true, termSetId: true, updatedAt: true, embeddedAt: true, synonyms: { select: { label: true } } } });
   if (!terms.length) return { skipped: 'no_active_terms' };
+  // Import embeds a whole set up front; this catches terms added or changed
+  // since (editor, topic candidates, move, merge). Normally a handful or none.
+  await ensureTermEmbeddings(prisma, openai, terms);
   // pgvector performs top-k selection in PostgreSQL; never deserialize all vectors per document.
   const documentVector = await embed(openai, [filename, summary, String(text || '').slice(0, 12000)].filter(Boolean).join('\n'));
   const ranked = await prisma.$queryRaw`SELECT id FROM "Term"
@@ -95,12 +107,17 @@ export async function classifyTaxonomyTerms({ prisma, openai, orgId, documentId,
     await tx.$queryRaw`SELECT id FROM "Document" WHERE id = ${documentId} FOR UPDATE`;
     const existing = await tx.documentTerm.findMany({ where: { documentId }, select: { id: true, fieldId: true, termId: true, source: true, status: true } });
     const sourceTagged = existing.some(t => t.source === 'source_system' && t.status === 'accepted');
-    if (sourceTagged) {
-      await tx.documentTerm.updateMany({ where: { documentId, source: 'auto', status: 'accepted' }, data: { status: 'suggested', acceptedById: null, acceptedAt: null } });
+    // CQ-3: once a document carries SharePoint tags, its earlier auto-accepted
+    // tags go back to review. They are kept (not replaced below), so a
+    // document never loses tags just because the source system tagged it.
+    const demotedIds = sourceTagged ? existing.filter(t => t.source === 'auto' && t.status === 'accepted').map(t => t.id) : [];
+    if (demotedIds.length) {
+      await tx.documentTerm.updateMany({ where: { id: { in: demotedIds } }, data: { status: 'suggested', acceptedById: null, acceptedAt: null } });
     }
     const protectedFields = new Set(existing.filter(t => t.source === 'manual' || t.source === 'source_system').map(t => t.fieldId));
-    const occupiedSingleFields = new Set(existing.filter(t => t.status === 'accepted').map(t => t.fieldId));
-    await tx.documentTerm.deleteMany({ where: { documentId, source: 'auto', status: 'suggested', fieldId: { in: applicable.map(f => f.id) } } });
+    const occupiedSingleFields = new Set(existing.filter(t => t.status === 'accepted' && !demotedIds.includes(t.id)).map(t => t.fieldId));
+    // Earlier unreviewed suggestions are replaced by this run's.
+    await tx.documentTerm.deleteMany({ where: { documentId, source: 'auto', status: 'suggested', id: { notIn: demotedIds }, fieldId: { in: applicable.map(f => f.id) } } });
     for (const tag of tags) {
       const field = applicable.find(f => f.id === tag.fieldId);
       const previous = existing.find(t => t.fieldId === tag.fieldId && t.termId === tag.termId);
