@@ -27,7 +27,7 @@ async function main() {
   if (!org || !base || !output || !cookie) throw Error('Usage: --org <id> --base-url <url> --out <json> [--cookie-env KMS_EVAL_COOKIE]. Provide session cookie via environment only.');
   const rows = [];
   for (const q of fixture.queries) {
-    const row = { id: q.id, query: q.query, relevant: q.relevant };
+    const row = { id: q.id, kind: q.kind || 'other', query: q.query, relevant: q.relevant };
     for (const mode of ['baseline','ontology']) {
       const response = await fetch(`${base.replace(/\/$/,'')}/api/org/${encodeURIComponent(org)}/search`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -41,8 +41,14 @@ async function main() {
   }
   const result = { format: 'kms-search-eval-v1', org, generatedAt: new Date().toISOString(), queries: rows };
   writeFileSync(resolve(output), JSON.stringify(result, null, 2) + '\n');
-  const scores = rows.map(row => ({ baseline: ndcgAt10(row.baseline, row.relevant), ontology: ndcgAt10(row.ontology, row.relevant) }));
-  const average = key => scores.reduce((sum,row) => sum + row[key],0) / scores.length;
-  console.log(JSON.stringify({ count: rows.length, baselineNdcg10: average('baseline'), ontologyNdcg10: average('ontology'), delta: average('ontology') - average('baseline') }, null, 2));
+  const scores = rows.map(row => ({ kind: row.kind, baseline: ndcgAt10(row.baseline, row.relevant), ontology: ndcgAt10(row.ontology, row.relevant) }));
+  const summary = list => {
+    const average = key => list.reduce((sum,row) => sum + row[key],0) / list.length;
+    return { count: list.length, baselineNdcg10: average('baseline'), ontologyNdcg10: average('ontology'), delta: average('ontology') - average('baseline') };
+  };
+  // Per kind as well: label queries are the control (keyword search alone
+  // should do well); synonym and narrower_synonym queries show what the ontology adds.
+  const byKind = Object.fromEntries([...new Set(scores.map(s => s.kind))].map(kind => [kind, summary(scores.filter(s => s.kind === kind))]));
+  console.log(JSON.stringify({ ...summary(scores), byKind }, null, 2));
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e.message); process.exitCode = 1; });

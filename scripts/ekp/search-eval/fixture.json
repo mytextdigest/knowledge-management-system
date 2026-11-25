@@ -1,1 +1,0 @@
-{"version":1,"cases":[{"id":"taxonomy-owner","query":"knowledge taxonomy ownership","relevantIds":["doc-1"],"returnedIds":["doc-1","doc-2"]},{"id":"sharepoint-sync","query":"sharepoint sync metadata","relevantIds":["doc-3"],"returnedIds":["doc-4","doc-3"]}]}
