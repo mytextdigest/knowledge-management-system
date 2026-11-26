@@ -77,7 +77,9 @@ const DocumentCard = ({
       case 'password_protected':
         return { label: 'Password-protected: remove the password and upload again', icon: AlertCircle, spin: false, className: 'text-red-600 dark:text-red-400' };
       case 'unreadable_file':
-        return { label: 'Not a valid PowerPoint file', icon: AlertCircle, spin: false, className: 'text-red-600 dark:text-red-400' };
+        return { label: "KMS couldn't read this file", icon: AlertCircle, spin: false, className: 'text-red-600 dark:text-red-400' };
+      case 'no_text_found': // E11.2: an image with no text and no description
+        return { label: 'No text found in this image', icon: AlertCircle, spin: false, className: 'text-amber-600 dark:text-amber-400' };
       case 'chunk_failed':
       case 'error':
         return { label: 'Processing failed', icon: AlertCircle, spin: false, className: 'text-red-600 dark:text-red-400' };

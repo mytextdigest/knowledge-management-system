@@ -40,6 +40,7 @@ import TranscriptView from '@/components/documents/TranscriptView';
 import TranscriptLinkPanel from '@/components/documents/TranscriptLinkPanel';
 import TranscriptionNotice from '@/components/documents/TranscriptionNotice';
 import ChapterList from '@/components/documents/ChapterList';
+import AssetView from '@/components/assets/AssetView';
 import DocumentTaggingPanel from '@/components/taxonomy/DocumentTaggingPanel';
 
 
@@ -984,6 +985,18 @@ function DocumentContent() {
       );
     }
 
+    // E14: an asset written in KMS from a template, section by section.
+    if (doc.contentType === "asset") {
+      return (
+        <FileViewerFrame
+          {...scrollProps}
+          onPrint={() => printHtml(printableHtml(doc.filename, `<pre style="white-space:pre-wrap;font:13px/1.6 ui-sans-serif,system-ui">${escapeHtml(doc.content)}</pre>`))}
+        >
+          <AssetView doc={doc} orgId={doc.orgId} />
+        </FileViewerFrame>
+      );
+    }
+
     // A SharePoint page (A-15) or ServiceNow article (A-17) has no file; show its text.
     if (ext === "txt" || doc.contentType === "page" || doc.contentType === "article" || fileMissing) {
       return (
@@ -1000,6 +1013,22 @@ function DocumentContent() {
           <pre className="whitespace-pre-wrap text-gray-900 dark:text-gray-100 p-6 font-mono text-sm leading-relaxed">
             {doc.content || "No text was extracted from this document."}
           </pre>
+        </FileViewerFrame>
+      );
+    }
+
+    // E11.2 / E13.2: an image, with what KMS read from it (OCR text and description).
+    if (["png", "jpg", "jpeg"].includes(ext)) {
+      return (
+        <FileViewerFrame {...scrollProps} getFileLinks={fileLinks} contentClassName="p-4">
+          {/* eslint-disable-next-line @next/next/no-img-element -- a signed S3 URL or the SharePoint stream */}
+          <img src={doc.fileUrl} alt={doc.filename} className="mx-auto max-h-[70vh] max-w-full rounded-md object-contain" />
+          {doc.content ? (
+            <details open className="mx-auto mt-4 max-w-3xl rounded-lg border border-gray-200 dark:border-gray-700">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200">What KMS read from this image</summary>
+              <pre className="whitespace-pre-wrap border-t border-gray-200 px-3 py-2 font-sans text-sm leading-relaxed text-gray-800 dark:border-gray-700 dark:text-gray-200">{doc.content}</pre>
+            </details>
+          ) : null}
         </FileViewerFrame>
       );
     }

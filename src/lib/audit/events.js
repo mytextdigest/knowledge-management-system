@@ -33,4 +33,11 @@ export const AUDIT_EVENTS = Object.freeze({
   AUTH_SSO_LOGIN: "auth.sso_login",
   AUTH_SSO_USER_CREATED: "auth.sso_user_created",
   SYNC_FILES_SKIPPED: "sync.files_skipped", // E11.4 / A-24: files a sync run didn't index, with reasons
+  // E14 (E-16): asset templates and the assets written from them.
+  TEMPLATE_CREATED: "template.created",
+  TEMPLATE_VERSION_CREATED: "template.version_created",
+  TEMPLATE_RETIRED: "template.retired",
+  TEMPLATE_RESTORED: "template.restored",
+  ASSET_CREATED: "asset.created",
+  ASSET_EDITED: "asset.edited",
 });

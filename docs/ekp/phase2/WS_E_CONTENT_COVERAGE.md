@@ -8,7 +8,7 @@
 | **Foundations used**  | F1 document access, F2 audit, F3 scheduled jobs, F5 org settings, F6 workflow engine (E14) |
 | **Phase 2 window**    | Mon 2 Nov – Thu 26 Nov 2026 (code-complete), integration to Mon 30 Nov                 |
 | **Branch**            | `feature/ekp-ws-e` (one branch for the phase, one PR per milestone; see [PHASE2_OVERVIEW.md](PHASE2_OVERVIEW.md) §3) |
-| **Status**            | E-M1 merged to `dev` (PR #36, 2026-11-07). E-M2 (E-6 to E-9) and E-10, E-11 of E-M3 (transcription, chapters) merged to `dev` (PR #39, 2026-11-14). E-12 (SAML) merged to `dev` (PR #40, 2026-11-19), completing E-M3. E-M4 outlined, detail it before it starts. |
+| **Status**            | E-M1 merged to `dev` (PR #36, 2026-11-07). E-M2 (E-6 to E-9) and E-10, E-11 of E-M3 (transcription, chapters) merged to `dev` (PR #39, 2026-11-14). E-12 (SAML) merged to `dev` (PR #40, 2026-11-19), completing E-M3. E-M4 (E-14 images, E-15 thumbnails and previews, E-16 templates) built on `feature/ekp-ws-e` 2026-11-26, in end-to-end testing. |
 
 **Source documents (don't copy from them, link to them):**
 
@@ -36,7 +36,7 @@ Workstream E has two parts. Both are in this document. Part 1 is NYPA's main con
 - Transcribing recordings that stay in organizers' OneDrive. Only SharePoint sites are in scope (Q&A #159).
 - Speaker identification beyond what the VTT or Word transcript already contains.
 - OCR and transcription for Content Server (connector is after award; NYPA expects very few Content Server videos to need it, Q&A #115).
-- PPTX rendering to images for thumbnails if it needs LibreOffice; the fallback is the slide's embedded thumbnail (see E-M4).
+- ~~PPTX rendering to images for thumbnails if it needs LibreOffice~~: superseded by EQ-4 (decks are rendered with LibreOffice); E-M4 thumbnails use the first rendered slide.
 
 ## 2. NYPA answers that affect E
 
@@ -171,10 +171,10 @@ Each milestone ends with a PR from `feature/ekp-ws-e` into `dev`, opened one wor
 | `E-12` | E-M3 · **`A-16`**: SAML 2.0 via embedded SAML Jackson + `BoxyHQSAMLProvider` (RFP §6 S2) | `DONE` | Johurul | `E-1` | #40 | 2026-11-18 | 2026-11-19 |
 | `E-M3` | **Milestone PR + demo: Transcription, chapters, SAML** (due Fri 20 Nov) | `DONE` | Johurul | `E-10`–`E-12` | #39, #40 | 2026-11-13 | 2026-11-19 |
 | `E-13` | E-M4 · Schema: `thumbnailPath`, `AssetTemplate`, `AssetTemplateVersion`, `Document.templateVersionId`, `assetData` | `DONE` | Johurul | — | `P2-1` (`20261029070816_ekp_p2_schema`) | 2026-10-29 | 2026-10-29 |
-| `E-14` | E-M4 · E11.2: images, OCR + vision caption | `TODO` | Johurul | `E-M3` | | | |
-| `E-15` | E-M4 · E13: thumbnails (PDF, PPTX, image, video) + in-app previews | `TODO` | Johurul | `E-13` | | | |
-| `E-16` | E-M4 · E14: templates, editor, F6 publishing, versioning (first to move to Phase 3 if late) | `TODO` | Johurul | `E-13` | | | |
-| `E-M4` | **Milestone PR + demo: Images, previews, templates** (due Thu 26 Nov) | `TODO` | Johurul | `E-14`–`E-16` | | | |
+| `E-14` | E-M4 · E11.2: images, OCR + vision caption | `IN_PROGRESS` | Johurul | `E-M3` | | 2026-11-26 | |
+| `E-15` | E-M4 · E13: thumbnails (PDF, PPTX, image, video) + in-app previews | `IN_PROGRESS` | Johurul | `E-13` | | 2026-11-26 | |
+| `E-16` | E-M4 · E14: templates, editor, F6 publishing, versioning (first to move to Phase 3 if late) | `IN_PROGRESS` | Johurul | `E-13` | | 2026-11-26 | |
+| `E-M4` | **Milestone PR + demo: Images, previews, templates** (due Thu 26 Nov) | `IN_PROGRESS` | Johurul | `E-14`–`E-16` | | 2026-11-26 | |
 | `E-17` | Update RTM for E11, E13, E14 (and E16.5, S2); run `P2-INT` cross-testing (27–30 Nov) | `TODO` | Johurul | `E-M4`, `C-M4`, `D-M4` | | | |
 
 ## 7. Implementation notes
@@ -218,6 +218,21 @@ Add a dated note when a task changes the design (e.g. `2026-11-03 · E-5: hidden
     - Add `https://<vercel domain>` as an Identifier and `https://<vercel domain>/api/oauth/saml` as a Reply URL in the Entra app.
     - Make sure Deployment Protection doesn't block KMS's server-side calls to its own `/api/oauth/token` and `/api/oauth/userinfo`.
     - A second user created only through SAML, and group-to-role mapping through SAML, are still to try.
+- `2026-11-26 · E-14 (images):` PNG, JPG and JPEG are in the format allow-list (upload, API, SharePoint sync). The chunk job (`worker/extractImage.js`) turns the image upright (EXIF) and reads it two ways at once. **OCR:** Tesseract on a grayscale copy, at most 2,400 px; a few stray characters don't count as text. **Description:** `gpt-4o-mini` vision, with the org's OpenAI key, on a JPEG of at most 1,024 px in high detail. The prompt asks for 2 to 5 sentences on what the image shows, then any readable text copied exactly ("Visible text:"), without naming people. The document text is `Image: <name>`, then the labelled description, then the OCR text, chunked as usual with `metadata.kind = "image"`. Either part may be missing. With no text and no description (no key, or the call failed), the status is `no_text_found` and the card says so; bytes that aren't an image end as `unreadable_file`. The document page shows the image with "What KMS read from this image" under it. Checked for real on a generated nameplate photo: OCR read `SERIAL NO. TX-4471-B` exactly and the description copied the plate, about 4 s. Cost: one vision call per image, about US$0.004.
+- `2026-11-26 · E-15 (thumbnails, previews):` `src/lib/thumbnails.js` and `worker/thumbnails.js`. The worker's `thumbnail` job writes a JPEG of at most 480 px to S3 `thumbnails/{docId}.jpg` and sets `Document.thumbnailPath`:
+  - **PDF:** the first page, with `pdftoppm`.
+  - **PPTX:** the first page of the rendered slides (EQ-4); without them (no LibreOffice), the preview PowerPoint saves in the deck (`docProps/thumbnail.jpeg`).
+  - **Image:** the image, scaled down with `sharp` (now a direct dependency).
+  - **Video:** a frame at 1 s (the first frame if shorter), with `ffmpeg` reading a 15-minute signed S3 URL, so only that part of the recording is fetched.
+  - **When it is queued:** after the chunk job (PDF, image), after the slide render (deck), after a recording is probed (video), and by the repair job when one is missing. A file whose new content has no thumbnail kind loses its old one. Thumbnails are removed with the stored copy (no-copy switch, size limit) and purged with the document (B-9). Never retried: without one, the card keeps its icon.
+  - **No-copy SharePoint files:** nothing is stored; `GET /api/documents/[id]/thumbnail` passes SharePoint's own thumbnail through (Graph `thumbnails/0/medium/content`). The route has the same access rule as the file and caches privately for 5 minutes.
+  - **Cards and previews:** repository and search cards show the thumbnail (`thumbnailUrl` in `GET /api/org/[orgId]/repository`, cache-busted by `contentUpdatedAt`). The card's Preview shows PDFs, images, video, audio and rendered slides in place. The type filter gains PowerPoint, Recording, Image and "Written from a template".
+  - **Worker host needs** `poppler-utils` (for `pdftoppm`) besides LibreOffice and ffmpeg; without it, PDFs and decks keep their icon. **Existing documents:** `node --env-file=.env scripts/ekp/e15-thumbnail-backfill.mjs` lists the stored files without a thumbnail (16 PDFs in the dev database); `--apply` queues the jobs.
+- `2026-11-26 · E-16 (templates):` **Templates** (Governance → Asset Templates, `/org/[orgId]/templates`, super admin, like approval workflows) have sections (title, guidance, required) and required fields (department, category; a subset of E21's). "Add starter templates" adds How-To Guide, FAQ, SOP and Key Takeaways. A section keeps its key when edited. Saving changed sections or fields creates version N+1 (`AssetTemplateVersion`); a rename alone doesn't. Retiring hides a template from "New from template"; assets are unaffected. Audit: `template.created`, `template.version_created`, `template.retired`, `template.restored`.
+  - **Assets:** "New from template" in the repository (any member but a guest) opens `/org/[orgId]/assets/new?template=…`. Each section's guidance appears under its heading, with a Markdown text box and a preview. Saving creates a repository `Document` with `contentType: "asset"`, no file, `lifecycle: "draft"`, `templateVersionId` set to the latest version, `assetData = { format: "markdown", sections }`, and `content` = title plus each filled section under its heading. The worker reads `content` like a SharePoint page, so the asset is chunked, embedded, summarized and searched like any document. An edit that makes it shorter drops its extra chunks (assets only).
+  - **Publishing (E14.3):** the author submits it from the Workflow tab (E22). Without a workflow covering it, a dept_admin or super admin publishes it directly. The author never publishes their own asset.
+  - **Editing (E14.4):** only a draft can be edited (author, super admin, or an admin of its department; `PUT /api/documents/[id]/asset`), always in the template version it was written from. The document page shows the asset section by section, with "Edit draft". Audit: `asset.created`, `asset.edited`. No schema change (`P2-1` had it all).
+  - **Tests:** `e14-images`, `e15-thumbnails` (real `sharp`, `pdftoppm` and `ffmpeg` on generated files) and `e16-templates`, which includes a database test inside a rolled-back transaction. `ekp:e` 127 pass, 2 skipped.
 - `2026-11-20 · E-12 follow-up (SAML only):` Raised by Johurul after the demo: setting up SAML needed "Connect Microsoft" first, which is admin consent to KMS's multi-tenant OIDC app. A SAML-first customer like NYPA may not approve an outside vendor's app.
   - **SAML-only setup:** an org with nothing connected can now set up SAML directly. In Settings → Microsoft sign-in, the admin copies the Identifier and Reply URL, uploads the Federation Metadata XML and types the email domains. The tenant comes from the metadata; a tenant already used by another org is refused. The org is created with `protocol: "saml"`, and the audit entry is `sso.connected` with `method: "saml_metadata"`. No migration.
   - **Domain proof without Graph** (`src/lib/sso/domainCheck.js`) uses two public Microsoft endpoints: the domain's `openid-configuration` (whose `issuer` holds the tenant the domain is verified in) and `getuserrealm.srf` (which must say `Managed` or `Federated`, not viral). Verifying a domain in Entra needs DNS control, so a domain resolving to the metadata's tenant proves ownership, as the Graph check does after consent. Public email domains and Microsoft's consumer tenant are refused. A domain can be added later the same way (`POST /api/org/[orgId]/sso/domains`). Checked live: the test tenant's domain is accepted; `microsoft.com`, `gmail.com` and an unknown domain are refused.

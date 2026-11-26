@@ -23,7 +23,7 @@ async function deleteS3Object(key) {
 }
 
 const PLAN_SELECT = {
-  id: true, orgId: true, filename: true, deletedAt: true, deletedById: true, purgeAfter: true, filePath: true,
+  id: true, orgId: true, filename: true, deletedAt: true, deletedById: true, purgeAfter: true, filePath: true, thumbnailPath: true,
   versions: { select: { filePath: true } },
   supersedes: { where: { deletedAt: null }, select: { id: true }, take: 1 },
   workflowInstances: { where: { status: "in_review" }, select: { status: true }, take: 1 },

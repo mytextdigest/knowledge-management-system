@@ -7,7 +7,7 @@ import { Eye, Download, Info, Loader2, Check, X, AlertTriangle, Tag } from "luci
 import { Modal, ModalHeader, ModalTitle, ModalContent } from "@/components/ui/Modal";
 import DocumentTaggingPanel from "@/components/taxonomy/DocumentTaggingPanel";
 import OpenInSourceLink, { sourceLabel } from "@/components/documents/OpenInSourceLink";
-import { fileExtension, mediaKind } from "@/lib/fileFormats";
+import { fileExtension, isImageFile, mediaKind } from "@/lib/fileFormats";
 
 const CATEGORIES = [
   "Policies",
@@ -52,12 +52,15 @@ const FILE_TYPE_ICONS = {
   txt: { src: "/icons/file-types/txt.png", alt: "Text file" },
   mp4: { src: "/icons/file-types/mp4.png", alt: "MP4 video" },
   media: { src: "/icons/file-types/video.png", alt: "Recording" },
+  png: { src: "/icons/file-types/png.png", alt: "PNG image" },
+  jpg: { src: "/icons/file-types/jpg.png", alt: "JPG image" },
   default: { src: "/icons/file-types/docs.png", alt: "Document" },
 };
 
 function getFileIcon(fileType = "", filename = "") {
   // Recordings first, by extension, so a name like "docs review.mp4" isn't a Word icon.
   if (mediaKind(filename)) return fileExtension(filename) === ".mp4" ? FILE_TYPE_ICONS.mp4 : FILE_TYPE_ICONS.media;
+  if (isImageFile(filename)) return fileExtension(filename) === ".png" ? FILE_TYPE_ICONS.png : FILE_TYPE_ICONS.jpg;
   const value = `${fileType} ${filename}`.toLowerCase();
   if (value.includes("pdf")) return FILE_TYPE_ICONS.pdf;
   if (value.includes("csv")) return FILE_TYPE_ICONS.csv;
@@ -85,6 +88,12 @@ export default function RepositoryDocumentCard({
   const lowerFilename = (document?.filename || "").toLowerCase();
   const isPdf = lowerFilename.endsWith(".pdf");
   const isSpreadsheet = /\.(xlsx|xls|csv)$/.test(lowerFilename);
+  // E13.2: what the Preview button can show in place.
+  const previewKind = isPdf ? "pdf" : isImageFile(lowerFilename) ? "image" : lowerFilename.endsWith(".pptx") ? "slides" : mediaKind(lowerFilename);
+  // E14: an asset written in KMS from a template has no file.
+  const hasFile = !["page", "article", "asset"].includes(document?.contentType);
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const showThumbnail = Boolean(document?.thumbnailUrl) && !thumbFailed;
   const [pendingAction, setPendingAction] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -248,9 +257,15 @@ export default function RepositoryDocumentCard({
     try {
       if (isSpreadsheet) {
         window.open(`/document?id=${document.id}`, "_blank", "noopener,noreferrer");
+      } else if (previewKind === "slides") {
+        // The deck as designed (rendered slides); until they're ready, the document page's text view.
+        const res = await fetch(`/api/documents/${document.id}/slides`);
+        const data = await res.json().catch(() => ({}));
+        if (data?.status === "ready" && data.url) setPreview({ fileUrl: data.url, kind: "pdf" });
+        else window.open(`/document?id=${document.id}`, "_blank", "noopener,noreferrer");
       } else {
         const { fileUrl } = await getFileUrls();
-        setPreview({ fileUrl });
+        setPreview({ fileUrl, kind: previewKind });
       }
     }
     catch (err) { setActionError(err.message); }
@@ -270,6 +285,24 @@ export default function RepositoryDocumentCard({
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
+      {showThumbnail ? (
+        // E13.3: a picture of the file (first page, first slide, the image, a video frame).
+        <button
+          type="button"
+          onClick={() => { onSearchResultOpen?.(); hasFile ? handlePreview() : router.push(`/document?id=${document.id}`); }}
+          title="Preview"
+          className="mb-3 block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- an authenticated API image, not a static asset */}
+          <img
+            src={document.thumbnailUrl}
+            alt=""
+            loading="lazy"
+            onError={() => setThumbFailed(true)}
+            className="h-36 w-full object-cover object-top"
+          />
+        </button>
+      ) : null}
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center">
           <Image src={fileIcon.src} alt={fileIcon.alt} width={36} height={36} className="h-9 w-9 object-contain" />
@@ -382,7 +415,9 @@ export default function RepositoryDocumentCard({
       ) : document?.status === "password_protected" ? (
         <p className="mt-3 text-xs text-red-600 dark:text-red-400">Password-protected: KMS can't read it. Remove the password, save it as .pptx and upload it again.</p>
       ) : document?.status === "unreadable_file" ? (
-        <p className="mt-3 text-xs text-red-600 dark:text-red-400">KMS couldn't read this file: it isn't a valid PowerPoint (.pptx) file.</p>
+        <p className="mt-3 text-xs text-red-600 dark:text-red-400">{isImageFile(lowerFilename) ? "KMS couldn't read this file: it isn't a valid PNG or JPG image." : mediaKind(lowerFilename) ? "KMS couldn't read this recording." : "KMS couldn't read this file: it isn't a valid PowerPoint (.pptx) file."}</p>
+      ) : document?.status === "no_text_found" ? (
+        <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">No text was found in this image and no description could be made, so search can only find it by name. An admin can add an OpenAI key and reprocess it.</p>
       ) : document?.status ? <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Status: <span className="font-medium">{document.status}</span></p> : null}
 
       {document?.match?.locator ? (
@@ -397,7 +432,7 @@ export default function RepositoryDocumentCard({
       ) : null}
 
       <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
-        {document?.contentType !== "page" && document?.contentType !== "article" ? (
+        {hasFile ? (
           <>
           <button type="button" onClick={() => { onSearchResultOpen?.(); handlePreview(); }} disabled={pendingAction === "preview"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "preview" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />} Preview</button>
           <button type="button" onClick={handleDownload} disabled={pendingAction === "download"} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">{pendingAction === "download" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download</button>
@@ -412,7 +447,20 @@ export default function RepositoryDocumentCard({
 
       <Modal isOpen={!!preview} onClose={() => setPreview(null)} size="xl">
         <ModalHeader><ModalTitle>{document?.filename || "Document preview"}</ModalTitle></ModalHeader>
-        <ModalContent>{preview && isPdf ? <iframe src={preview.fileUrl} title={document?.filename || "Document preview"} className="h-[70vh] w-full rounded-md border border-gray-200 dark:border-gray-700" /> : <p className="text-sm text-gray-600 dark:text-gray-300">Preview isn't available for this file type yet. Use View or Download to see the file.</p>}</ModalContent>
+        <ModalContent>
+          {preview?.kind === "pdf" ? (
+            <iframe src={preview.fileUrl} title={document?.filename || "Document preview"} className="h-[70vh] w-full rounded-md border border-gray-200 dark:border-gray-700" />
+          ) : preview?.kind === "image" ? (
+            // eslint-disable-next-line @next/next/no-img-element -- a signed S3 URL or the SharePoint stream
+            <img src={preview.fileUrl} alt={document?.filename || "Image"} className="mx-auto max-h-[70vh] w-auto rounded-md object-contain" />
+          ) : preview?.kind === "video" ? (
+            <video src={preview.fileUrl} controls preload="metadata" className="max-h-[70vh] w-full rounded-md bg-black" />
+          ) : preview?.kind === "audio" ? (
+            <audio src={preview.fileUrl} controls preload="metadata" className="w-full" />
+          ) : (
+            <p className="text-sm text-gray-600 dark:text-gray-300">Preview isn&apos;t available for this file type yet. Use View or Download to see the file.</p>
+          )}
+        </ModalContent>
       </Modal>
     </div>
   );

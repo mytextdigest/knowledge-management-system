@@ -337,6 +337,17 @@ export async function fetchDriveItemContent({ accessToken, driveId, itemId, form
   return res;
 }
 
+// E13.3: SharePoint's own thumbnail of a drive item (it draws them for PDFs,
+// Office files, images and videos), as a fetch Response. For no-copy files,
+// which KMS doesn't store. size: "small" | "medium" | "large".
+export async function fetchDriveItemThumbnail({ accessToken, driveId, itemId, size = "medium" }) {
+  const res = await fetchWithRetry(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}/thumbnails/0/${size}/content`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw await parseGraphError(res);
+  return res;
+}
+
 // App-only-token call: a drive item's content as a Buffer.
 export async function downloadDriveItemContent({ accessToken, driveId, itemId }) {
   const res = await fetchDriveItemContent({ accessToken, driveId, itemId });

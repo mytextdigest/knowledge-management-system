@@ -23,6 +23,10 @@ export const SUPPORTED_FORMATS = [
   { ext: ".mp3", label: "Audio", media: "audio" },
   { ext: ".wav", label: "Audio", media: "audio" },
   { ext: ".vtt", label: "Transcript" },
+  // E-M4 (E11.2): images, read with OCR plus an AI description.
+  { ext: ".png", label: "Image", image: true },
+  { ext: ".jpg", label: "Image", image: true },
+  { ext: ".jpeg", label: "Image", image: true },
 ];
 
 export const SUPPORTED_EXTENSIONS = SUPPORTED_FORMATS.map((f) => f.ext);
@@ -32,7 +36,7 @@ export const ACCEPT_ATTRIBUTE = SUPPORTED_EXTENSIONS.join(",");
 
 // For the upload dialogs' help line.
 export const SUPPORTED_FORMATS_TEXT =
-  "PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .xls), CSV, TXT, video (.mp4, .mov), audio (.mp3, .m4a, .wav) and transcripts (.vtt)";
+  "PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .xls), CSV, TXT, video (.mp4, .mov), audio (.mp3, .m4a, .wav), transcripts (.vtt) and images (.png, .jpg)";
 
 export const MEDIA_EXTENSIONS = SUPPORTED_FORMATS.filter((f) => f.media).map((f) => f.ext);
 
@@ -70,9 +74,13 @@ export function mediaKind(name) {
 
 export const isMediaFile = (name) => Boolean(mediaKind(name));
 
+/** Whether a file is an image KMS reads (E11.2), by its name. */
+export const isImageFile = (name) => Boolean(SUPPORTED_FORMATS.find((f) => f.ext === fileExtension(name))?.image);
+
 // Content types for files the browser plays or shows itself (S3 copies made by the sync).
 const CONTENT_TYPES = {
   ".mp4": "video/mp4", ".mov": "video/quicktime", ".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".vtt": "text/vtt",
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 };
 
 /** The Content-Type to store a recording or transcript with, or undefined. */

@@ -33,7 +33,7 @@ export const STAGE_LABELS = {
 /** Whether the worker can read the document's content again (for the chunk stage). */
 export function canReadSource(doc) {
   if (!doc) return false;
-  if (doc.contentType === "page" || doc.contentType === "article") return Boolean(doc.content);
+  if (doc.contentType === "page" || doc.contentType === "article" || doc.contentType === "asset") return Boolean(doc.content);
   if (doc.filePath) return true;
   return doc.sourceProvider === "sharepoint" && Boolean(doc.externalUrl && doc.externalId && doc.orgId);
 }
