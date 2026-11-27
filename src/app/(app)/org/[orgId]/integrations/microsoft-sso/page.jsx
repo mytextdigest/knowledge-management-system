@@ -11,8 +11,9 @@ import { cn } from '@/lib/utils';
 // tenant's verified domains come back from Microsoft and are the only
 // domains that can be enabled.
 // E-12: optionally, sign-in through the org's own Entra SAML app instead of
-// the KMS Sign-in app (OIDC). Connecting stays the same: it proves the tenant
-// and its domains.
+// the KMS Sign-in app (OIDC). E-12 follow-up: an org can also set up SAML
+// only, without approving the KMS Sign-in app: the tenant comes from the SAML
+// metadata and each email domain is checked with Microsoft's public endpoints.
 
 const PROVISIONING_OPTIONS = [
   { value: 'auto', label: 'Anyone in the Microsoft organization', hint: 'They join this org as Employee on first sign-in (or with their invite\'s role).' },
@@ -173,46 +174,62 @@ export default function MicrosoftSignInPage() {
             <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
           </div>
         ) : !config?.connected ? (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-            <p className="text-sm text-gray-700 dark:text-gray-300">
-              Connecting sends you to Microsoft. <strong>An administrator of your Microsoft organization</strong> must
-              approve the KMS Sign-in app for the whole organization. If that isn't you, ask your Microsoft admin to
-              sign in at that step.
-            </p>
-            <ul className="text-sm text-gray-600 dark:text-gray-400 list-disc pl-5 space-y-1">
-              <li>KMS only asks for basic profile and sign-in access, not files or mail.</li>
-              <li>After approval you choose which of your organization's verified email domains may sign in.</li>
-            </ul>
-            {config?.available === false ? (
-              <p className="text-sm text-amber-700 dark:text-amber-300">Microsoft sign-in isn't configured on this KMS deployment.</p>
-            ) : (
-              <a
-                href={connectHref}
-                className="inline-flex items-center px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium"
-              >
-                Connect Microsoft
-              </a>
-            )}
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+            <p className="text-sm text-gray-700 dark:text-gray-300">Choose how your people sign in with Microsoft.</p>
+
+            <SamlOnlySetup orgId={orgId} saml={config?.saml} onDone={load} setError={setError} setNotice={setNotice} />
+
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+              <div>
+                <p className="font-medium text-gray-900 dark:text-gray-100">KMS Sign-in app (OpenID Connect)</p>
+                <p className="text-xs text-gray-500">Nothing to create in Microsoft: approve KMS&apos;s app once.</p>
+              </div>
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                Connecting sends you to Microsoft. <strong>An administrator of your Microsoft organization</strong> must
+                approve the KMS Sign-in app for the whole organization. If that isn&apos;t you, ask your Microsoft admin to
+                sign in at that step.
+              </p>
+              <ul className="text-sm text-gray-600 dark:text-gray-400 list-disc pl-5 space-y-1">
+                <li>KMS only asks for basic profile and sign-in access, not files or mail.</li>
+                <li>After approval you choose which of your organization&apos;s verified email domains may sign in.</li>
+                <li>Approving it also lets you search Microsoft groups when mapping roles. You can add your own SAML app later.</li>
+              </ul>
+              {config?.available === false ? (
+                <p className="text-sm text-amber-700 dark:text-amber-300">The KMS Sign-in app isn&apos;t configured on this KMS deployment.</p>
+              ) : (
+                <a
+                  href={connectHref}
+                  className="inline-flex items-center px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  Connect Microsoft
+                </a>
+              )}
+            </div>
           </motion.div>
         ) : (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <p className="font-medium text-gray-900 dark:text-gray-100">{config.tenantName || 'Microsoft organization'}</p>
+                <p className="font-medium text-gray-900 dark:text-gray-100">{config.tenantName || config.verifiedDomains?.[0] || 'Microsoft organization'}</p>
                 <p className="text-xs text-gray-500 truncate">Tenant ID {config.tenantId}</p>
+                {!config.signInAppConsent && (
+                  <p className="text-xs text-gray-500">Set up with your own SAML app only. The KMS Sign-in app isn&apos;t approved.</p>
+                )}
               </div>
-              <a
-                href={connectHref}
-                className="text-sm text-primary-600 hover:underline flex-shrink-0"
-                title="Re-run Microsoft approval, e.g. after adding a domain in Microsoft"
-              >
-                Reconnect
-              </a>
+              {config.available !== false && (
+                <a
+                  href={connectHref}
+                  className="text-sm text-primary-600 hover:underline flex-shrink-0"
+                  title={config.signInAppConsent ? 'Re-run Microsoft approval, e.g. after adding a domain in Microsoft' : 'Optional: approve the KMS Sign-in app (OpenID Connect and group search)'}
+                >
+                  {config.signInAppConsent ? 'Reconnect' : 'Approve KMS Sign-in app'}
+                </a>
+              )}
             </div>
 
             <section className="space-y-2">
               <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Email domains</h2>
-              <p className="text-xs text-gray-500">People can sign in with Microsoft only if their email is on a selected domain. Only domains your Microsoft organization has verified are listed.</p>
+              <p className="text-xs text-gray-500">People can sign in with Microsoft only if their email is on a selected domain. Only domains your Microsoft organization has verified can be added.</p>
               <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
                 {config.verifiedDomains.map((domain) => (
                   <label key={domain} className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer">
@@ -226,14 +243,23 @@ export default function MicrosoftSignInPage() {
                   </label>
                 ))}
               </div>
+              <AddDomain
+                orgId={orgId}
+                onAdded={({ verifiedDomains, allowedDomains }) => {
+                  setConfig((prev) => ({ ...prev, verifiedDomains, allowedDomains }));
+                  setDraft((prev) => ({ ...prev, allowedDomains: [...new Set([...prev.allowedDomains, ...allowedDomains])] }));
+                }}
+              />
             </section>
 
             <SamlSetup
               orgId={orgId}
               saml={config.saml}
+              signInAppConsent={config.signInAppConsent}
               protocol={draft.protocol}
               onProtocol={(protocol) => setDraft((prev) => ({ ...prev, protocol }))}
               onChanged={(patch) => {
+                if (patch.removedSetup) return load();
                 setConfig((prev) => ({ ...prev, ...patch.config, saml: { ...prev.saml, ...patch.saml } }));
                 if (patch.config?.protocol) setDraft((prev) => ({ ...prev, protocol: patch.config.protocol }));
               }}
@@ -247,6 +273,7 @@ export default function MicrosoftSignInPage() {
               map={draft.groupRoleMap}
               onChange={(groupRoleMap) => setDraft((prev) => ({ ...prev, groupRoleMap }))}
               connectHref={connectHref}
+              canSearch={config.signInAppConsent}
             />
 
             <OptionGroup
@@ -323,7 +350,7 @@ function OptionGroup({ title, options, value, onChange }) {
 
 // A-6: Entra security group → KMS role (+ departments), applied at each
 // Microsoft sign-in.
-function GroupRoleMapping({ orgId, departments, map, onChange, connectHref }) {
+function GroupRoleMapping({ orgId, departments, map, onChange, connectHref, canSearch }) {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState(null);
   const [searching, setSearching] = useState(false);
@@ -346,6 +373,16 @@ function GroupRoleMapping({ orgId, departments, map, onChange, connectHref }) {
   };
 
   const mapped = new Set(map.map((m) => m.groupId));
+  const [manualId, setManualId] = useState('');
+  const [manualName, setManualName] = useState('');
+  const manualIdNormalized = manualId.trim().toLowerCase();
+  const manualValid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(manualIdNormalized);
+  const addManual = () => {
+    if (!manualValid || mapped.has(manualIdNormalized)) return;
+    onChange([...map, { groupId: manualIdNormalized, groupName: manualName.trim() || manualIdNormalized, role: 'employee', departmentIds: [] }]);
+    setManualId('');
+    setManualName('');
+  };
   const update = (groupId, patch) => onChange(map.map((m) => (m.groupId === groupId ? { ...m, ...patch } : m)));
   const toggleDept = (entry, deptId) =>
     update(entry.groupId, {
@@ -408,6 +445,7 @@ function GroupRoleMapping({ orgId, departments, map, onChange, connectHref }) {
         </div>
       )}
 
+      {canSearch && (
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
@@ -426,6 +464,38 @@ function GroupRoleMapping({ orgId, departments, map, onChange, connectHref }) {
         >
           {searching ? 'Searching…' : 'Search'}
         </button>
+      </div>
+      )}
+
+      <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-3 space-y-2">
+        <p className="text-xs text-gray-500">
+          {canSearch
+            ? 'Or add a group by its Object ID (Entra admin center → Groups → the group → Overview).'
+            : 'Add a group by its Object ID (Entra admin center → Groups → the group → Overview). Your SAML app must send the groups claim (Group ID).'}
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            value={manualId}
+            onChange={(e) => setManualId(e.target.value)}
+            placeholder="Group Object ID"
+            className="flex-1 min-w-0 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm font-mono"
+          />
+          <input
+            value={manualName}
+            onChange={(e) => setManualName(e.target.value)}
+            placeholder="Name (for you)"
+            className="flex-1 min-w-0 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm"
+          />
+          <button
+            onClick={addManual}
+            disabled={!manualValid || mapped.has(manualIdNormalized)}
+            className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-medium disabled:opacity-50"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {mapped.has(manualIdNormalized) ? 'Added' : 'Add'}
+          </button>
+        </div>
+        {manualId.trim() && !manualValid && <p className="text-xs text-amber-700 dark:text-amber-300">An Object ID looks like 1a2b3c4d-1234-5678-9abc-1234567890ab.</p>}
       </div>
 
       {searchError && (
@@ -461,19 +531,10 @@ function GroupRoleMapping({ orgId, departments, map, onChange, connectHref }) {
 }
 
 // E-12: SAML 2.0 through the org's own Microsoft Entra enterprise app.
-function SamlSetup({ orgId, saml, protocol, onProtocol, onChanged, setError, setNotice }) {
+function SamlSetup({ orgId, saml, signInAppConsent, protocol, onProtocol, onChanged, setError, setNotice }) {
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState('');
   if (!saml?.available) return null;
   const connection = saml.connection;
-
-  const copy = async (label, value) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(label);
-      setTimeout(() => setCopied(''), 1500);
-    } catch {}
-  };
 
   const upload = async (file) => {
     if (!file) return;
@@ -490,7 +551,7 @@ function SamlSetup({ orgId, saml, protocol, onProtocol, onChanged, setError, set
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Upload failed.');
       onChanged({ saml: { connection: data.connection } });
-      setNotice('SAML app saved. Choose SAML below and save to use it.');
+      setNotice(protocol === 'saml' ? 'SAML app metadata replaced.' : 'SAML app saved. Choose SAML above and save to use it.');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -499,7 +560,10 @@ function SamlSetup({ orgId, saml, protocol, onProtocol, onChanged, setError, set
   };
 
   const remove = async () => {
-    if (!window.confirm('Remove the SAML app? People will sign in with Microsoft through the KMS Sign-in app (OIDC) again.')) return;
+    const message = signInAppConsent
+      ? 'Remove the SAML app? People will sign in with Microsoft through the KMS Sign-in app (OIDC) again.'
+      : 'Remove the SAML app? This turns off Microsoft sign-in for your organization (it was set up with SAML only). People with a KMS password can still use it.';
+    if (!window.confirm(message)) return;
     setBusy(true);
     setError('');
     setNotice('');
@@ -507,8 +571,8 @@ function SamlSetup({ orgId, saml, protocol, onProtocol, onChanged, setError, set
       const res = await fetch(`/api/org/${orgId}/sso/saml`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to remove.');
-      onChanged({ saml: { connection: null }, config: { protocol: 'oidc' } });
-      setNotice('SAML app removed.');
+      onChanged(data.connected === false ? { removedSetup: true } : { saml: { connection: null }, config: { protocol: 'oidc' } });
+      setNotice(data.connected === false ? 'SAML app removed. Microsoft sign-in is off.' : 'SAML app removed.');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -522,11 +586,13 @@ function SamlSetup({ orgId, saml, protocol, onProtocol, onChanged, setError, set
     <section className="space-y-2">
       <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">How people sign in</h2>
       <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
-        <label className="flex items-start gap-3 px-4 py-3 text-sm cursor-pointer">
-          <input type="radio" checked={protocol !== 'saml'} onChange={() => onProtocol('oidc')} className="h-4 w-4 mt-0.5" />
+        <label className={cn('flex items-start gap-3 px-4 py-3 text-sm', signInAppConsent ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed')}>
+          <input type="radio" checked={protocol !== 'saml'} disabled={!signInAppConsent} onChange={() => onProtocol('oidc')} className="h-4 w-4 mt-0.5" />
           <span>
             <span className="block text-gray-900 dark:text-gray-100">KMS Sign-in app (OpenID Connect)</span>
-            <span className="block text-xs text-gray-500">Nothing more to set up in Microsoft.</span>
+            <span className="block text-xs text-gray-500">
+              {signInAppConsent ? 'Nothing more to set up in Microsoft.' : 'Needs your Microsoft admin to approve the KMS Sign-in app first.'}
+            </span>
           </span>
         </label>
         <label className={cn('flex items-start gap-3 px-4 py-3 text-sm', connection ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed')}>
@@ -534,7 +600,9 @@ function SamlSetup({ orgId, saml, protocol, onProtocol, onChanged, setError, set
           <span>
             <span className="block text-gray-900 dark:text-gray-100">Your own SAML app (SAML 2.0)</span>
             <span className="block text-xs text-gray-500">
-              {connection ? 'People who enter their work email are sent to your Entra SAML app.' : 'Set up the SAML app below first.'}
+              {connection
+                ? 'People sign in only through your Entra SAML app (your Conditional Access applies). The KMS Sign-in app is refused for your organization.'
+                : 'Set up the SAML app below first.'}
             </span>
           </span>
         </label>
@@ -548,17 +616,8 @@ function SamlSetup({ orgId, saml, protocol, onProtocol, onChanged, setError, set
           <li>Assign the users or groups who may use KMS. To map roles from groups, add a group claim (Group ID).</li>
           <li>Download <strong>Federation Metadata XML</strong> and upload it here.</li>
         </ol>
-        {[['Identifier (Entity ID)', saml.entityId], ['Reply URL (Assertion Consumer Service URL)', saml.acsUrl]].map(([label, value]) => (
-          <div key={label}>
-            <p className="text-xs text-gray-500">{label}</p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 min-w-0 truncate px-2 py-1.5 rounded bg-gray-100 dark:bg-gray-800 text-xs text-gray-900 dark:text-gray-100">{value}</code>
-              <button onClick={() => copy(label, value)} className="p-1.5 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100" title="Copy">
-                {copied === label ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-        ))}
+        <CopyField label="Identifier (Entity ID)" value={saml.entityId} />
+        <CopyField label="Reply URL (Assertion Consumer Service URL)" value={saml.acsUrl} />
 
         {saml.error && <p className="text-xs text-red-700 dark:text-red-300">{saml.error}</p>}
         {connection && (
@@ -595,5 +654,162 @@ function SamlSetup({ orgId, saml, protocol, onProtocol, onChanged, setError, set
         </div>
       </div>
     </section>
+  );
+}
+
+// A value the admin copies into Microsoft Entra.
+function CopyField({ label, value }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
+  return (
+    <div>
+      <p className="text-xs text-gray-500">{label}</p>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 min-w-0 truncate px-2 py-1.5 rounded bg-gray-100 dark:bg-gray-800 text-xs text-gray-900 dark:text-gray-100">{value}</code>
+        <button onClick={copy} className="p-1.5 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100" title="Copy">
+          {copied ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// E-12 follow-up: set up Microsoft sign-in with the org's own SAML app only,
+// without approving the KMS Sign-in app.
+function SamlOnlySetup({ orgId, saml, onDone, setError, setNotice }) {
+  const [file, setFile] = useState(null);
+  const [domains, setDomains] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!saml?.available) return null;
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const metadataXml = await file.text();
+      const res = await fetch(`/api/org/${orgId}/sso/saml`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ metadataXml, domains: domains.split(/[\s,;]+/).filter(Boolean) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Setup failed.');
+      setNotice('Microsoft sign-in is set up with your SAML app. People on your domains now sign in through it.');
+      await onDone();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border-2 border-primary-200 dark:border-primary-800 p-6 space-y-4">
+      <div>
+        <p className="font-medium text-gray-900 dark:text-gray-100">Your own SAML app (SAML 2.0)</p>
+        <p className="text-xs text-gray-500">You create the app in your Microsoft Entra and control it. KMS needs no approval in your Microsoft organization.</p>
+      </div>
+      <ol className="text-xs text-gray-600 dark:text-gray-400 list-decimal pl-5 space-y-1">
+        <li>In Microsoft Entra, create an Enterprise application (&quot;Create your own application&quot;, non-gallery) and choose SAML single sign-on.</li>
+        <li>Under Basic SAML Configuration, paste the two values below.</li>
+        <li>Assign the users or groups who may use KMS. To map roles from groups, add a group claim (Group ID).</li>
+        <li>Download <strong>Federation Metadata XML</strong>, then choose it below with your email domains.</li>
+      </ol>
+      <CopyField label="Identifier (Entity ID)" value={saml.entityId} />
+      <CopyField label="Reply URL (Assertion Consumer Service URL)" value={saml.acsUrl} />
+
+      <div className="space-y-1">
+        <label className="text-xs text-gray-500" htmlFor="saml-domains">Email domains your people sign in with</label>
+        <input
+          id="saml-domains"
+          value={domains}
+          onChange={(e) => setDomains(e.target.value)}
+          placeholder="e.g. contoso.com, contoso.org"
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm"
+        />
+        <p className="text-xs text-gray-500">KMS checks with Microsoft that each domain is verified in the same Microsoft organization as your SAML app.</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label className={cn('inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-medium', busy ? 'opacity-50' : 'cursor-pointer')}>
+          <Upload className="h-4 w-4" />
+          {file ? 'Change file' : 'Choose metadata XML'}
+          <input
+            type="file"
+            accept=".xml,application/xml,text/xml"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => { setFile(e.target.files?.[0] || null); e.target.value = ''; }}
+          />
+        </label>
+        {file && <span className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-[16rem]">{file.name}</span>}
+        <button
+          onClick={submit}
+          disabled={busy || !file || !domains.trim()}
+          className="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium disabled:opacity-50"
+        >
+          {busy ? 'Checking…' : 'Set up SAML sign-in'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// E-12 follow-up: add an email domain, checked with Microsoft's public
+// endpoints against the org's tenant.
+function AddDomain({ orgId, onAdded }) {
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const add = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/org/${orgId}/sso/domains`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: value }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not add the domain.');
+      onAdded(data);
+      setMessage({ ok: true, text: 'Domain added. Save changes to keep your other edits.' });
+      setValue('');
+    } catch (err) {
+      setMessage({ ok: false, text: err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && value.trim() && add()}
+          placeholder="Add a domain, e.g. contoso.com"
+          className="flex-1 min-w-0 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm"
+        />
+        <button
+          onClick={add}
+          disabled={busy || !value.trim()}
+          className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-medium disabled:opacity-50"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {busy ? 'Checking…' : 'Add'}
+        </button>
+      </div>
+      {message && <p className={cn('text-xs', message.ok ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300')}>{message.text}</p>}
+    </div>
   );
 }

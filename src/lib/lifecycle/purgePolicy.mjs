@@ -29,11 +29,13 @@ export function createPurgePlan(doc, now = new Date()) {
     eligible,
     blocked: !eligible || blockers.length > 0,
     blockers: !eligible ? ['retention_not_elapsed_or_invalid', ...blockers] : blockers,
-    // Stored files, earlier versions, and a deck's rendered slides (src/lib/slidePreview.js).
+    // Stored files, earlier versions, a deck's rendered slides (src/lib/slidePreview.js)
+    // and the card thumbnail (src/lib/thumbnails.js).
     objectKeys: [...new Set([
       doc?.filePath,
       ...(doc?.versions ?? []).map(v => v.filePath),
       doc?.id && isSlideDeck(doc.filename) ? slidePreviewKey(doc.id) : null,
+      doc?.thumbnailPath,
     ].filter(Boolean))],
     chunkCount: doc?._count?.chunks ?? 0,
     versionCount: doc?._count?.versions ?? 0,

@@ -35,6 +35,8 @@ export async function GET(req, { params }) {
       project: { select: { orgId: true, departmentId: true, scope: true } },
       decisions: { orderBy: { decidedAt: "desc" } },
       summaryReview: { select: { status: true, summaryHash: true } },
+      // E14: the template version an asset was written from.
+      templateVersion: { select: { version: true, sections: true, template: { select: { id: true, name: true } } } },
       // A-23: managed-metadata values the file had in SharePoint (raw, until WS-C maps them to terms).
       sourceTags: {
         select: { fieldName: true, fieldDisplayName: true, label: true, termGuid: true, syncedAt: true },
@@ -216,6 +218,8 @@ export async function GET(req, { params }) {
       canLinkTranscript: canManage,
       // E-10: who may ask KMS to transcribe a recording (POST /api/documents/[id]/transcribe checks again).
       canTranscribe: canManage && isMediaFile(doc.filename),
+      // E14: same rule as PUT /api/documents/[id]/asset (drafts only).
+      canEditAsset: canManage && role !== "guest" && doc.contentType === "asset" && doc.lifecycle === "draft",
     },
   });
 }

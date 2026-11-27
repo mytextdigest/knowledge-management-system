@@ -80,3 +80,19 @@ export async function getUserGroupIds(tenantId, objectId, groupIds) {
   }
   return member;
 }
+
+/**
+ * E-12 follow-up: has this tenant approved the KMS Sign-in app (admin consent
+ * via "Connect Microsoft")? Only then can the app get a token there. A SAML-
+ * only org hasn't; OIDC sign-in, group search and the many-groups lookup
+ * need it. False on any error (it only decides what the settings page offers).
+ */
+export async function hasSignInAppConsent(tenantId) {
+  if (!process.env.ENTRA_SSO_CLIENT_ID || !tenantId) return false;
+  try {
+    await appToken(tenantId);
+    return true;
+  } catch {
+    return false;
+  }
+}

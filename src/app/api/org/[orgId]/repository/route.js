@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { thumbnailUrl } from "@/lib/thumbnails";
 import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
@@ -17,6 +18,9 @@ const FILE_TYPE_EXTS = {
   spreadsheet: [".xlsx", ".xls", ".csv"],
   doc: [".docx", ".doc"],
   text: [".txt", ".md"],
+  slides: [".pptx"],
+  recording: [".mp4", ".mov", ".mp3", ".m4a", ".wav"],
+  image: [".png", ".jpg", ".jpeg"], // E11.2
 };
 
 export async function GET(req, { params }) {
@@ -92,6 +96,8 @@ export async function GET(req, { params }) {
   }
 
   const extList = fileType && fileType !== "all" ? FILE_TYPE_EXTS[fileType] : null;
+  // E14: assets written from a template have no file extension.
+  if (fileType === "asset") andConditions.push({ contentType: "asset" });
   if (extList) {
     andConditions.push({
       OR: extList.map((ext) => ({
@@ -171,6 +177,11 @@ export async function GET(req, { params }) {
     sourceProvider: true,
     externalUrl: true,
     contentType: true,
+    // E13.3: for thumbnailUrl() only; not sent.
+    filePath: true,
+    thumbnailPath: true,
+    externalId: true,
+    contentUpdatedAt: true,
     status: true,
     scope: true,
     lifecycle: true,
@@ -261,8 +272,9 @@ export async function GET(req, { params }) {
 
   return NextResponse.json({
     searchEventId,
-    documents: docs.map((d) => ({
+    documents: docs.map(({ filePath, thumbnailPath, externalId, ...d }) => ({
       ...d,
+      thumbnailUrl: thumbnailUrl({ ...d, filePath, thumbnailPath, externalId }),
       match: matchOf(d),
       relatedDocumentCount: (d._count?.relationshipsFrom || 0) + (d._count?.relationshipsTo || 0),
       _count: undefined,

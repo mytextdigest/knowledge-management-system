@@ -32,6 +32,7 @@ import {
   FileCheck2,
   Workflow,
   CalendarClock,
+  LayoutTemplate,
   Tags,
   BarChart3,
   Trash2,
@@ -209,6 +210,7 @@ export default function AppSidebar({ orgId, isOpen, onClose }) {
         ...(isSuperAdmin ? [
           { label: "Approval Workflows", href: `/org/${orgId}/workflows`, icon: Workflow },
           { label: "Review Policies", href: `/org/${orgId}/review-policies`, icon: CalendarClock },
+          { label: "Asset Templates", href: `/org/${orgId}/templates`, icon: LayoutTemplate }, // E14
           { label: "Governance Metrics", href: `/org/${orgId}/governance-metrics`, icon: BarChart3 },
         ] : []),
       ]

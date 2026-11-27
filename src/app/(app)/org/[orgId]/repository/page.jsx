@@ -3,6 +3,7 @@
 import RepositoryDocumentCard from "@/components/repository/RepositoryDocumentCard";
 import RepositoryFilters from "@/components/repository/RepositoryFilters";
 import UploadToRepositoryModal from "@/components/repository/UploadToRepositoryModal";
+import NewFromTemplateButton from "@/components/assets/NewFromTemplateButton";
 import Layout from "@/components/layout/Layout";
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
@@ -161,18 +162,22 @@ export default function RepositoryPage({ params }) {
             Knowledge Repository
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Browse, filter, and upload organization knowledge documents.
+            Browse, filter, and upload organization knowledge documents, or write one from a template.
           </p>
         </div>
 
         {canUpload ? (
-          <button
-            type="button"
-            onClick={() => setUploadOpen(true)}
-            className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
-          >
-            Upload Document
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* E14: write a How-To, FAQ, SOP… in KMS from a template */}
+            <NewFromTemplateButton orgId={orgId} isSuperAdmin={orgRole === "super_admin"} />
+            <button
+              type="button"
+              onClick={() => setUploadOpen(true)}
+              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+            >
+              Upload Document
+            </button>
+          </div>
         ) : null}
       </div>
 

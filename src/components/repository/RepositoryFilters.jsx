@@ -101,6 +101,10 @@ export default function RepositoryFilters({
         <option value="spreadsheet">Spreadsheet</option>
         <option value="doc">Word</option>
         <option value="text">Text</option>
+        <option value="slides">PowerPoint</option>
+        <option value="recording">Recording</option>
+        <option value="image">Image</option>
+        <option value="asset">Written from a template</option>
       </select>
 
       <select

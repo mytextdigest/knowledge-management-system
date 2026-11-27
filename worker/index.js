@@ -7,6 +7,7 @@ import { extractPdfText } from "./extractPdf.js";
 import { extractSpreadsheetChunks } from "./extractSpreadsheet.js";
 import { extractPptxChunks } from "./extractPptx.js";
 import { runOCR } from "./runOcr.js";
+import { extractImage, UnreadableImage } from "./extractImage.js";
 import mammoth from "mammoth";
 import { PrismaClient } from "@prisma/client";
 import OpenAI from "openai";
@@ -39,6 +40,9 @@ import { tooLargeFileWrites, isTooLargeToIndex, TOO_LARGE } from "../src/lib/con
 import { pipelineState, firstMissingStage, STAGE_LABELS } from "../src/lib/documentPipeline.js";
 import { slidePreviewKey, isSlideDeck } from "../src/lib/slidePreview.js";
 import { renderPptxToPdf, SlideRenderUnavailable } from "./renderSlides.js";
+import { thumbnailKey, thumbnailKind } from "../src/lib/thumbnails.js";
+import { imageThumbnail, pdfThumbnail, embeddedPptxThumbnail, videoThumbnail, ThumbnailToolUnavailable } from "./thumbnails.js";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createSourceTagReader } from "../src/lib/connectors/sharepointSourceTags.js";
 import { createTaxonomyAwareSourceTagReader } from "../src/lib/taxonomy/import/sharepointWorkerBridge.mjs";
 import { getFieldMap } from "../src/lib/taxonomy/import/sourceTagMap.mjs";
@@ -46,7 +50,7 @@ import { urlHash } from "../src/lib/analytics/linkHealth.mjs";
 import { sendSyncDigestEmail } from "../src/lib/mailer.js";
 import { startScheduler } from "./scheduler.js";
 import { defaultOwnerId } from "../src/lib/governance/defaultOwner.js";
-import { checkFileFormat, fileExtension, isMediaFile, playableContentType } from "../src/lib/fileFormats.js";
+import { checkFileFormat, fileExtension, isImageFile, isMediaFile, playableContentType } from "../src/lib/fileFormats.js";
 import { parseVtt, parseWordTranscript, chunkTranscript, transcriptText } from "../src/lib/transcripts.js";
 import { refreshAutoLinks, mayBeTranscript, UPLOAD_WINDOW_DAYS } from "../src/lib/transcriptLinking.js";
 import { withTempDir, streamToFile, probeMedia, watchMemory, toNodeReadable, MediaToolsUnavailable, NotEnoughDiskSpace, removeStaleTempDirs } from "./media.js";
@@ -130,6 +134,9 @@ function startTimer(label, meta = {}) {
 }
 
 // E11.1: PowerPoint files the worker can never read, and the status they get.
+// Documents with no file: their text is the document (pages, articles, E14 assets).
+const TEXT_CONTENT_TYPES = new Set(["page", "article", "asset"]);
+
 const UNREADABLE_PPTX = { PPTX_PROTECTED: "password_protected", PPTX_INVALID: "unreadable_file" };
 
 async function processChunkJob(job) {
@@ -181,8 +188,9 @@ async function processChunkJob(job) {
 
   const endExtract = startTimer("TEXT EXTRACTION", { docId, filename });
 
-  // SharePoint pages (A-15) and ServiceNow articles (A-17) arrive as text.
-  const isPage = existingDoc.contentType === "page" || existingDoc.contentType === "article";
+  // SharePoint pages (A-15), ServiceNow articles (A-17) and assets written
+  // from a template (E14) arrive as text.
+  const isPage = TEXT_CONTENT_TYPES.has(existingDoc.contentType);
   const ext = fileExtension(filename); // lower-case: "Deck.PDF" is a PDF too
   const isSpreadsheet = [".xlsx", ".xls", ".csv"].includes(ext);
 
@@ -244,6 +252,35 @@ async function processChunkJob(job) {
       return;
     }
     endExtract();
+  } else if (isImageFile(filename)) {
+    // E11.2: OCR text plus an AI description, one document text.
+    endExtract();
+    await prisma.document.update({ where: { id: docId }, data: { status: "running_ocr" } });
+    const endImage = startTimer("IMAGE (OCR + description)", { docId });
+    let image;
+    try {
+      image = await extractImage(buffer, { filename, getOpenAI: () => getOpenAIForDocument(docId) });
+    } catch (err) {
+      endImage();
+      if (!(err instanceof UnreadableImage)) throw err;
+      // Retrying can't help: stop with a status the document cards explain.
+      console.warn(`⚠️ ${filename}: ${err.message}`);
+      await prisma.document.update({ where: { id: docId }, data: { status: "unreadable_file" } });
+      return;
+    }
+    endImage();
+    console.log(`🖼️ ${filename}: ${image.width}×${image.height}, OCR ${image.ocrText.length} chars, description ${image.description.length} chars`);
+    if (!image.text) {
+      // No words in it and no description (no OpenAI key, or the call failed): nothing to search.
+      await prisma.document.update({ where: { id: docId }, data: { status: "no_text_found" } });
+      await queueThumbnail(docId);
+      return;
+    }
+    rawText = image.text;
+    sheetChunks = chunkText(image.text, chunkSize, chunkOverlap).map((text) => ({
+      text,
+      metadata: { kind: "image", ocr: Boolean(image.ocrText), description: Boolean(image.description) },
+    }));
   } else if (ext === ".txt") {
     rawText = buffer.toString("utf8");
     endExtract();
@@ -268,7 +305,8 @@ async function processChunkJob(job) {
 
   let text = forceValidUTF8(sanitizeText(rawText));
 
-  if (!text || text.length < 50) {
+  // An image's OCR text can be a short label; it was checked above.
+  if (!text || (text.length < 50 && !isImageFile(filename))) {
     await prisma.document.update({
       where: { id: docId },
       data: { status: "chunk_failed" },
@@ -327,6 +365,15 @@ async function processChunkJob(job) {
           throw new Error(`Ambiguous existing chunks for document ${docId}; manual review required`);
         }
         byIndex.set(row.chunkIndex, row.id);
+      }
+      // E14: an edited draft asset can get shorter; its extra chunks go
+      // (decision evidence pointing at them is set to null by the schema).
+      if (existingDoc.contentType === "asset") {
+        const extra = [...byIndex.entries()].filter(([index]) => index >= chunks.length).map(([, id]) => id);
+        if (extra.length) {
+          await tx.chunk.deleteMany({ where: { id: { in: extra } } });
+          for (const [index] of [...byIndex.entries()].filter(([index]) => index >= chunks.length)) byIndex.delete(index);
+        }
       }
       if ([...byIndex.keys()].some((index) => index >= chunks.length || index < 0)) {
         throw new Error(`Document ${docId} has stale chunk indices; manual review required`);
@@ -408,8 +455,12 @@ async function processChunkJob(job) {
   // shows the text view rather than old slides.
   if (isSlideDeck(filename) && (s3Key || existingDoc.filePath)) {
     await deleteSlidePreview(docId);
-    await queueSlidePreview(docId);
+    await queueSlidePreview(docId); // its thumbnail follows the render
   }
+  // E13.3: the card's thumbnail, made again from the new content.
+  const thumbKind = thumbnailKind(filename);
+  if ((thumbKind === "pdf" || thumbKind === "image") && (s3Key || existingDoc.filePath)) await queueThumbnail(docId);
+  else if (!thumbKind && existingDoc.thumbnailPath) await deleteThumbnail(docId);
 
   // -----------------------------
   // 8. Enqueue embedding job
@@ -818,7 +869,7 @@ async function ensureFreshAppOnlyToken(integration) {
 // otherwise straight from the source (no-copy mode), held in memory only.
 async function getDocumentBytes(doc, s3Key = doc.filePath) {
   // A-15/A-17: a page's or article's text is extracted at sync time; there is no file.
-  if (doc.contentType === "page" || doc.contentType === "article") return Buffer.from(doc.content || "", "utf8");
+  if (TEXT_CONTENT_TYPES.has(doc.contentType)) return Buffer.from(doc.content || "", "utf8");
   if (s3Key) {
     const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
     return streamToBuffer(object.Body);
@@ -904,6 +955,8 @@ async function processRecording(doc, s3Key, filename) {
     where: { id: docId },
     data: { durationSeconds: probe.durationSeconds, status: "ready" },
   });
+  // E13.3: a frame for the card (stored videos; SharePoint shows its own for no-copy files).
+  if (probe.hasVideo && (s3Key || doc.filePath)) await queueThumbnail(docId);
   await linkTranscripts(docId); // E11.5: the transcripts next to it
   const transcripts = await prisma.document.count({ where: { transcriptOfId: docId, deletedAt: null } });
   console.log(transcripts
@@ -1111,6 +1164,7 @@ async function syncOneFile({ change, integration, site, connectedByUserId, acces
 // too). Returns the bytes freed (0 if there was none or it couldn't be removed).
 async function removeStoredCopy(filePath, name, docId = null) {
   if (docId && isSlideDeck(name)) await deleteSlidePreview(docId);
+  if (docId) await deleteThumbnail(docId); // E13.3: made from the stored copy
   if (!filePath) return 0n;
   try {
     const head = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: filePath }));
@@ -1648,7 +1702,8 @@ async function processRepairJob(job) {
   const stage = firstMissingStage(doc, state);
   console.log(`🛠️ REPAIR JOB: ${doc.id} — ${stage ? `missing ${STAGE_LABELS[stage] || stage}` : "nothing missing"}`, state);
 
-  if (isSlideDeck(doc.filename) && doc.filePath) await queueSlidePreview(doc.id);
+  if (isSlideDeck(doc.filename) && doc.filePath) await queueSlidePreview(doc.id); // and its thumbnail
+  else if (doc.filePath && !doc.thumbnailPath && thumbnailKind(doc.filename)) await queueThumbnail(doc.id);
 
   const base = { docId: doc.id, filename: doc.filename, projectId: doc.projectId, userId: doc.userId, orgId: doc.orgId };
   // E-6: a recording needs its length; what was said lives in its transcript,
@@ -1689,12 +1744,15 @@ async function deleteSlidePreview(docId) {
 }
 
 async function processSlidePreviewJob(job) {
-  const doc = await prisma.document.findUnique({ where: { id: job.docId }, select: { id: true, filename: true, filePath: true } });
+  const doc = await prisma.document.findUnique({ where: { id: job.docId }, select: { id: true, filename: true, filePath: true, thumbnailPath: true } });
   if (!doc?.filePath || !isSlideDeck(doc.filename)) return;
   const Key = slidePreviewKey(doc.id);
   if (!job.force) {
     const exists = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key })).then(() => true, () => false);
-    if (exists) return;
+    if (exists) {
+      if (!doc.thumbnailPath) await queueThumbnail(doc.id);
+      return;
+    }
   }
   try {
     const end = startTimer("SLIDE PREVIEW", { docId: doc.id });
@@ -1707,6 +1765,74 @@ async function processSlidePreviewJob(job) {
     if (err instanceof SlideRenderUnavailable) console.warn(`⚠️ Slide previews are off on this worker: ${err.message}`);
     else console.error(`⚠️ Slide preview failed for ${doc.id}:`, err.message);
   }
+  // E13.3: the card shows the first slide (or, unrendered, the deck's own preview).
+  await queueThumbnail(doc.id);
+}
+
+// E13.3 (E-15): card thumbnails (src/lib/thumbnails.js, worker/thumbnails.js)
+// for stored files. Never retried: without one the card shows its icon.
+async function queueThumbnail(docId) {
+  try {
+    await sqs.send(new SendMessageCommand({ QueueUrl: QUEUE_URL, MessageBody: JSON.stringify({ type: "thumbnail", docId }) }));
+  } catch (err) {
+    console.error(`⚠️ Couldn't queue the thumbnail for ${docId}:`, err.message);
+  }
+}
+
+async function deleteThumbnail(docId) {
+  try {
+    await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: thumbnailKey(docId) }));
+    await prisma.document.updateMany({ where: { id: docId, thumbnailPath: { not: null } }, data: { thumbnailPath: null } });
+  } catch (err) {
+    console.error(`⚠️ Couldn't remove the thumbnail of ${docId}:`, err.message);
+  }
+}
+
+async function readS3(Key) {
+  const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key }));
+  return streamToBuffer(object.Body);
+}
+
+async function processThumbnailJob(job) {
+  const doc = await prisma.document.findUnique({
+    where: { id: job.docId },
+    select: { id: true, filename: true, filePath: true, deletedAt: true },
+  });
+  const kind = thumbnailKind(doc?.filename);
+  if (!doc?.filePath || doc.deletedAt || !kind) return;
+  const end = startTimer("THUMBNAIL", { docId: doc.id, kind });
+  try {
+    let jpeg = null;
+    if (kind === "image") jpeg = await imageThumbnail(await readS3(doc.filePath));
+    else if (kind === "pdf") jpeg = await pdfThumbnail(await readS3(doc.filePath));
+    else if (kind === "slides") {
+      const slides = await readS3(slidePreviewKey(doc.id)).catch(() => null);
+      if (slides) {
+        jpeg = await pdfThumbnail(slides).catch((err) => {
+          console.warn(`⚠️ Couldn't draw the first slide of ${doc.id}: ${err.message}`);
+          return null;
+        });
+      }
+      if (!jpeg) jpeg = await embeddedPptxThumbnail(await readS3(doc.filePath));
+    } else if (kind === "video") {
+      // ffmpeg reads the one frame over HTTP (range requests): no download of the recording.
+      const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: S3_BUCKET, Key: doc.filePath }), { expiresIn: 900 });
+      jpeg = await videoThumbnail(url);
+    }
+    if (!jpeg) {
+      console.log(`🖼️ No thumbnail for ${doc.id} (${doc.filename}): nothing to draw it from`);
+      return;
+    }
+    const Key = thumbnailKey(doc.id);
+    await s3.send(new PutObjectCommand({ Bucket: S3_BUCKET, Key, Body: jpeg, ContentType: "image/jpeg" }));
+    await prisma.document.update({ where: { id: doc.id }, data: { thumbnailPath: Key } });
+    console.log(`🖼️ Thumbnail stored for ${doc.id} (${kind}, ${jpeg.length} bytes)`);
+  } catch (err) {
+    if (err instanceof ThumbnailToolUnavailable) console.warn(`⚠️ Thumbnails for ${kind} files are off on this worker: ${err.message}`);
+    else console.error(`⚠️ Thumbnail failed for ${doc.id}:`, err.message);
+  } finally {
+    end();
+  }
 }
 
 async function processJob(job) {
@@ -1715,6 +1841,7 @@ async function processJob(job) {
   if (job.type === "summarize") return processSummarizationJob(job);
   if (job.type === "repair") return processRepairJob(job);
   if (job.type === "slide_preview") return processSlidePreviewJob(job);
+  if (job.type === "thumbnail") return processThumbnailJob(job);
   if (job.type === "transcribe") return mediaJobs.processTranscribeJob(job);
   if (job.type === "segment") return mediaJobs.processSegmentJob(job);
   if (job.type === "cluster") {
