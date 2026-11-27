@@ -1,0 +1,10 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {validateReviewPolicy,matchesPolicy,addDays,reviewerFor,validOutcome} from '../../../src/lib/governance/reviewCycles.mjs';
+const policy={name:'Annual',intervalDays:365,reviewerType:'owner',escalateAfterDays:7,departmentIds:[],categories:[],active:true};
+test('accepts valid policy',()=>assert.equal(validateReviewPolicy(policy),null));
+test('rejects unsafe interval',()=>assert.match(validateReviewPolicy({...policy,intervalDays:0}),/Interval/));
+test('rejects invalid reviewer',()=>assert.match(validateReviewPolicy({...policy,reviewerType:'anyone'}),/reviewer/));
+test('matches department and category',()=>{assert.equal(matchesPolicy({departmentId:'d',category:'c'},{...policy,departmentIds:['d'],categories:['c']}),true);assert.equal(matchesPolicy({departmentId:'x',category:'c'},{...policy,departmentIds:['d']}),false)});
+test('due date arithmetic',()=>assert.equal(addDays('2026-01-01T00:00:00Z',30).toISOString(),'2026-01-31T00:00:00.000Z'));
+test('resolves steward or owner',()=>{assert.equal(reviewerFor({ownerId:'a'},policy),'a');assert.equal(reviewerFor({stewards:[{userId:'b'}]},{...policy,reviewerType:'steward'}),'b')});
+test('only allowed outcomes',()=>{assert.equal(validOutcome('valid'),true);assert.equal(validOutcome('unknown'),false)});

@@ -1,0 +1,1 @@
+Cybersecurity standard for operational technology networks: segmentation, logging and patch windows.

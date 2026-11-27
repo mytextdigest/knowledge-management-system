@@ -17,7 +17,6 @@ export default function TopicGroup({
   onReclusterUnassigned,
   onView,
   onDelete,
-  onToggleStar,
   onToggleSelect,
   onRename,
   defaultExpanded = true,
@@ -256,13 +255,13 @@ export default function TopicGroup({
                     docId={doc.id}
                     docFilename={doc.filename}
                     currentTopicId={topic.id}
+                    permissions={doc.permissions}
                   >
                     <DocumentCard
                       document={doc}
                       viewMode={showLabels ? 'grid' : 'list'}
                       onView={onView}
                       onDelete={onDelete}
-                      onToggleStar={onToggleStar}
                       onToggleSelect={onToggleSelect}
                       onRename={onRename}
                     />

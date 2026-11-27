@@ -1,0 +1,100 @@
+# Rank 10 (Knowledge Recommendation Engine) — Implementation Tracker
+### Tier 2 — Organizational Intelligence
+
+> **For AI agents:** This file is the source of truth for task status on Rank 10. When you complete a task, update the `Status` field to `DONE` and fill in `Completed` date. When you start a task, set it to `IN_PROGRESS`. Add notes under the task if important decisions were made during implementation.
+>
+> **Single-owner feature — do not redistribute.** Matching the convention used for `TIER1_AUTO_CLASSIFICATION_IMPLEMENTATION_TRACKER.md`, `TIER1_INGESTION_PIPELINE_IMPLEMENTATION_TRACKER.md`, and `TIER1_KNOWLEDGE_CONTEXT_ENGINE_IMPLEMENTATION_TRACKER.md`, this whole feature is one person's end-to-end ownership, submitted as one PR — not split across the team. Every task below is assigned to **Simran**. The task breakdown exists to track sequencing and progress, not to divide work among people.
+>
+> **Reference documents:** `REQUIREMENTS_KNOWLEDGE_RECOMMENDATION_ENGINE.md` for full FR text, data model, and acceptance criteria this tracker's tasks implement.
+>
+> **This is an extension of existing, merged code, not a fresh build.** `src/lib/recommendations.js` and `GET /api/org/[orgId]/recommendations` already existed and already worked; `RelatedWorkPanel.jsx` had been unmounted from the department page (commit `80d3657`) with no reason recorded. Read `11-A` before touching anything else — the very first step is getting an actual answer on why the panel was hidden, not assuming. **Resolved 2026-09-09: see `11-A`'s decision note — `RelatedWorkPanel.jsx` is retired and removed, replaced by the dedicated `/org/[orgId]/recommendations` page.**
+
+---
+
+## Status Legend
+
+| Symbol | Meaning |
+|--------|---------|
+| `TODO` | Not started |
+| `IN_PROGRESS` | Currently being worked on |
+| `DONE` | Complete and merged |
+| `BLOCKED` | Waiting on a dependency |
+| `SKIP` | Deferred or out of scope |
+
+---
+
+## Milestone 11 — Rank 10 (Knowledge Recommendation Engine)
+
+| Task ID | Title | Status | Assignee | Depends On | Started | Completed |
+|---------|-------|--------|----------|------------|---------|-----------|
+| `11-A` | Resolve Panel-Hiding Decision + Re-Establish Surface (FR-1) | `DONE` | Simran | — | 2026-09-06 | 2026-09-09 |
+| `11-B` | Document Interaction Signal — Schema + Migration (FR-2) | `DONE` | Simran | — | 2026-09-06 | 2026-09-06 |
+| `11-C` | Interaction Write Path | `DONE` | Simran | `11-B` | 2026-09-06 | 2026-09-06 |
+| `11-D` | Feedback-Weighted Ranking (FR-3) | `DONE` | Simran | — | 2026-09-06 | 2026-09-06 |
+| `11-E` | Relationship-Graph-Aware Recommendations (FR-4) | `DONE` | Simran | — | 2026-09-06 | 2026-09-06 |
+| `11-F` | Department/Role-Aware Recommendations (FR-5) | `DONE` | Simran | `11-A` | 2026-09-06 | 2026-09-06 |
+| `11-G` | Admin Effectiveness Visibility (FR-6) | `DONE` | Simran | `11-C` | 2026-09-06 | 2026-09-06 |
+| `11-H` | Integration Validation | `IN_PROGRESS` | Simran | `11-D`, `11-E`, `11-F`, `11-G` | 2026-09-06 | |
+| `11-I` | PR + Cross-Review | `TODO` | Simran | `11-H` | | |
+
+---
+
+### Task 11-A — Resolve Panel-Hiding Decision + Re-Establish Surface
+- **Status:** `DONE`
+- **Objective:** FR-1 — before any other work, confirm with whoever hid `RelatedWorkPanel` in commit `80d3657` why it was hidden (no reason is recorded in the commit message or any doc). Decide: restore as-is on the department page, redesign, relocate, or deliberately retire in favor of the new semantic search added in that same commit — and document whichever it is here.
+- **Key files:** `src/app/(app)/org/[orgId]/department/[deptId]/page.jsx` (previously had `RelatedWorkPanel` import and usage commented out), `src/components/recommendations/RelatedWorkPanel.jsx` (removed).
+- **Acceptance criteria:** at least one recommendation surface is visibly reachable in the product, with the placement decision explicitly recorded in this tracker's notes.
+- **Decision confirmed (2026-09-09, by Johurul):** retire `RelatedWorkPanel` — do not restore it on the department page. The dedicated, sidebar-reachable `/org/[orgId]/recommendations` page (built under `11-A`'s implementation) is the v1 recommendation surface going forward, kept separate from the semantic-search listing pages introduced in `80d3657` rather than duplicating that experience. Since this was the only thing keeping `11-A` open, the now-dead `RelatedWorkPanel.jsx` component and its commented-out import/usage in `department/[deptId]/page.jsx` were removed in the same change rather than left as unreachable code. This also retroactively satisfies `11-F`'s dependency on `11-A`.
+
+### Task 11-B — Document Interaction Signal: Schema + Migration
+- **Status:** `DONE`
+- **Objective:** FR-2 — add the `DocumentInteraction` model per `REQUIREMENTS_KNOWLEDGE_RECOMMENDATION_ENGINE.md`'s Data Model Impact. Coordinate the final field shape with Sandeep (owner of [[REQUIREMENTS_EXPERT_DISCOVERY]], Rank 9) before finalizing, since his feature will consume this model once it exists — see both docs' Interface Contract sections.
+- **Key files:** `prisma/schema.prisma`, new migration.
+- **Acceptance criteria:** `prisma migrate status` clean; purely additive, no column overlap with any other in-flight feature.
+
+### Task 11-C — Interaction Write Path
+- **Status:** `DONE`
+- **Objective:** Wire a write to `DocumentInteraction` into the document-view request path (`src/app/(app)/document/page.jsx` and/or its backing API route). Fire-and-forget / best-effort — must not become a blocking dependency of the document-view response.
+- **Acceptance criteria:** viewing a document creates an interaction row, with no measurable latency regression on the view request.
+
+### Task 11-D — Feedback-Weighted Ranking
+- **Status:** `DONE`
+- **Objective:** FR-3 — read `OrgMessage.feedback` in `src/lib/recommendations.js` and adjust `collapseByDocument()`'s scoring: boost documents behind `"helpful"`-marked answers, suppress ones behind `"not_helpful"`.
+- **Acceptance criteria:** a document behind a `not_helpful` answer is demonstrably deprioritized in that user's next recommendation set.
+
+### Task 11-E — Relationship-Graph-Aware Recommendations
+- **Status:** `DONE`
+- **Objective:** FR-4 — extend `getRecommendations()` to pull additional candidates via `DocumentRelationship`, reusing the same graph `expandWithRelatedDocuments()` (`src/lib/knowledgeContext.js`) already uses for chat, rather than a second implementation of graph traversal.
+- **Acceptance criteria:** a document structurally related (via `DocumentRelationship`) to a user's recent activity can appear in recommendations even without strong embedding similarity to their `OrgMemberMemory` topics.
+
+### Task 11-F — Department/Role-Aware Recommendations
+- **Status:** `DONE`
+- **Objective:** FR-5 — a department-wide trending/aggregate view for `dept_admin`, distinct from an individual's personalized proactive list. Depends on `11-A`'s resolved surface placement.
+- **Acceptance criteria:** a `dept_admin` can see department-level recommended/trending content, not just their own personal feed.
+
+### Task 11-G — Admin Effectiveness Visibility
+- **Status:** `DONE`
+- **Objective:** FR-6 — a narrow summary (most-recommended documents, zero-click-through recommendations) reusing the `GET /api/org/[orgId]/health` aggregation pattern. Depends on `11-C`'s interaction data existing to aggregate over.
+- **Acceptance criteria:** an admin can see a basic effectiveness summary without this becoming a general analytics feature.
+
+### Task 11-H — Integration Validation
+- **Status:** `IN_PROGRESS`
+- **Objective:** Full regression pass — confirm `ORG_OPENAI_KEY_MISSING` handling still works, confirm no chat/search/repository-listing regression, confirm interaction writes (`11-C`) don't leak individual-level data to unintended viewers (see requirements doc NFRs and Open Question 3).
+- **Acceptance criteria:** all acceptance criteria in `REQUIREMENTS_KNOWLEDGE_RECOMMENDATION_ENGINE.md` verified.
+
+### Task 11-I — PR + Cross-Review
+- **Status:** `TODO`
+- **Objective:** Submit this feature's PR. Request review explicitly focused on `11-C`'s RBAC/privacy handling of interaction data, given the precedent set by Rank 8's "leaks existence of association" failure mode.
+- **Acceptance criteria:** merged to `dev` with explicit reviewer sign-off on the interaction-data privacy boundary.
+
+
+## Implementation Notes — 2026-09-06
+
+- **11-A implementation decision:** a dedicated `/org/[orgId]/recommendations` page is implemented and linked from the application sidebar. The existing `RelatedWorkPanel` remains intentionally unmounted so semantic-search listing pages are not duplicated. **External team/product confirmation of this placement is still required by FR-1; code cannot manufacture that sign-off, so 11-A remains `BLOCKED`.**
+- **11-B interface contract:** `DocumentInteraction(documentId, userId, orgId, type, createdAt)` is shared with Expert Discovery.
+- **11-C privacy/RBAC:** view writes are best-effort from the document page and the backing route independently verifies repository/project access. No endpoint exposes individual view history to admins.
+- **11-D:** requesting-user feedback (`helpful`/`not_helpful`, plus existing `up`/`down`) changes document scores before ranking.
+- **11-E:** recent view/download activity seeds the existing `expandWithRelatedDocuments()` graph traversal; no duplicate graph implementation was added.
+- **11-F:** authorized department admins get an aggregate department mode. It includes both repository documents and org-scoped project documents whose effective department matches.
+- **11-G:** effectiveness is aggregate-only and shows impressions, post-impression engagements, zero-click documents, and the most-recommended documents for the 30-day window.
+- **11-H:** static/source validation is complete; local DB migration/status plus browser regression remains required before merge.

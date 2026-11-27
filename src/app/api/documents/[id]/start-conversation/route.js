@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { resolveDocumentManagementAccess } from "@/lib/documentManagementPolicy";
 
 export async function POST(req, { params }) {
   try {
@@ -12,21 +13,22 @@ export async function POST(req, { params }) {
 
     console.log("Conv document id: ", documentId)
 
-    // Validate doc belongs to user
-    const doc = await prisma.document.findFirst({
-      where: {
-        id: documentId,
-        user: { email: session.user.email }
-      }
-    });
-    if (!doc) return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    const access = await resolveDocumentManagementAccess(session.user.email, documentId);
+    if (!access.document) return NextResponse.json({ error: "Document not found" }, { status: 404 });
+    if (!access.canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    // Check for existing conversation
+    const actingUser = access.user || await prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { id: true },
+    });
+    if (!actingUser) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    // Check for the caller's existing conversation
     const existing = await prisma.conversation.findFirst({
       where: {
         documentId,
-        userId: doc.userId,
-        messages: { some: {} } // 🔒 must still have messages
+        userId: actingUser.id,
+        messages: { some: {} } // must still have messages
       },
       orderBy: { createdAt: "desc" }
     });
@@ -42,7 +44,7 @@ export async function POST(req, { params }) {
     const conv = await prisma.conversation.create({
       data: {
         documentId,
-        userId: doc.userId  // required by schema
+        userId: actingUser.id  // caller-specific conversation
       }
     });
 

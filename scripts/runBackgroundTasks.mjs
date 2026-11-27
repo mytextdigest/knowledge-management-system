@@ -1,3 +1,4 @@
+import "dotenv/config";
 // scripts/runBackgroundTasks.mjs
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { extractTextFromPDFBuffer } from "./pdfExtractor.mjs";
@@ -20,7 +21,7 @@ async function retryOperation(operation, operationName, maxRetries = MAX_RETRIES
       return await operation();
     } catch (error) {
       lastError = error;
-      console.warn(`⚠️ ${operationName} attempt ${attempt} failed:`, error.message);
+      console.warn(`âš ï¸ ${operationName} attempt ${attempt} failed:`, error.message);
       if (attempt < maxRetries) {
         await delay(RETRY_DELAY * attempt);
       }
@@ -57,23 +58,25 @@ async function loadDependencies() {
     const { 
       generateEmbeddingsInBackground, 
       runSummarizationInBackground 
-    } = await import("../src/utils/backgroundTasks.mjs");
+    } = await import("../src/utils/backgroundTasks.js");
 
     return { s3Client, prisma, generateEmbeddingsInBackground, runSummarizationInBackground };
   } catch (error) {
-    console.error("❌ Failed to load dependencies:", error);
+    console.error("âŒ Failed to load dependencies:", error);
     throw new Error(`Dependency loading failed: ${error.message}`);
   }
 }
 
 async function updateDocumentStatus(prisma, docId, status, error = null) {
+  if (error) {
+    console.error(`Document ${docId} status ${status}:`, error);
+  }
+
   return retryOperation(
     async () => {
       return await prisma.document.update({
         where: { id: docId },
-        data: error 
-          ? { status, error: error.message || String(error) }
-          : { status, error: null },
+        data: { status },
       });
     },
     `Update document status to ${status}`
@@ -84,7 +87,7 @@ async function downloadFromS3(s3Client, s3Key) {
   return retryOperation(
     async () => {
       const command = new GetObjectCommand({
-        Bucket: process.env.AWS_S3_BUCKET,
+        Bucket: process.env.S3_BUCKET,
         Key: s3Key,
       });
       const response = await s3Client.send(command);
@@ -95,7 +98,8 @@ async function downloadFromS3(s3Client, s3Key) {
 }
 
 async function processDocument(docId, s3Key, filename) {
-  console.log(`🚀 Worker started for doc ${docId}, file: ${filename}`);
+  let failed = false;
+  console.log(`ðŸš€ Worker started for doc ${docId}, file: ${filename}`);
   
   let dependencies;
   try {
@@ -104,27 +108,40 @@ async function processDocument(docId, s3Key, filename) {
     const { prisma } = dependencies;
 
     // Update status to extracting
-    await updateDocumentStatus(prisma, docId, "extracting");
+    const claim = await prisma.document.updateMany({
+      where: {
+        id: docId,
+        status: "queued",
+      },
+      data: {
+        status: "extracting",
+      },
+    });
+
+    if (claim.count !== 1) {
+      console.log(`Skipping document ${docId}: already claimed or not queued`);
+      return;
+    }
 
     // Download file from S3
-    console.log(`📥 Downloading file from S3: ${s3Key}`);
+    console.log(`ðŸ“¥ Downloading file from S3: ${s3Key}`);
     const buffer = await downloadFromS3(dependencies.s3Client, s3Key);
     
     if (!buffer || buffer.length === 0) {
       throw new Error("Downloaded file is empty");
     }
 
-    console.log(`✅ Downloaded ${buffer.length} bytes`);
+    console.log(`âœ… Downloaded ${buffer.length} bytes`);
 
     // Extract text based on file type
     let text = "";
     if (filename.endsWith(".txt")) {
       text = buffer.toString("utf-8");
     } else if (filename.endsWith(".pdf")) {
-      console.log("📄 Processing PDF file...");
+      console.log("ðŸ“„ Processing PDF file...");
       text = await extractTextFromPDFBuffer(buffer);
     } else if (filename.endsWith(".docx")) {
-      console.log("📄 Processing DOCX file...");
+      console.log("ðŸ“„ Processing DOCX file...");
       const result = await mammoth.extractRawText({ buffer });
       text = result.value;
     } else {
@@ -135,19 +152,19 @@ async function processDocument(docId, s3Key, filename) {
       throw new Error("No text content extracted from file");
     }
 
-    console.log(`✅ Extracted ${text.length} characters from ${filename}`);
+    console.log(`âœ… Extracted ${text.length} characters from ${filename}`);
 
     // Chunk text
     const chunks = chunkText(text);
-    console.log(`📦 Created ${chunks.length} chunks`);
+    console.log(`ðŸ“¦ Created ${chunks.length} chunks`);
 
     // Insert chunks into DB
     await retryOperation(
       async () => {
         await prisma.chunk.createMany({
           data: chunks.map((chunk, idx) => ({
-            document_id: docId,
-            chunk_index: idx,
+            documentId: docId,
+            chunkIndex: idx,
             text: chunk,
           })),
         });
@@ -159,38 +176,40 @@ async function processDocument(docId, s3Key, filename) {
     await updateDocumentStatus(prisma, docId, "processing");
 
     // Run background AI tasks sequentially to avoid overload
-    console.log(`🤖 Starting AI tasks for document ${docId}`);
+    console.log(`ðŸ¤– Starting AI tasks for document ${docId}`);
     
     if (dependencies.generateEmbeddingsInBackground) {
       await dependencies.generateEmbeddingsInBackground(docId, chunks);
     } else {
-      console.warn("⚠️ generateEmbeddingsInBackground function not available");
+      throw new Error("Embedding function not available");
     }
 
     if (dependencies.runSummarizationInBackground) {
       await dependencies.runSummarizationInBackground(docId, filename, chunks);
     } else {
-      console.warn("⚠️ runSummarizationInBackground function not available");
+      throw new Error("Summarization function not available");
     }
 
-    // Final status update
+    // Both AI tasks must succeed before marking ingestion complete.
+    // Preserve the existing document processing-status contract.
     await updateDocumentStatus(prisma, docId, "completed");
     
-    console.log(`🎉 Processing complete for doc ${docId}`);
+    console.log(`ðŸŽ‰ Processing complete for doc ${docId}`);
 
   } catch (error) {
-    console.error("❌ Worker failed:", error);
+    failed = true;
+    console.error("âŒ Worker failed:", error);
     
     try {
       if (dependencies?.prisma) {
         await updateDocumentStatus(dependencies.prisma, docId, "error", error);
       }
     } catch (dbError) {
-      console.error("❌ Failed to update error status:", dbError);
+      console.error("âŒ Failed to update error status:", dbError);
     }
   } finally {
-    // Graceful shutdown
-    process.exit(0);
+    // Allow pending I/O and logging to finish.
+    process.exitCode = failed ? 1 : 0;
   }
 }
 
@@ -200,28 +219,28 @@ if (process.argv.length >= 5) {
   const s3Key = process.argv[3];
   const filename = process.argv[4];
   
-  console.log(`📝 Starting via CLI args for doc: ${docId}`);
+  console.log(`ðŸ“ Starting via CLI args for doc: ${docId}`);
   processDocument(docId, s3Key, filename).catch(console.error);
 }
 
 // Handle IPC messages (primary)
 process.on("message", async (message) => {
   if (message && message.docId && message.s3Key && message.filename) {
-    console.log(`📝 Starting via IPC for doc: ${message.docId}`);
+    console.log(`ðŸ“ Starting via IPC for doc: ${message.docId}`);
     await processDocument(message.docId, message.s3Key, message.filename);
   } else {
-    console.error("❌ Invalid IPC message:", message);
+    console.error("âŒ Invalid IPC message:", message);
     process.exit(1);
   }
 });
 
 // Handle uncaught errors
 process.on("uncaughtException", (error) => {
-  console.error("💥 Uncaught Exception:", error);
+  console.error("ðŸ’¥ Uncaught Exception:", error);
   process.exit(1);
 });
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error("💥 Unhandled Rejection at:", promise, "reason:", reason);
+  console.error("ðŸ’¥ Unhandled Rejection at:", promise, "reason:", reason);
   process.exit(1);
 });

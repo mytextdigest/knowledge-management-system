@@ -1,0 +1,1 @@
+Multifactor authentication rollout for remote access: enrolment steps, hardware tokens and exceptions.
