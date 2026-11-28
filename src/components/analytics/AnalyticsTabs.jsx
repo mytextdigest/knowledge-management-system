@@ -12,6 +12,7 @@ export default function AnalyticsTabs({ orgId, showGovernance = false }) {
     { label: "Search activity", href: `/org/${orgId}/analytics` },
     { label: "Usage & adoption", href: `/org/${orgId}/analytics/usage` },
     { label: "Content health", href: `/org/${orgId}/analytics/health` },
+    { label: "Search quality", href: `/org/${orgId}/analytics/search-quality` },
     ...(showGovernance ? [{ label: "Governance", href: `/org/${orgId}/governance-metrics` }] : []),
   ];
   return (

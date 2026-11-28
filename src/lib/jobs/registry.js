@@ -25,6 +25,7 @@ import { scanDueReviews } from "../governance/reviewScan.js";
 import { scanStaleContent } from "../governance/staleScan.js";
 import { purgeDeletedDocuments } from "../lifecycle/purgeDeleted.js";
 import { rollupUsageRange } from "../analytics/rollup.mjs";
+import { scanSearchGaps } from "../analytics/gapScan.mjs";
 import { scanDocumentLinks } from "../analytics/linkHealth.mjs";
 
 // A-22: down to 5 minutes (NFR-6, NYPA Q&A #99: changes within 5 minutes).
@@ -79,6 +80,7 @@ async function queueSync({ prisma, orgId, enqueue, provider, name }) {
 }
 
 export const JOB_DEFINITIONS = {
+  "analytics.gap-scan": { label: "Search knowledge gaps", description: "Links recent unsuccessful searches and low-confidence answers to knowledge gaps.", defaultIntervalMinutes: 1440, minIntervalMinutes: 60, appliesTo: () => true, run: ({prisma,orgId}) => scanSearchGaps(prisma,{orgId}) },
   "links.check": {
     label: "Document link health",
     description: "Checks external document URLs for broken links; private/internal addresses are never requested.",

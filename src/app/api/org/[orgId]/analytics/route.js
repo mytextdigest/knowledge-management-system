@@ -58,7 +58,7 @@ export async function GET(request, { params }) {
       summary: { total, noResults, noResultRate: total ? round(100 * noResults / total) : 0, averageLatencyMs: latencies._avg.latencyMs === null ? null : round(latencies._avg.latencyMs), clicks, reformulations },
       topQueries,
       noResultQueries: noResultQueries.map((r) => ({ query: r.normalizedQuery, count: r._count._all })),
-      recent,
+      recent: role === 'super_admin' ? recent : [],
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     console.error('Search analytics failed:', error?.message);
