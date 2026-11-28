@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAccessibleExpertsWithPrisma } from "@/lib/expertDiscoveryQuery.mjs";
 import { RELATIONSHIP_MIN_CONFIDENCE } from "./relationshipScoringPolicy.mjs";
-import { knowledgeAccessSql } from "@/lib/access/documentAccess";
+import { knowledgeAccessSql, searchAccessSql } from "@/lib/access/documentAccess";
 
 export const RELATED_DOCUMENT_MIN_WEIGHT = RELATIONSHIP_MIN_CONFIDENCE;
 
@@ -28,10 +28,11 @@ export async function getAccessibleExperts(args) {
   return getAccessibleExpertsWithPrisma(prisma, args);
 }
 
-export async function expandWithRelatedDocuments({ rows, orgId, userId, isSuperAdmin = false, limit = 8 }) {
+export async function expandWithRelatedDocuments({ rows, orgId, userId, isSuperAdmin = false, limit = 8, graphWeight = 0.72, eligibleDocumentIds = null }) {
+  if(graphWeight===0)return rows.slice(0,limit);
   const seedIds = [...new Set(rows.slice(0, 4).map((row) => row.document_id).filter(Boolean))];
   if (!seedIds.length) return rows.slice(0, limit);
-  const access = knowledgeAccessSql({ userId, isSuperAdmin, alias: "d" });
+  const access = eligibleDocumentIds === null ? knowledgeAccessSql({ userId, isSuperAdmin, alias: "d" }) : searchAccessSql({userId,orgId,isSuperAdmin});
   const related = await prisma.$queryRaw`
     SELECT DISTINCT ON (d.id) NULL::text AS id, NULL::text AS text, d.summary,
       NULL::int AS chunk_index, d.id AS document_id, NULL::jsonb AS metadata,
@@ -46,13 +47,14 @@ export async function expandWithRelatedDocuments({ rows, orgId, userId, isSuperA
     WHERE r."orgId" = ${orgId} AND r.weight >= ${RELATED_DOCUMENT_MIN_WEIGHT}
       AND (r."fromDocumentId" = ANY(${seedIds}::text[]) OR r."toDocumentId" = ANY(${seedIds}::text[]))
       AND NOT (d.id = ANY(${seedIds}::text[])) AND ${access}
+    ${eligibleDocumentIds === null ? Prisma.empty : Prisma.sql`AND d.id = ANY(${eligibleDocumentIds}::text[])`}
     ORDER BY d.id, r.weight DESC
     LIMIT 6
   `;
   const seen = new Set(rows.map((r) => r.document_id));
   const additions = related.filter((r) => !seen.has(r.document_id)).map((r) => ({
     ...r, vectorScore: Number(r.relationship_score || 0), keywordScore: 0,
-    hybridScore: Number(r.relationship_score || 0) * 0.72, relationshipDerived: true,
+    hybridScore: Number(r.relationship_score || 0) * graphWeight, relationshipDerived: true,
   }));
   return [...rows, ...additions]
     .sort((a,b) => Number(b.hybridScore || 0) - Number(a.hybridScore || 0))

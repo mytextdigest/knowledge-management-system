@@ -80,7 +80,7 @@ export async function ontologyContext(prisma, orgId, queries) {
 // Tag-only matches: return chunks from matching documents even when the query
 // words are absent from title/body. Uses the SAME F1 SQL predicate and scope
 // filter as vectorSearch.orgKeywordSearch; never fetches unrestricted IDs.
-export async function orgTaggedChunkSearch({ prisma, Prisma, searchAccessSql, scopeSql, termIds, userId, orgId, scope, departmentId, isSuperAdmin, limit }) {
+export async function orgTaggedChunkSearch({ prisma, Prisma, searchAccessSql, scopeSql, termIds, userId, orgId, scope, departmentId, isSuperAdmin, limit, eligibleDocumentIds = null }) {
   if (!termIds.length) return [];
   const scopeFilter = scopeSql({ scope, departmentId, userId });
   return prisma.$queryRaw`
@@ -97,6 +97,7 @@ export async function orgTaggedChunkSearch({ prisma, Prisma, searchAccessSql, sc
     WHERE dt.term_id IN (${Prisma.join(termIds)}) AND dt.status = 'accepted'
       AND d."orgId" = ${orgId} ${scopeFilter}
       AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+    ${eligibleDocumentIds === null ? Prisma.empty : Prisma.sql`AND d.id = ANY(${eligibleDocumentIds}::text[])`}
     ORDER BY d.id, c.chunk_index ASC
     LIMIT ${Math.max(1, Math.min(100, limit))}
   `;

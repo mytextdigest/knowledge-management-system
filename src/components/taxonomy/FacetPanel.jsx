@@ -1,0 +1,7 @@
+"use client";
+function Buckets({items,selected,onSelect}) {
+ return <ul className="space-y-1 pl-3">{items.map(b=><li key={b.termId}><button type="button" aria-pressed={selected===b.termId} className="text-left text-sm hover:underline" onClick={()=>onSelect(b.termId)}>{b.label} ({b.count}) {selected===b.termId?'✓':''}</button>{b.children.length>0&&<details open><summary className="text-xs cursor-pointer">Subterms</summary><Buckets items={b.children} selected={selected} onSelect={onSelect}/></details>}</li>)}</ul>;
+}
+export default function FacetPanel({facets,selected,onChange}) {
+ return <section className="rounded-lg border p-4 space-y-3"><h2 className="font-semibold">Taxonomy facets</h2>{Object.keys(selected).length>0&&<button type="button" onClick={()=>onChange({})} className="text-sm underline">Clear taxonomy filters</button>}{Object.keys(selected).map(fieldId=><button key={fieldId} type="button" className="block text-sm underline" onClick={()=>{const next={...selected};delete next[fieldId];onChange(next);}}>Remove {facets.find(f=>f.fieldId===fieldId)?.label||"selected"} filter</button>)}{facets.map(f=><details key={f.fieldId} open><summary className="cursor-pointer font-medium">{f.label}</summary><Buckets items={f.buckets} selected={selected[f.fieldId]} onSelect={id=>{const next={...selected};if(next[f.fieldId]===id)delete next[f.fieldId];else next[f.fieldId]=id;onChange(next);}}/></details>)}</section>;
+}

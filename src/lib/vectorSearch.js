@@ -69,6 +69,7 @@ export async function orgSearch(
     isSuperAdmin = false,
     scope = "organization",
     departmentId = null,
+    eligibleDocumentIds = null,
   }
 ) {
   const embStr = JSON.stringify(queryEmbedding);
@@ -91,6 +92,7 @@ export async function orgSearch(
       AND c.embedding_vec IS NOT NULL
       ${scopeFilter}
       AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+      ${eligibleDocumentIds === null ? Prisma.empty : Prisma.sql`AND d.id = ANY(${eligibleDocumentIds}::text[])`}
     ORDER BY distance ASC
     LIMIT ${Prisma.raw(String(limit))}
   `;
@@ -105,6 +107,7 @@ export async function orgKeywordSearch(
     isSuperAdmin = false,
     scope = "organization",
     departmentId = null,
+    eligibleDocumentIds = null,
   }
 ) {
   const safeQuery = String(query || "").trim();
@@ -143,6 +146,7 @@ export async function orgKeywordSearch(
       ${scopeFilter}
       AND (${Prisma.join(termFilters, " OR ")})
       AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+      ${eligibleDocumentIds === null ? Prisma.empty : Prisma.sql`AND d.id = ANY(${eligibleDocumentIds}::text[])`}
     LIMIT ${Prisma.raw(String(candidatePoolSize))}
   `;
 
@@ -163,6 +167,7 @@ export async function orgFallbackTextSearch(
     isSuperAdmin = false,
     scope = "organization",
     departmentId = null,
+    eligibleDocumentIds = null,
   }
 ) {
   const safeQuery = String(query || "").trim();
@@ -203,6 +208,7 @@ export async function orgFallbackTextSearch(
       ${scopeFilter}
       AND (${Prisma.join(termFilters, " OR ")})
       AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+      ${eligibleDocumentIds === null ? Prisma.empty : Prisma.sql`AND d.id = ANY(${eligibleDocumentIds}::text[])`}
     LIMIT ${Prisma.raw(String(limit))}
   `;
 }
@@ -222,7 +228,7 @@ export async function orgExactTermSearch(
   question,
   {
     userId, orgId, isSuperAdmin = false, scope = "organization", departmentId = null, maxDocsPerTerm = 3, db = prisma,
-    terms: givenTerms = null, sourceProvider = null, contentType = null,
+    terms: givenTerms = null, sourceProvider = null, contentType = null, eligibleDocumentIds = null,
   }
 ) {
   const words = givenTerms ?? exactQueryTerms(question);
@@ -235,10 +241,12 @@ export async function orgExactTermSearch(
     FROM unnest(${words}::text[]) AS q(term)
     JOIN "Chunk" c ON TRUE
     JOIN "Document" d ON c.document_id = d.id
+    LEFT JOIN "DepartmentMember" dm ON d."departmentId" = dm."departmentId" AND dm."userId" = ${userId}
     WHERE d."orgId" = ${orgId}
       ${scopeFilter}
       AND ${matches}
       AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+      ${eligibleDocumentIds === null ? Prisma.empty : Prisma.sql`AND d.id = ANY(${eligibleDocumentIds}::text[])`}
     GROUP BY q.term
   `;
   const countByTerm = new Map(counts.map((r) => [r.term, r.documentCount]));
@@ -258,10 +266,12 @@ export async function orgExactTermSearch(
     JOIN "Document" d ON c.document_id = d.id
     LEFT JOIN "Department" dept ON dept.id = d."departmentId"
     LEFT JOIN "Project" proj ON proj.id = d."projectId"
+    LEFT JOIN "DepartmentMember" dm ON d."departmentId" = dm."departmentId" AND dm."userId" = ${userId}
     WHERE d."orgId" = ${orgId}
       ${scopeFilter}
       AND ${matches}
       AND ${searchAccessSql({ userId, orgId, isSuperAdmin })}
+      ${eligibleDocumentIds === null ? Prisma.empty : Prisma.sql`AND d.id = ANY(${eligibleDocumentIds}::text[])`}
     ORDER BY q.term, d.id, (c.text ~* ('\\m' || q.term || '\\M')) DESC, c.chunk_index
   `;
   // Rarest words first (most specific), then in question order.
@@ -319,4 +329,16 @@ export async function orgListDocuments({
     total: rows[0]?.total ?? 0,
     rows: rows.map(({ total, ...r }) => ({ ...r, distance: 1, keyword_score: 1 })),
   };
+}
+
+// Unbounded document corpus, independent of chunk ranking and pagination.
+export async function authorizedSearchCorpus({userId,orgId,isSuperAdmin=false,scope="organization",departmentId=null}) {
+  const rows = await prisma.$queryRaw`
+    SELECT DISTINCT d.id FROM "Document" d
+    LEFT JOIN "DepartmentMember" dm ON d."departmentId" = dm."departmentId" AND dm."userId" = ${userId}
+    WHERE d."orgId" = ${orgId} ${scopeSql({scope,departmentId,userId})}
+    AND ${searchAccessSql({userId,orgId,isSuperAdmin})}
+    AND d."supersededById" IS NULL AND d.lifecycle <> 'retired'
+  `;
+  return rows.map(row=>row.id);
 }

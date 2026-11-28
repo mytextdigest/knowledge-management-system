@@ -30,8 +30,10 @@ export async function POST(req, { params }) {
   // Imported (read-only) sets can back a field too: the field is KMS config,
   // only the terms are managed outside (C-8 maps SharePoint columns to it).
   if (!set) return fail("Term set not found", 404);
+  const facetOrder = body.facetOrder ?? 0;
+  if(!Number.isInteger(facetOrder)||facetOrder<0||facetOrder>10000)return fail("Invalid facet order");
   try {
-    const field = await prisma.metadataField.create({ data: { orgId, key, name, termSetId: set.id, multi: body.multi === true, required: body.required === true, facet: body.facet === true } });
+    const field = await prisma.metadataField.create({ data: { orgId, key, name, termSetId: set.id, multi: body.multi === true, required: body.required === true, facet: body.facet === true, facetOrder } });
     await logAudit({ orgId, actorUserId: actor.user.id, action: "taxonomy.metadata_field.created", entityType: "MetadataField", entityId: field.id, after: { key, name, termSetId: set.id } });
     return NextResponse.json({ field }, { status: 201 });
   } catch (e) { if (e.code === "P2002") return fail("Field key already exists", 409); throw e; }
@@ -51,7 +53,9 @@ export async function PATCH(req, { params }) {
   const facet = body.facet === undefined ? old.facet : body.facet;
   if ([multi, required, facet].some(v => typeof v !== "boolean")) return fail("Invalid boolean flags");
   if (old._count.documentTerms && old.multi && !multi) return fail("Cannot change populated multi-value field to single-value", 409);
-  const field = await prisma.metadataField.update({ where: { id: old.id }, data: { name, multi, required, facet } });
-  await logAudit({ orgId, actorUserId: actor.user.id, action: "taxonomy.metadata_field.updated", entityType: "MetadataField", entityId: old.id, before: { name: old.name, multi: old.multi, required: old.required, facet: old.facet }, after: { name, multi, required, facet } });
+  const facetOrder = body.facetOrder ?? old.facetOrder;
+  if(!Number.isInteger(facetOrder)||facetOrder<0||facetOrder>10000)return fail("Invalid facet order");
+  const field = await prisma.metadataField.update({ where: { id: old.id }, data: { name, multi, required, facet, facetOrder } });
+  await logAudit({ orgId, actorUserId: actor.user.id, action: "taxonomy.metadata_field.updated", entityType: "MetadataField", entityId: old.id, before: { name: old.name, multi: old.multi, required: old.required, facet: old.facet, facetOrder:old.facetOrder }, after: { name, multi, required, facet, facetOrder } });
   return NextResponse.json({ field });
 }

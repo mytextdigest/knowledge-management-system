@@ -240,7 +240,7 @@ function TermSetCard({ set, canEdit, busy, actions, onReimport }) {
   );
 }
 
-function MetadataFields({ fields, sets, canEdit, busy, onCreate, onRename }) {
+function MetadataFields({ fields, sets, canEdit, busy, onCreate, onRename, onFacet }) {
   const [form, setForm] = useState({ name: "", key: "", termSetId: "", multi: false, required: false, facet: false });
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   return (
@@ -258,7 +258,7 @@ function MetadataFields({ fields, sets, canEdit, busy, onCreate, onRename }) {
                 {f.termSet?.name} · {f.multi ? "Multiple terms" : "One term"} · {f.required ? "Required" : "Optional"} · {f.facet ? "Search facet" : "Not a facet"} · {f._count?.documentTerms || 0} tags
               </p>
             </div>
-            {canEdit ? <button type="button" className={secondaryBtn} disabled={busy} onClick={() => onRename(f)}>Rename</button> : null}
+            {canEdit ? <div className="flex gap-2"><button type="button" className={secondaryBtn} disabled={busy} onClick={() => onRename(f)}>Rename</button><button type="button" className={secondaryBtn} disabled={busy} onClick={()=>onFacet(f,{facet:!f.facet})}>{f.facet?"Disable facet":"Enable facet"}</button><input aria-label="Facet order" type="number" min="0" max="10000" defaultValue={f.facetOrder} onBlur={e=>{if(e.target.value!==String(f.facetOrder))onFacet(f,{facetOrder:Number(e.target.value)});}} className="w-20 border rounded"/></div> : null}
           </div>
         ))}
         {!fields.length ? <p className="py-3 text-sm text-gray-500">No metadata fields yet.</p> : null}
@@ -634,6 +634,7 @@ export default function TaxonomyPage() {
                 onReimport={(set) => { setImportTarget(set); document.getElementById("taxonomy-import")?.scrollIntoView({ behavior: "smooth" }); }}
               />
             ))}
+            {canEdit&&sets.map(s=><div key={`export-${s.id}`} className="flex gap-3 text-sm"><span>{s.name}</span>{["ttl","csv"].map(format=><a key={format} className="underline" href={`${base}/export?id=${encodeURIComponent(s.id)}&format=${format}`}>Export {format.toUpperCase()}</a>)}</div>)}
             {!sets.length ? <p className={`${card} p-6 text-center text-sm text-gray-500`}>No term sets yet.</p> : null}
             <MetadataFields
               fields={fields}
@@ -641,6 +642,7 @@ export default function TaxonomyPage() {
               canEdit={canEdit}
               busy={busy}
               onCreate={(f) => run(`${base}/fields`, "POST", f, `Field "${f.name}" created.`)}
+              onFacet={(f,patch)=>run(`${base}/fields`,"PATCH",{id:f.id,...patch},"Facet updated.")}
               onRename={(f) => {
                 const name = window.prompt("Field name", f.name);
                 if (name === null || name.trim() === f.name) return;

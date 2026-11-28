@@ -1,6 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import RepositoryDocumentCard from "@/components/repository/RepositoryDocumentCard";
+import CorpusFilterInputs from "@/components/taxonomy/CorpusFilterInputs";
+import FacetPanel from "@/components/taxonomy/FacetPanel";
 import RepositoryFilters from "@/components/repository/RepositoryFilters";
 import UploadToRepositoryModal from "@/components/repository/UploadToRepositoryModal";
 import NewFromTemplateButton from "@/components/assets/NewFromTemplateButton";
@@ -35,6 +38,8 @@ export default function RepositoryPage({ params }) {
   const { data: session } = useSession();
   const userId = session?.user?.id;
 
+  const [facets,setFacets] = useState([]);
+  const [selectedFacets,setSelectedFacets] = useState({});
   const [documents, setDocuments] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [filters, setFilters] = useState(initialFilters);
@@ -55,10 +60,11 @@ export default function RepositoryPage({ params }) {
     Object.entries(filters).forEach(([key, value]) => {
       if (value) search.set(FILTER_PARAM_MAP[key] || key, value);
     });
+    Object.entries(selectedFacets).forEach(([field,term])=>search.append("facet",`${field}:${term}`));
     search.set("page", String(page));
 
     return search.toString();
-  }, [filters, page]);
+  }, [filters, page, selectedFacets]);
 
   async function loadRepository() {
     if (!orgId) return;
@@ -90,6 +96,7 @@ export default function RepositoryPage({ params }) {
 
       setDocuments(data.documents || data || []);
       setSearchEventId(data.searchEventId || null);
+      setFacets(data.facets || []);
       setTotalPages(data.totalPages || 1);
       setTotal(data.total ?? (Array.isArray(data) ? data.length : 0));
     } catch (err) {
@@ -181,12 +188,15 @@ export default function RepositoryPage({ params }) {
         ) : null}
       </div>
 
+      <Link className="underline" href={`/org/${orgId}/search`}>Open hybrid knowledge search</Link>
       <RepositoryFilters
         filters={filters}
         departments={departments}
         onChange={setFilters}
       />
 
+      <CorpusFilterInputs value={filters} onChange={setFilters}/>
+      <FacetPanel facets={facets} selected={selectedFacets} onChange={next=>{setSelectedFacets(next);setPage(1);}} />
       {error ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
           {error}

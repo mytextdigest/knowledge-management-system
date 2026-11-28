@@ -1,0 +1,2 @@
+export const DEFAULT_SEARCH_WEIGHTS = Object.freeze({w_keyword:0.35,w_vector:0.65,w_term:0.12,w_graph:0.72});
+export function validSearchWeights(value){return !!value && typeof value==='object' && Object.keys(value).length===4 && Object.keys(DEFAULT_SEARCH_WEIGHTS).every(k=>typeof value[k]==='number' && Number.isFinite(value[k]) && value[k]>=0 && value[k]<=1) && Object.values(value).some(v=>v>0);}
