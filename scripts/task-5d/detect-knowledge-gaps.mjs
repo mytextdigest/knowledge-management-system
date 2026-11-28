@@ -112,7 +112,7 @@ try {
   // `--days`/`--org` run never wipes another org's untouched snapshot.
   const analyzedOrgIds = orgId ? [orgId] : [...new Set(gaps.map((g) => g.orgId))];
   if (analyzedOrgIds.length > 0) {
-    await prisma.knowledgeGap.deleteMany({ where: { orgId: { in: analyzedOrgIds } } });
+    await prisma.knowledgeGap.deleteMany({ where: { orgId: { in: analyzedOrgIds }, queryIds: { isEmpty: true } } });
   }
   if (gaps.length > 0) {
     await prisma.knowledgeGap.createMany({

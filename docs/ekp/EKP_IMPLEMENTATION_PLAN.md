@@ -353,3 +353,6 @@ The single status board. **Update it in the same PR that completes a requirement
 | Johurul | Send the NYPA questions (due 14 Oct). Review `phase1/WS_A_M365_CONNECTORS.md`. Start Microsoft single sign-on (S2), since per-file SharePoint permissions depend on it. |
 | Sandeep & Simran | Review `phase1/WS_B_GOVERNANCE_LIFECYCLE.md` together and **agree the split of B's 8 requirements** between you (suggested lanes in its §1.1). Define the audit event format first (everyone uses it), then start E23 audit logging. |
 | All | By the end of week 1, the shared design and first package of both workstream documents are reviewed, and tracker owners are filled in. |
+
+
+**2026-11-27 · D-M4 candidate:** Search quality, linked gap job and reporting API/key UI implemented for review. E30/A5 remain partial pending authenticated role isolation, seeded metric verification and Power BI Desktop refresh. D-14 final RTM re-score and P2-INT pending. No schema changes.

@@ -1,5 +1,6 @@
 'use client';
 
+import PowerBISettings from '@/components/settings/PowerBISettings';
 import GovernanceSettings from '@/components/governance/GovernanceSettings';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -1125,6 +1126,7 @@ export default function OrgSettingsPage() {
               Set up Microsoft sign-in and connect external platforms to bring their knowledge into this org&apos;s repository.
             </p>
 
+            {org?.role === 'super_admin' && <PowerBISettings orgId={orgId}/>}
             {integrationsError ? (
               <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-300">
                 {integrationsError}

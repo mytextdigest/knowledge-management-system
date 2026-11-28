@@ -28,22 +28,16 @@ export default function RepositoryFilters({
   // clearing all filters), without fighting the user's own typing.
   useEffect(() => {
     setSearchInput(filters.search || "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.search]);
 
-  useEffect(() => {
-    const handle = setTimeout(() => {
-      if (searchInput !== (filters.search || "")) {
-        onChange({ ...filters, search: searchInput });
-      }
-    }, 400);
-    return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchInput]);
+  function submitSearch(event) {
+    event.preventDefault();
+    onChange({ ...filters, search: searchInput.trim() });
+  }
 
   return (
     <div className="grid gap-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 md:grid-cols-4">
-      <div className="relative md:col-span-4">
+      <form onSubmit={submitSearch} className="relative flex gap-2 md:col-span-4">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
         <input
           type="text"
@@ -53,7 +47,8 @@ export default function RepositoryFilters({
           title="Semantic search — finds documents by meaning, not just exact keyword matches"
           className={`${FIELD_CLASS} w-full pl-9`}
         />
-      </div>
+        <button type="submit" className="rounded-md border px-4">Search</button>
+      </form>
 
       {hideDepartmentFilter ? null : (
         <select

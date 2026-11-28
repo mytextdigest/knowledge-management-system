@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { resolveOrgRole, isOrgAdmin } from "@/lib/orgGuard";
+import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
 
 const CONFIDENCE_WEIGHT = { high: 1, medium: 0.5, low: 0 };
 const CONFIDENCE_SAMPLE_SIZE = 200;
@@ -19,7 +19,7 @@ export async function GET(req, { params }) {
   const { user, role } = await resolveOrgRole(session.user.email, orgId);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
   if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  if (!isOrgAdmin(role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!isSuperAdmin(role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const [recentMessages, openConflicts, topGaps] = await Promise.all([
     prisma.orgMessage.findMany({

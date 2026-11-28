@@ -78,7 +78,7 @@ async function insertSearchEvent(id, { kind, query, options, resultCount, latenc
         kind,
         query: String(query).trim().slice(0, 2000),
         normalizedQuery,
-        filters: { scope: options.scope || "organization", departmentId: options.departmentId || null },
+        filters: { scope: options.scope || "organization", departmentId: options.departmentId || null, ...(options.sourceProvider ? { sourceSystem: options.sourceProvider } : {}) },
         resultCount,
         latencyMs: Math.max(0, Math.round(latencyMs)),
         departmentId: searcher.departmentId,
