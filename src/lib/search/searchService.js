@@ -1,10 +1,12 @@
+import { corpusFilters } from "@/lib/search/corpusFilters.mjs";
+import { facetSelection, corpusFacets } from "@/lib/taxonomy/facets.mjs";
 /**
  * F7 unified retrieval entry point. D-3 intentionally preserves the Phase 1
  * retrieval algorithms and result ordering. D-4 logs one SearchEvent per
  * user search (never failing the search itself).
  */
 import { hybridOrgSearch } from "@/lib/hybridSearch";
-import { orgSearch } from "@/lib/vectorSearch";
+import { orgSearch, authorizedSearchCorpus } from "@/lib/vectorSearch";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -143,7 +145,18 @@ export async function search({ kind = "search", query, queryEmbedding, ...option
 
   // Do not alter query expansion, embeddings, ranking or access rules here.
   // Existing callers continue supplying the same retrieval parameters.
-  const results = await hybridOrgSearch(options);
+  let results;
+  let facets;
+  if(kind === "search") {
+    const selection=await facetSelection(prisma,options.orgId,options.facetSelections??{});
+    const corpus = await authorizedSearchCorpus(options);
+    const counted=await corpusFacets(prisma,selection.fields,corpus,[...corpusFilters(options.filters),...selection.filters]);
+    const {eligibleDocumentIds}=counted;
+    facets=counted.facets;
+    results=eligibleDocumentIds.length ? await hybridOrgSearch({...options,eligibleDocumentIds}) : [];
+  } else {
+    results=await hybridOrgSearch(options);
+  }
   const searchEventId = recordSearch({ kind, query, options, resultCount: results.length, latencyMs: Date.now() - startedAt });
-  return { results, searchEventId };
+  return { results, searchEventId, facets };
 }

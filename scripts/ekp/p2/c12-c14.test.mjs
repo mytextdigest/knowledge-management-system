@@ -1,0 +1,11 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {buildBuckets,facetSelection} from '../../../src/lib/taxonomy/facets.mjs';
+import {DEFAULT_SEARCH_WEIGHTS,validSearchWeights} from '../../../src/lib/search/weights.mjs';
+import {exportTaxonomy} from '../../../src/lib/taxonomy/export.mjs';
+import {parseTaxonomyCsv} from '../../../src/lib/taxonomy/import/csv.mjs';
+const terms=[{id:'p',label:'Parent',status:'active',ancestorIds:[],synonyms:[]},{id:'c',label:'Child',status:'active',parentId:'p',ancestorIds:['p'],synonyms:[]}];
+test('distinct document rollup',()=>{const b=buildBuckets(terms,[{termId:'p',documentId:'1'},{termId:'c',documentId:'1'},{termId:'c',documentId:'2'}]);assert.equal(b[0].count,2);assert.equal(b[0].children[0].count,2);});
+test('empty results hide buckets',()=>assert.deepEqual(buildBuckets(terms,[]),[]));
+test('invalid selection fails closed',async()=>assert.rejects(facetSelection({metadataField:{findMany:async()=>[]}},'org',{foreign:'x'}),/Invalid facet/));
+test('weights validated',()=>{assert.ok(validSearchWeights(DEFAULT_SEARCH_WEIGHTS));assert.ok(!validSearchWeights({...DEFAULT_SEARCH_WEIGHTS,w_graph:-1}));assert.ok(!validSearchWeights({}));});
+test('export parent hierarchy',()=>{const set={id:'s',name:'Test',terms};assert.equal(parseTaxonomyCsv(exportTaxonomy(set,'csv')).concepts[1].parentExternalId,'p');assert.match(exportTaxonomy(set,'ttl'),/skos:broader <urn:kms:term:p>/);});

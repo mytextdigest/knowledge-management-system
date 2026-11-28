@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import OpenAI from "openai";
 import { chunkLocation } from "@/lib/chunkLocation";
 import { resolveOrgRole, isSuperAdmin } from "@/lib/orgGuard";
+import { InvalidFacetSelection } from "@/lib/taxonomy/facets.mjs";
 import { search } from "@/lib/search/searchService";
 import { expandQuery } from "@/lib/queryExpansion";
 import { getOrgOpenAIKey } from "@/utils/key_helper";
@@ -47,8 +48,11 @@ export async function POST(req, { params }) {
   });
   const queryEmbeddings = embRes.data.map((item) => item.embedding);
 
-  const { results: rows, searchEventId } = await search({
+  let response;
+  try { response = await search({
     kind: "search",
+    facetSelections: body.facetSelections ?? {},
+    filters: body.filters && typeof body.filters === "object" ? body.filters : {},
     query,
     queries: expandedQueries,
     embeddings: queryEmbeddings,
@@ -62,8 +66,14 @@ export async function POST(req, { params }) {
     ontologyEnabled: body.ontologyEnabled === false && isSuperAdmin(role) ? false : true,
   });
 
+  } catch (error) {
+    if (error instanceof InvalidFacetSelection) return NextResponse.json({error:error.message},{status:400});
+    throw error;
+  }
+  const {results:rows,searchEventId,facets}=response;
   return NextResponse.json({
     searchEventId,
+    facets,
     retrieval: {
       mode: "hybrid",
       scope,

@@ -11,6 +11,8 @@ import { chunkLocation } from "@/lib/chunkLocation";
 import { linkedRecordings } from "@/lib/recordingCitations";
 import { timeOf } from "@/lib/transcripts";
 
+import { facetSelection, countFacets } from "@/lib/taxonomy/facets.mjs";
+
 const PAGE_SIZE = 20;
 
 const FILE_TYPE_EXTS = {
@@ -111,6 +113,15 @@ export async function GET(req, { params }) {
   // restrict the listing to that candidate set. If no embedding key is
   // configured or the embedding call fails, fall back to a plain substring
   // match so search still returns something rather than erroring out.
+  let selection;
+  try { selection = await facetSelection(prisma, orgId, Object.fromEntries(searchParams.getAll("facet").map(v=>v.split(":")))); }
+  catch (error) { if(error.message === 'Invalid facet selection') return NextResponse.json({error:error.message},{status:400}); throw error; }
+  if(searchParams.get('sourceProvider')) andConditions.push({sourceProvider:searchParams.get('sourceProvider')});
+  if(searchParams.get('ownerId')) andConditions.push({ownerId:searchParams.get('ownerId')});
+  andConditions.push(...selection.filters);
+  const corpusWhere = { AND: [...andConditions] };
+  const facets = await countFacets(prisma, selection.fields, corpusWhere);
+
   let rankMap = null;
   let searchEventId = null;
   const bestChunks = new Map(); // documentId → its best-matching chunk
@@ -139,6 +150,7 @@ export async function GET(req, { params }) {
           isSuperAdmin: isSuperAdmin(role),
           scope: deptFilter ? "department" : "organization",
           departmentId: deptFilter,
+          eligibleDocumentIds: (await prisma.document.findMany({where:corpusWhere,select:{id:true}})).map(d=>d.id),
         });
 
         searchEventId = eventId;
@@ -272,6 +284,7 @@ export async function GET(req, { params }) {
 
   return NextResponse.json({
     searchEventId,
+    facets,
     documents: docs.map(({ filePath, thumbnailPath, externalId, ...d }) => ({
       ...d,
       thumbnailUrl: thumbnailUrl({ ...d, filePath, thumbnailPath, externalId }),

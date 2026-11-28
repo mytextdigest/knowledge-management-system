@@ -1,3 +1,4 @@
+import { getSetting } from "@/lib/settings";
 import { orgSearch, orgKeywordSearch, orgFallbackTextSearch, orgExactTermSearch, scopeSql } from "@/lib/vectorSearch";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
@@ -12,7 +13,7 @@ function normalizeDistance(distance) {
   return Math.max(0, 1 - value);
 }
 
-function mergeRows(rows) {
+function mergeRows(rows, weights) {
   const merged = new Map();
 
   for (const row of rows) {
@@ -32,7 +33,7 @@ function mergeRows(rows) {
       keywordScore: Math.max(existing?.keywordScore || 0, keywordScore),
     };
 
-    next.hybridScore = next.vectorScore * 0.65 + next.keywordScore * 0.35;
+    next.hybridScore = next.vectorScore * weights.w_vector + next.keywordScore * weights.w_keyword;
     merged.set(key, next);
   }
 
@@ -198,11 +199,13 @@ export async function hybridOrgSearch({
   // The user's own question: its distinctive words (code names, IDs) keep a
   // place in the results even when broader matches outrank them.
   exactTermQuestion = null,
+  eligibleDocumentIds = null,
 }) {
+  const weights = await getSetting(orgId,"search.weights");
   const safeQueries = Array.isArray(queries) ? queries.filter(Boolean) : [];
   // Ontology is additive; failure must never disable existing search.
   let ontology = null;
-  try { if (ontologyEnabled) ontology = await ontologyContext(prisma, orgId, safeQueries); }
+  try { if (ontologyEnabled && weights.w_term > 0) ontology = await ontologyContext(prisma, orgId, safeQueries); }
   catch (error) { console.warn('Ontology search unavailable:', error?.message); }
   // Send each expansion as a standalone query: keyword search truncates to eight tokens.
   const keywordQueries = ontology ? [...new Set([
@@ -236,6 +239,7 @@ export async function hybridOrgSearch({
       scope,
       departmentId,
       isSuperAdmin,
+      eligibleDocumentIds,
     });
     allRows.push(...rows);
   }
@@ -248,6 +252,7 @@ export async function hybridOrgSearch({
       scope,
       departmentId,
       isSuperAdmin,
+      eligibleDocumentIds,
     });
     allRows.push(...rows);
   }
@@ -255,10 +260,10 @@ export async function hybridOrgSearch({
   if (ontology?.weights.size) {
     try {
       allRows.push(...await orgTaggedChunkSearch({ prisma, Prisma, searchAccessSql, scopeSql,
-        termIds: [...ontology.weights.keys()], userId, orgId, scope, departmentId, isSuperAdmin, limit: candidateLimit }));
+        termIds: [...ontology.weights.keys()], userId, orgId, scope, departmentId, isSuperAdmin, eligibleDocumentIds, limit: candidateLimit }));
     } catch (error) { console.warn('Ontology tag retrieval unavailable:', error?.message); }
   }
-  let ranked = mergeRows(allRows);
+  let ranked = mergeRows(allRows, weights);
 
   if (ranked.length === 0 && safeQueries.length > 0) {
     const fallbackRows = await orgFallbackTextSearch(safeQueries[0], {
@@ -268,8 +273,9 @@ export async function hybridOrgSearch({
       scope,
       departmentId,
       isSuperAdmin,
+      eligibleDocumentIds,
     });
-    ranked = mergeRows(fallbackRows);
+    ranked = mergeRows(fallbackRows, weights);
   }
 
   const feedbackWeights = await getFeedbackDocumentWeights({
@@ -285,7 +291,7 @@ export async function hybridOrgSearch({
       documentId: { in: ids }, termId: { in: [...ontology.weights.keys()] }, status: 'accepted',
       term: { termSet: { orgId } },
     }, select: { documentId: true, termId: true, status: true } });
-    ranked = rerankTaggedRows(ranked, tags, ontology.weights);
+    ranked = rerankTaggedRows(ranked, tags, new Map([...ontology.weights].map(([id,w])=>[id,w/0.12*weights.w_term])));
   }
 
   let effectiveDiversify = diversify;
@@ -296,10 +302,10 @@ export async function hybridOrgSearch({
 
   let base = effectiveDiversify ? diversifyResults(ranked, limit) : ranked.slice(0, limit);
   if (exactTermQuestion) {
-    const { rows: exact } = await orgExactTermSearch(exactTermQuestion, { userId, orgId, isSuperAdmin, scope, departmentId });
+    const { rows: exact } = await orgExactTermSearch(exactTermQuestion, { userId, orgId, isSuperAdmin, scope, departmentId, eligibleDocumentIds });
     base = pinExactMatches(base, exact, limit);
   }
-  const expanded = await expandWithRelatedDocuments({ rows: base, orgId, userId, isSuperAdmin, limit });
+  const expanded = await expandWithRelatedDocuments({ rows: base, orgId, userId, isSuperAdmin, limit, graphWeight:weights.w_graph, eligibleDocumentIds });
   const ids = [...new Set(expanded.map((row) => row.document_id).filter(Boolean))];
   if (!ids.length) return [];
   const documents = await prisma.document.findMany({

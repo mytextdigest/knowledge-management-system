@@ -312,8 +312,8 @@ The single status board. **Update it in the same PR that completes a requirement
 |---|---|---|---|---|---|
 | E1 | Customizable landing page | F | TBD | TBD | 🟡 |
 | E2 | Unified search across SharePoint/Content Server/ServiceNow, permission-aware | A | Johurul | 1 | 🟡 SharePoint + ServiceNow ✅; Content Server after award (`A-18`) |
-| E3 | Hybrid + ontology search | C | Sandeep | 2 | 🟡 |
-| E4 | Taxonomy facets | C | Sandeep | 2 | 🟡 |
+| E3 | Hybrid + ontology search | C | Sandeep | 2 | 🟡 C-M4 weight validation/reset wiring tested; live ranking and nDCG pending |
+| E4 | Taxonomy facets | C | Sandeep | 2 | 🟡 C-M4 full corpus and pre-retrieval filters implemented; authenticated parity pending |
 | E5 | Personal home, saved searches, watchlists | F | TBD | TBD | 🟡 |
 | E6 | Recommendations & trending | — | — | — | ✅ |
 | E7 | NL answers alongside results | F | TBD | TBD | ✅ (UX polish) |
@@ -324,8 +324,8 @@ The single status board. **Update it in the same PR that completes a requirement
 | E12 | Site pages, wikis, KB articles | A | Johurul | 1 | ✅ |
 | E13 | Previews & thumbnails | E | Johurul | 2 | 🟡 |
 | E14 | Asset templates | E | Johurul | 2 | ❌ |
-| E15 | Managed metadata (hierarchy, synonyms) | C | Sandeep | 2 | ❌ |
-| E16 | NYPA taxonomy-tool integration | C | Sandeep (E16.5 capture: Johurul, `A-23`) | 2 | ❌ SharePoint tags captured (`A-23`, E-M1); term mapping is C-M2 |
+| E15 | Managed metadata (hierarchy, synonyms) | C | Sandeep | 2 | 🟡 Implementation evidence in WS-C; live classification/merge/audit acceptance pending |
+| E16 | NYPA taxonomy-tool integration | C | Sandeep (E16.5 capture: Johurul, `A-23`) | 2 | ❌ SharePoint tags captured (`A-23`, E-M1); term mapping is C-M2; C-M4 TTL/CSV parser tests pass; tenant acceptance pending |
 | E17 | Graph-enriched search/navigation/chat | — | — | — | ✅ |
 | E18 | Drag-and-drop upload | — | — | — | ✅ |
 | E19 | Summary with human review | B | Sandeep & Simran | 1 | ✅ |
@@ -353,3 +353,6 @@ The single status board. **Update it in the same PR that completes a requirement
 | Johurul | Send the NYPA questions (due 14 Oct). Review `phase1/WS_A_M365_CONNECTORS.md`. Start Microsoft single sign-on (S2), since per-file SharePoint permissions depend on it. |
 | Sandeep & Simran | Review `phase1/WS_B_GOVERNANCE_LIFECYCLE.md` together and **agree the split of B's 8 requirements** between you (suggested lanes in its §1.1). Define the audit event format first (everyone uses it), then start E23 audit logging. |
 | All | By the end of week 1, the shared design and first package of both workstream documents are reviewed, and tracker owners are filled in. |
+
+### Workstream C integration evidence (pending acceptance)
+E3: C-M3 merged; measured nDCG and throughput pending. E4: full authorized corpus counts and pre-retrieval filtering implemented; live access parity pending. E15: taxonomy and classification implemented; throughput pending. E16: file import and source mapping merged; real tenant validation remains subject to permissions. No RTM status promoted without acceptance.

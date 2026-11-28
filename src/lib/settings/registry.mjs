@@ -1,3 +1,4 @@
+import { DEFAULT_SEARCH_WEIGHTS, validSearchWeights } from "../search/weights.mjs";
 // Shared, framework-independent registry: safe to import from workers.
 const nonNegativeInt = (x) => Number.isInteger(x) && x >= 0;
 const positiveInt = (x) => Number.isInteger(x) && x > 0;
@@ -8,6 +9,7 @@ const metadataRules = validMetadataRules;
 import { validSummaryApprovalRules } from '../governance/summaryApprovalRules.mjs';
 const staleRules = (x) => x && typeof x === 'object' && nonNegativeInt(x.noUpdateDays) && nonNegativeInt(x.noViewDays);
 export const SETTINGS_REGISTRY = Object.freeze({
+ "search.weights": {label:"Search ranking weights",default:DEFAULT_SEARCH_WEIGHTS,validate:validSearchWeights},
  'summary.requireApproval': { label:'Require summary approval', default:false, validate:validSummaryApprovalRules },
  'metadata.requiredFields': { label:'Required metadata rules', default:[], validate:metadataRules },
  'ownership.default': { label:'Default document owner', default:'uploader', validate:x => ['uploader','department_owner'].includes(x) },
